@@ -86,7 +86,7 @@ npm start
 }
 ```
 
-**4. Restart your IDE.** That's it — your agent now has access to all 11 tools.
+**4. Restart your IDE.** That's it — your agent now has access to all 12 tools.
 
 ---
 
@@ -150,6 +150,7 @@ When starting a new session, type `/continue`. The agent will:
 | `krusch_context_read_tree` | Browse the file tree of an indexed repository |
 | `krusch_context_read_blob` | Read full content of a specific file by blob ID |
 | `krusch_context_deep_search` | Composite zero-trust search across both memory and codebase |
+| `krusch_context_health_check` | Verify server connectivity, database status, and memory/repo counts |
 
 ---
 
@@ -158,7 +159,7 @@ When starting a new session, type `/continue`. The agent will:
 Krusch Context MCP unifies two complementary halves of the **Agentic Brain**:
 
 - **Episodic Memory (The "Why")**: The `ide_agent_memory` table stores *intent* — architectural decisions, user preferences, bugs encountered, and project goals. Powered by exponential temporal decay so the agent always prefers fresh context.
-- **Codebase Memory (The "What" & "How")**: The `blobs` table stores *implementation* — 6,500+ embedded files across 28+ repositories, providing the actual code, file structures, and algorithms.
+- **Codebase Memory (The "What" & "How")**: The `blobs` table stores *implementation* — semantically embedded source files across your entire codebase. The index scales horizontally: batch ingestion scripts (`sync_to_pg.js`, `sync_all_projects.js`) distribute embedding generation across multiple GPU nodes via fleet-aware Ollama load balancing, allowing you to index thousands of files without bottlenecking a single machine.
 
 By querying both simultaneously via `krusch_context_deep_search`, the agent can cross-reference *why* you chose a specific architecture with *how* it's currently implemented.
 

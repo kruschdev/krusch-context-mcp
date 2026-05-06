@@ -177,6 +177,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["category"]
         }
+      },
+      {
+        name: "krusch_context_health_check",
+        description: "Verify that the Krusch Context MCP server is alive, connected to kruschdb, and functioning.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
       }
     ]
   };
@@ -232,8 +240,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const projectTag = r.project ? `[${r.project}]` : '';
           const pathStr = r.file_path ? ` | Path: ${r.file_path}` : '';
           output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | ${projectTag} ${r.file_name}${pathStr} | Seen: ${dateStr} ---\n`;
-          const content = r.content.toString('utf-8');
-          output += content.substring(0, 500) + (content.length > 500 ? '...\n' : '\n');
+          output += (r.summary || '(no preview)') + '\n';
       }
       return { content: [{ type: "text", text: output }] };
 
@@ -281,8 +288,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const projectTag = r.project ? `[${r.project}]` : '';
             const pathStr = r.file_path ? ` | Path: ${r.file_path}` : '';
             output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | ${projectTag} ${r.file_name}${pathStr} ---\n`;
-            const content = r.content.toString('utf-8');
-            output += content.substring(0, 500) + (content.length > 500 ? '...\n' : '\n');
+            output += (r.summary || '(no preview)') + '\n';
         }
       }
       
@@ -313,6 +319,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     } else if (request.params.name === "krusch_context_consolidate") {
       return await consolidateMemories(args);
+
+    } else if (request.params.name === "krusch_context_health_check") {
+      const dbCheck = await pool.query('SELECT COUNT(*) as count FROM ide_agent_memory');
+      const repoCheck = await pool.query('SELECT COUNT(*) as count FROM repositories');
+      const memoryCount = dbCheck.rows[0].count;
+      const repoCount = repoCheck.rows[0].count;
+      return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories: ${memoryCount}\n- Indexed repositories: ${repoCount}\n- Database: kruschdb (pgvector)\n- Version: 1.0.0` }] };
 
     } else {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);

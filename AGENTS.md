@@ -23,6 +23,7 @@
 | `krusch_context_read_tree` | `src/index.js` (calls `pg-git/server/git-engine.js`) |
 | `krusch_context_read_blob` | `src/index.js` (calls `pg-git/server/git-engine.js`) |
 | `krusch_context_deep_search` | `src/index.js` (composite, all categories) |
+| `krusch_context_health_check` | `src/index.js` (DB connectivity + counts) |
 
 ## Fragile / Don't Touch
 

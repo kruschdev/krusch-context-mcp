@@ -10,7 +10,7 @@
   },
   "keywords": ["mcp", "semantic-search", "pgvector", "context-engine"],
   "author": "kruschdev",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "pg-git": "file:../pg-git"
