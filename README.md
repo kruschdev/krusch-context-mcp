@@ -8,20 +8,23 @@ Previously, each IDE agent session needed two separate MCP servers (`pg-git-mcp`
 
 - **Shares a single `pg.Pool`** connected to `kruschdb` on `kruschserv:5434`
 - **Shares Ollama embedding logic** with fleet-wide round-robin load balancing
-- **Provides `deep_context_search`** — a composite tool that queries both codebase and memory in one call
+- **Provides `krusch_context_deep_search`** — a composite tool that queries both codebase and memory in one call
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `mcp_homelab-memory_add` | Store an episodic memory (bug, lesson, priority, outcome, activity) |
-| `mcp_homelab-memory_search` | Semantic search over episodic memories with temporal decay |
-| `mcp_homelab-memory_list` | List recent memories by category (no embedding, fast) |
-| `mcp_homelab-memory_delete` | Delete a memory by ID |
-| `mcp_homelab-memory_update` | Update content/tags/project (re-embeds on content change) |
-| `pg_git_semantic_search` | Semantic search over all indexed codebase files |
-| `pg_git_list_repos` | List all repositories indexed in PG-Git |
-| `deep_context_search` | Composite zero-trust search across both memory and codebase |
+| `krusch_context_add_memory` | Store an episodic memory (bug, lesson, priority, outcome, activity) |
+| `krusch_context_search_memory` | Semantic search over episodic memories with temporal decay |
+| `krusch_context_list_memories` | List recent memories by category (no embedding, fast) |
+| `krusch_context_delete_memory` | Delete a memory by ID |
+| `krusch_context_update_memory` | Update content/tags/project (re-embeds on content change) |
+| `krusch_context_consolidate` | Find and merge semantically duplicate memories |
+| `krusch_context_search_code` | Semantic search over all indexed codebase files |
+| `krusch_context_list_repos` | List all repositories indexed in PG-Git |
+| `krusch_context_read_tree` | Browse the file tree of an indexed repository |
+| `krusch_context_read_blob` | Read full content of a specific file by blob ID |
+| `krusch_context_deep_search` | Composite zero-trust search across both memory and codebase |
 
 ## Setup
 

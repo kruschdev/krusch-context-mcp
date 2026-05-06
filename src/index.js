@@ -10,9 +10,9 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 // Import logic from our required MCP packages
-import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory } from './memory-engine.js';
+import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, consolidateMemories } from './memory-engine.js';
 import { getEmbedding } from 'pg-git/lib/embedding.js';
-import { searchBlobs, getRepositories } from 'pg-git/server/git-engine.js';
+import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git/server/git-engine.js';
 import { pool } from 'pg-git/db/pool.js';
 
 // Verify DB connection
@@ -42,7 +42,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: "mcp_homelab-memory_add",
+        name: "krusch_context_add_memory",
         description: "Add a new fact or memory to the persistent IDE database. Use this strictly to document bugs, priorities, lessons, or project outcomes.",
         inputSchema: {
           type: "object",
@@ -56,7 +56,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "mcp_homelab-memory_search",
+        name: "krusch_context_search_memory",
         description: "Search the persistent IDE database for past lessons, bugs, priorities, or project outcomes via semantic embeddings.",
         inputSchema: {
           type: "object",
@@ -70,7 +70,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "pg_git_semantic_search",
+        name: "krusch_context_search_code",
         description: "Semantically search the contents of all files in PG-Git. Results are automatically decayed by age so recent code ranks higher.",
         inputSchema: {
           type: "object",
@@ -84,7 +84,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "deep_context_search",
+        name: "krusch_context_deep_search",
         description: "Zero-Trust composite search. Query both the objective codebase (PG-Git) and subjective history (Homelab Memory) simultaneously. Use this to establish a holistic baseline context for a topic.",
         inputSchema: {
           type: "object",
@@ -96,7 +96,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "mcp_homelab-memory_list",
+        name: "krusch_context_list_memories",
         description: "List recent memories in a category, optionally filtered by project. No embedding required — fast chronological listing.",
         inputSchema: {
           type: "object",
@@ -109,7 +109,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "mcp_homelab-memory_delete",
+        name: "krusch_context_delete_memory",
         description: "Delete a specific memory by its ID. Use list or search first to find the ID.",
         inputSchema: {
           type: "object",
@@ -120,7 +120,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "mcp_homelab-memory_update",
+        name: "krusch_context_update_memory",
         description: "Update an existing memory's content, tags, or project assignment. Content changes trigger re-embedding.",
         inputSchema: {
           type: "object",
@@ -134,11 +134,48 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "pg_git_list_repos",
+        name: "krusch_context_list_repos",
         description: "List all repositories indexed in PG-Git with their IDs and descriptions.",
         inputSchema: {
           type: "object",
           properties: {}
+        }
+      },
+      {
+        name: "krusch_context_read_tree",
+        description: "Browse the file tree of a repository indexed in PG-Git. Returns directory entries (files and subdirectories) for a given tree ID. Use krusch_context_list_repos first to get a repo ID, then call with no tree_id to get the root.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            repository_id: { type: "number", description: "The repository ID (from krusch_context_list_repos)" },
+            tree_id: { type: "string", description: "The tree hash to browse. Omit for root tree." }
+          },
+          required: ["repository_id"]
+        }
+      },
+      {
+        name: "krusch_context_read_blob",
+        description: "Read the full content of a specific file (blob) from PG-Git by its blob ID. Get blob IDs from krusch_context_read_tree.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blob_id: { type: "string", description: "The SHA hash of the blob to read" }
+          },
+          required: ["blob_id"]
+        }
+      },
+      {
+        name: "krusch_context_consolidate",
+        description: "Find and merge semantically duplicate memories within a category. Use dry_run=true first to preview which pairs would be merged. Default threshold 0.15 (lower = stricter matching).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
+            project: { type: "string", description: "Optional: only consolidate memories for this project" },
+            threshold: { type: "number", default: 0.15, description: "Cosine distance threshold — pairs closer than this are considered duplicates" },
+            dry_run: { type: "boolean", default: false, description: "If true, only preview matches without merging" }
+          },
+          required: ["category"]
         }
       }
     ]
@@ -148,22 +185,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const args = request.params.arguments || {};
   try {
-    if (request.params.name === "mcp_homelab-memory_add") {
+    if (request.params.name === "krusch_context_add_memory") {
       return await addMemory(args);
 
-    } else if (request.params.name === "mcp_homelab-memory_search") {
+    } else if (request.params.name === "krusch_context_search_memory") {
       return await searchMemory(args);
 
-    } else if (request.params.name === "mcp_homelab-memory_list") {
+    } else if (request.params.name === "krusch_context_list_memories") {
       return await listMemories(args);
 
-    } else if (request.params.name === "mcp_homelab-memory_delete") {
+    } else if (request.params.name === "krusch_context_delete_memory") {
       return await deleteMemory(args);
 
-    } else if (request.params.name === "mcp_homelab-memory_update") {
+    } else if (request.params.name === "krusch_context_update_memory") {
       return await updateMemory(args);
 
-    } else if (request.params.name === "pg_git_list_repos") {
+    } else if (request.params.name === "krusch_context_list_repos") {
       const repos = await getRepositories();
       if (repos.length === 0) {
         return { content: [{ type: "text", text: "No repositories indexed in PG-Git." }] };
@@ -174,7 +211,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       return { content: [{ type: "text", text: output }] };
 
-    } else if (request.params.name === "pg_git_semantic_search") {
+    } else if (request.params.name === "krusch_context_search_code") {
       const { query: searchQuery, limit = 5, repository_id, project } = args;
       
       let resolvedRepoId = repository_id;
@@ -200,7 +237,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       return { content: [{ type: "text", text: output }] };
 
-    } else if (request.params.name === "deep_context_search") {
+    } else if (request.params.name === "krusch_context_deep_search") {
       const { query, project } = args;
       
       console.error(`[krusch-context-mcp] Executing deep context search for: "${query}"...`);
@@ -250,6 +287,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       
       return { content: [{ type: "text", text: output }] };
+
+    } else if (request.params.name === "krusch_context_read_tree") {
+      const { repository_id, tree_id } = args;
+      let treeHash = tree_id;
+      if (!treeHash) {
+        treeHash = await getRepoRootTree(repository_id);
+        if (!treeHash) return { content: [{ type: "text", text: "No root tree found for this repository. It may not have any commits synced." }] };
+      }
+      const entries = await getTreeEntries(treeHash);
+      if (entries.length === 0) return { content: [{ type: "text", text: `No entries found in tree: ${treeHash}` }] };
+      let output = `=== 🌳 Tree: ${treeHash.substring(0, 12)}... (${entries.length} entries) ===\n`;
+      for (const e of entries) {
+        const icon = e.type === 'tree' ? '📁' : '📄';
+        output += `\n${icon} ${e.name} (${e.type}) → ${e.object_id}`;
+      }
+      return { content: [{ type: "text", text: output }] };
+
+    } else if (request.params.name === "krusch_context_read_blob") {
+      const blob = await getBlob(args.blob_id);
+      if (!blob) return { content: [{ type: "text", text: `No blob found with ID: ${args.blob_id}` }] };
+      const content = blob.content instanceof Buffer ? blob.content.toString('utf-8') : String(blob.content);
+      const header = `=== 📄 Blob: ${args.blob_id.substring(0, 12)}... (${blob.size || content.length} bytes) ===\n`;
+      return { content: [{ type: "text", text: header + content }] };
+
+    } else if (request.params.name === "krusch_context_consolidate") {
+      return await consolidateMemories(args);
 
     } else {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);

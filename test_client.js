@@ -66,10 +66,10 @@ async function run() {
         console.log(`   - ${t.name}`);
     }
 
-    // 2. Test pg_git_list_repos
-    console.log('\n📦 Testing pg_git_list_repos...');
+    // 2. Test krusch_context_list_repos
+    console.log('\n📦 Testing krusch_context_list_repos...');
     try {
-        const reposRes = await send('tools/call', { name: 'pg_git_list_repos', arguments: {} });
+        const reposRes = await send('tools/call', { name: 'krusch_context_list_repos', arguments: {} });
         const text = reposRes.result?.content?.[0]?.text || '';
         console.log(`   ${text.substring(0, 200)}`);
     } catch (e) {
@@ -77,10 +77,10 @@ async function run() {
     }
 
     // 3. Test list_memories
-    console.log('\n📋 Testing mcp_homelab-memory_list...');
+    console.log('\n📋 Testing krusch_context_list_memories...');
     try {
         const listRes = await send('tools/call', {
-            name: 'mcp_homelab-memory_list',
+            name: 'krusch_context_list_memories',
             arguments: { category: 'lessons', limit: 3 }
         });
         const text = listRes.result?.content?.[0]?.text || '';
@@ -90,10 +90,10 @@ async function run() {
     }
 
     // 4. Test search (requires Ollama)
-    console.log('\n🔍 Testing mcp_homelab-memory_search...');
+    console.log('\n🔍 Testing krusch_context_search_memory...');
     try {
         const searchRes = await send('tools/call', {
-            name: 'mcp_homelab-memory_search',
+            name: 'krusch_context_search_memory',
             arguments: { category: 'lessons', query: 'MCP server architecture' }
         });
         const text = searchRes.result?.content?.[0]?.text || '';

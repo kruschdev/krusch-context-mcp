@@ -17,7 +17,7 @@ description: Pause krusch-context-mcp and save state
    - Document any **Fragile** files and transient state.
 
 3. **Log Activity**:
-   - Execute `mcp_homelab-memory_add` with `category: 'activity'`, `project: 'krusch-context-mcp'` and content summarizing this session's work.
+   - Execute `krusch_context_add_memory` with `category: 'activity'`, `project: 'krusch-context-mcp'` and content summarizing this session's work.
 
 4. **Save Steering Facts**:
    - Store any new patterns via `mcp_nuggets-memory_remember` with `kind: 'project'`, key prefixed `krusch-context-mcp:`.

@@ -165,7 +165,7 @@ export async function deleteMemory({ id }) {
 
 export async function updateMemory({ id, content, tags, project }) {
     if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
-    if (!content && !tags && project === undefined) {
+    if (!content && !tags && (project === undefined)) {
         throw new McpError(ErrorCode.InvalidParams, "Must provide at least one field to update (content, tags, or project)");
     }
 
@@ -206,4 +206,90 @@ export async function updateMemory({ id, content, tags, project }) {
         client.release();
     }
     return { content: [{ type: "text", text: `[krusch-context] ✏️ Updated memory ID: ${id}` }] };
+}
+
+/**
+ * Find and merge semantically duplicate memories within a category.
+ * Uses cosine distance to find pairs closer than the threshold,
+ * then merges content and deletes the older record.
+ */
+export async function consolidateMemories({ category, project, threshold = 0.15, dry_run = false }) {
+    if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
+
+    const client = await pool.connect();
+    try {
+        // Find pairs of memories whose embeddings are very close (distance < threshold)
+        let sql = `
+            WITH candidates AS (
+                SELECT id, content, tags, project, created_at, embedding
+                FROM ide_agent_memory
+                WHERE category = $1 AND embedding IS NOT NULL
+        `;
+        const params = [category];
+        if (project) {
+            sql += ` AND project = $2`;
+            params.push(project);
+        }
+        sql += `
+            )
+            SELECT 
+                a.id AS id_a, a.content AS content_a, a.created_at AS created_a,
+                b.id AS id_b, b.content AS content_b, b.created_at AS created_b,
+                a.embedding <=> b.embedding AS distance
+            FROM candidates a
+            JOIN candidates b ON a.id < b.id
+            WHERE a.embedding <=> b.embedding < $${params.length + 1}
+            ORDER BY distance ASC
+            LIMIT 20
+        `;
+        params.push(threshold);
+
+        const res = await client.query(sql, params);
+        const pairs = res.rows;
+
+        if (pairs.length === 0) {
+            return { content: [{ type: "text", text: `[krusch-context] ✅ No duplicate memories found in category: ${category} (threshold: ${threshold})` }] };
+        }
+
+        if (dry_run) {
+            let output = `=== 🔍 Consolidation Preview: ${category} (${pairs.length} pairs) ===\n`;
+            for (const p of pairs) {
+                output += `\n--- Distance: ${Number(p.distance).toFixed(3)} ---\n`;
+                output += `  ID ${p.id_a} (${new Date(p.created_a).toISOString().split('T')[0]}): ${p.content_a.substring(0, 100)}...\n`;
+                output += `  ID ${p.id_b} (${new Date(p.created_b).toISOString().split('T')[0]}): ${p.content_b.substring(0, 100)}...\n`;
+            }
+            return { content: [{ type: "text", text: output }] };
+        }
+
+        // Merge: keep the newer record, append older content, delete the older one
+        const merged = new Set();
+        let mergeCount = 0;
+        for (const p of pairs) {
+            if (merged.has(p.id_a) || merged.has(p.id_b)) continue;
+
+            const keepId = p.created_a > p.created_b ? p.id_a : p.id_b;
+            const dropId = keepId === p.id_a ? p.id_b : p.id_a;
+            const keepContent = keepId === p.id_a ? p.content_a : p.content_b;
+            const dropContent = keepId === p.id_a ? p.content_b : p.content_a;
+
+            const mergedContent = `${keepContent}\n\n[Consolidated from ID ${dropId}]: ${dropContent}`;
+
+            // Re-embed the merged content
+            const embeddingArray = await getEmbedding(mergedContent);
+            if (embeddingArray) {
+                const embeddingStr = `[${embeddingArray.join(',')}]`;
+                await client.query(
+                    `UPDATE ide_agent_memory SET content = $1, embedding = $2::vector WHERE id = $3`,
+                    [mergedContent, embeddingStr, keepId]
+                );
+                await client.query(`DELETE FROM ide_agent_memory WHERE id = $1`, [dropId]);
+                merged.add(dropId);
+                mergeCount++;
+            }
+        }
+
+        return { content: [{ type: "text", text: `[krusch-context] 🔗 Consolidated ${mergeCount} duplicate pairs in category: ${category}` }] };
+    } finally {
+        client.release();
+    }
 }

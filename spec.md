@@ -2,7 +2,7 @@
 
 > **Author**: Antigravity
 > **Date**: 2026-05-05
-> **Status**: Draft
+> **Status**: Active
 
 ---
 
@@ -21,10 +21,10 @@ The **Krusch Context MCP Server** is a unified Model Context Protocol server tha
 
 | Feature | Priority | Notes |
 |---------|----------|-------|
-| `mcp_homelab-memory_search` | Must-have | Search episodic memories (`priorities`, `bugs`, `outcomes`, `activity`, `lessons`). |
-| `mcp_homelab-memory_add` | Must-have | Add new episodic memories. |
-| `pg_git_semantic_search` | Must-have | Search semantic codebase blobs across tracked homelab projects. |
-| `deep_context_search` | Nice-to-have | A composite tool that takes a single query and returns both codebase matches and relevant historical lessons to quickly establish baseline context in one turn. |
+| `krusch_context_search_memory` | Must-have | Search episodic memories (`priorities`, `bugs`, `outcomes`, `activity`, `lessons`). |
+| `krusch_context_add_memory` | Must-have | Add new episodic memories. |
+| `krusch_context_search_code` | Must-have | Search semantic codebase blobs across tracked homelab projects. |
+| `krusch_context_deep_search` | Nice-to-have | A composite tool that takes a single query and returns both codebase matches and relevant historical lessons to quickly establish baseline context in one turn. |
 | Shared DB Connection Pool | Must-have | Single `pg.Pool` instance connected to `kruschdb` on `kruschserv:5434`. |
 | Shared Embedding Engine | Must-have | Shared logic for generating 1536-dim embeddings via `qwen2.5-coder:1.5b` on `kruschgame`. |
 
@@ -76,6 +76,6 @@ The server will interface with two distinct areas of `kruschdb`:
 | Phase | Scope | Acceptance |
 |-------|-------|------------|
 | 1 | Scaffolding & DB Connection | Server starts, connects to DB with explicit health check, handles pooling. |
-| 2 | Porting Existing Tools | `mcp_homelab-memory_*` and `pg_git_semantic_search` tools are functional under the unified server. |
-| 3 | Composite Context Tool | `deep_context_search` is implemented and verified. |
+| 2 | Porting Existing Tools | `krusch_context_*` memory and code search tools are functional under the unified server. |
+| 3 | Composite Context Tool | `krusch_context_deep_search` is implemented and verified. |
 | 4 | Replacement & Cleanup | Replace old MCPs in IDE config, archive old repos. |

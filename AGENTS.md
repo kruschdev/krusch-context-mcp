@@ -12,16 +12,19 @@
 
 | Tool | Source |
 |------|--------|
-| `mcp_homelab-memory_add` | `src/memory-engine.js` |
-| `mcp_homelab-memory_search` | `src/memory-engine.js` |
-| `mcp_homelab-memory_list` | `src/memory-engine.js` |
-| `mcp_homelab-memory_delete` | `src/memory-engine.js` |
-| `mcp_homelab-memory_update` | `src/memory-engine.js` |
-| `pg_git_semantic_search` | `src/index.js` (calls `pg-git/server/git-engine.js`) |
-| `pg_git_list_repos` | `src/index.js` (calls `pg-git/server/git-engine.js`) |
-| `deep_context_search` | `src/index.js` (composite, all categories) |
+| `krusch_context_add_memory` | `src/memory-engine.js` |
+| `krusch_context_search_memory` | `src/memory-engine.js` |
+| `krusch_context_list_memories` | `src/memory-engine.js` |
+| `krusch_context_delete_memory` | `src/memory-engine.js` |
+| `krusch_context_update_memory` | `src/memory-engine.js` |
+| `krusch_context_consolidate` | `src/memory-engine.js` (semantic dedup + merge) |
+| `krusch_context_search_code` | `src/index.js` (calls `pg-git/server/git-engine.js`) |
+| `krusch_context_list_repos` | `src/index.js` (calls `pg-git/server/git-engine.js`) |
+| `krusch_context_read_tree` | `src/index.js` (calls `pg-git/server/git-engine.js`) |
+| `krusch_context_read_blob` | `src/index.js` (calls `pg-git/server/git-engine.js`) |
+| `krusch_context_deep_search` | `src/index.js` (composite, all categories) |
 
 ## Fragile / Don't Touch
 
 - `ide_agent_memory` column migrations in `verifyDatabase()` — these are idempotent guards
-- The `_embedding` internal parameter on `searchMemory`/`addMemory` — used for dedup optimization in `deep_context_search`
+- The `_embedding` internal parameter on `searchMemory`/`addMemory` — used for dedup optimization in `krusch_context_deep_search`
