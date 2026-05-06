@@ -11,8 +11,8 @@ description: Pause krusch-context-mcp and save state
    node /home/kruschdev/homelab/projects/pg-git/scripts/sync_to_pg.js /home/kruschdev/homelab/projects/krusch-context-mcp
    ```
 
-2. **Update GEMINI_INFLIGHT.md**:
-   - Create or overwrite `GEMINI_INFLIGHT.md` in this project root.
+2. **Update INFLIGHT.md**:
+   - Create or overwrite `INFLIGHT.md` in this project root (see `.agent/templates/INFLIGHT.md`).
    - Include: current tool surface status (count, any broken), pending schema migrations, Ollama model/fleet health.
    - Document any **Fragile** files and transient state.
 

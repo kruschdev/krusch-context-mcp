@@ -6,13 +6,11 @@
   <strong>Unified IDE context engine that merges semantic codebase search with episodic project memory into a single MCP server.</strong>
 </p>
 
-<p align="center">
-  <a href="https://github.com/kruschdev/krusch-context-mcp"><img src="https://img.shields.io/github/package-json/v/kruschdev/krusch-context-mcp.svg?style=flat-square" alt="Version"></a>
-  <a href="https://github.com/kruschdev/krusch-context-mcp/blob/main/LICENSE"><img src="https://img.shields.io/github/license/kruschdev/krusch-context-mcp.svg?style=flat-square" alt="License"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D18-blue.svg?style=flat-square" alt="Node Version">
-  <img src="https://img.shields.io/badge/Ollama-qwen2.5--coder:1.5b-blue.svg?style=flat-square" alt="Ollama">
-  <img src="https://img.shields.io/badge/Database-PostgreSQL%20%2B%20pgvector-lightgrey.svg?style=flat-square" alt="Database">
-</p>
+[![Version](https://img.shields.io/github/package-json/v/kruschdev/krusch-context-mcp.svg)](https://github.com/kruschdev/krusch-context-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![Node](https://img.shields.io/badge/Node.js-22+-green.svg)
+![Ollama](https://img.shields.io/badge/Ollama-qwen2.5--coder:1.5b-blue.svg)
+![DB](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20pgvector-lightgrey.svg)
 
 ---
 
@@ -122,18 +120,35 @@ Krusch Context MCP is designed for **infinite session continuity** — your agen
 
 ### 1. The `/close` Workflow (Pause Work)
 When stepping away, tell your agent `/close`. It will:
-1. **Save Local State:** Write active files, fragile components, and next steps to `GEMINI_INFLIGHT.md`.
+1. **Save Local State:** Write active files, fragile components, and next steps to `INFLIGHT.md`.
 2. **Commit to Long-Term Memory:** Call `krusch_context_add_memory` to embed the session's decisions, outcomes, and bug fixes into the vector database.
 
 ### 2. The `/continue` Workflow (Resume Work)
 When starting a new session, type `/continue`. The agent will:
-1. **Read Local State:** Load `GEMINI_INFLIGHT.md` for the active task list.
+1. **Read Local State:** Load `INFLIGHT.md` for the active task list.
 2. **Retrieve Semantic Context:** Call `krusch_context_search_memory` to dynamically load relevant historical context.
 3. **Verify Codebase State:** Call `krusch_context_search_code` to confirm its understanding of the current implementation matches reality.
 
 **The Result:** The agent dynamically pulls the exact context it needs, giving it infinite continuity across sessions without hallucinating stale state.
 
----
+### `INFLIGHT.md` Template
+
+```markdown
+# Project Name - Session State
+
+**Status**: In Progress | Stable | Blocked
+**Last Updated**: YYYY-MM-DD
+
+## Current State
+- Brief summary of what was accomplished this session.
+
+## Fragile Files / Transient State
+- Files or state that must not be touched without understanding context.
+
+## Pending / Next Steps
+- [ ] Next task 1
+- [ ] Next task 2
+```
 
 ## 🛠️ Available Tools
 
