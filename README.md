@@ -84,7 +84,7 @@ npm start
 }
 ```
 
-**4. Restart your IDE.** That's it — your agent now has access to all 12 tools.
+**4. Restart your IDE.** That's it — your agent now has access to all 14 tools.
 
 ---
 
@@ -179,6 +179,8 @@ This keeps the context engine lean and accurate without manual intervention.
 | `krusch_context_read_tree` | Browse the file tree of an indexed repository |
 | `krusch_context_read_blob` | Read full content of a specific file by blob ID |
 | `krusch_context_deep_search` | Composite zero-trust search across both memory and codebase |
+| `krusch_docs_list` | List all available external manuals and documentation |
+| `krusch_docs_search` | Semantically search a specific external manual |
 | `krusch_context_health_check` | Verify server connectivity, database status, and memory/repo counts |
 
 ---

@@ -9,6 +9,9 @@ import {
   McpError
 } from "@modelcontextprotocol/sdk/types.js";
 
+import fs from 'fs/promises';
+import path from 'path';
+
 // Import logic from our required MCP packages
 import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, consolidateMemories } from './memory-engine.js';
 import { getEmbedding } from 'pg-git/lib/embedding.js';
@@ -185,6 +188,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {}
         }
+      },
+      {
+        name: "krusch_docs_list",
+        description: "List all available external manuals and documentation that have been ingested into the semantic database.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "krusch_docs_search",
+        description: "Semantically search a specific external manual. Use krusch_docs_list to find available manual names.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            manual_name: { type: "string", description: "The exact name of the manual (e.g. anthropic-docs)" },
+            query: { type: "string", description: "The search query" },
+            limit: { type: "number", default: 5 }
+          },
+          required: ["manual_name", "query"]
+        }
       }
     ]
   };
@@ -326,6 +350,46 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const memoryCount = dbCheck.rows[0].count;
       const repoCount = repoCheck.rows[0].count;
       return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories: ${memoryCount}\n- Indexed repositories: ${repoCount}\n- Database: kruschdb (pgvector)\n- Version: 1.0.0` }] };
+
+    } else if (request.params.name === "krusch_docs_list") {
+      try {
+        const configPath = process.env.EXTERNAL_DOCS_CONFIG_PATH || '/home/kruschdev/homelab/projects/pg-git/config/external_docs.json';
+        const fileContent = await fs.readFile(configPath, 'utf-8');
+        const configData = JSON.parse(fileContent);
+        if (configData.length === 0) {
+            return { content: [{ type: "text", text: "No manuals available." }] };
+        }
+        let output = `=== 📚 Available External Manuals ===\n`;
+        for (const doc of configData) {
+            output += `\n- ${doc.name} (Source: ${doc.url})`;
+        }
+        return { content: [{ type: "text", text: output }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: `Error reading manuals config: ${e.message}` }], isError: true };
+      }
+
+    } else if (request.params.name === "krusch_docs_search") {
+      const { manual_name, query: searchQuery, limit = 5 } = args;
+      
+      const repoRes = await pool.query(`SELECT id FROM repositories WHERE name = $1`, [manual_name]);
+      if (repoRes.rows.length === 0) {
+          return { content: [{ type: "text", text: `Manual '${manual_name}' not found in database. Use krusch_docs_list to see available manuals.` }] };
+      }
+      const resolvedRepoId = repoRes.rows[0].id;
+      
+      const vector = await getEmbedding(searchQuery);
+      if (!vector) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
+      
+      const results = await searchBlobs(vector, limit, resolvedRepoId);
+      if (results.length === 0) return { content: [{ type: "text", text: "No relevant documentation found." }] };
+      
+      let output = `=== 📖 Documentation Search: ${manual_name} ===\n`;
+      for (const r of results) {
+          const pathStr = r.file_path ? ` [${r.file_path}]` : '';
+          output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)})${pathStr} ---\n`;
+          output += (r.summary || '(no preview)') + '\n';
+      }
+      return { content: [{ type: "text", text: output }] };
 
     } else {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
