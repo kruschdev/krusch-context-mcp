@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Unified Model Context Protocol server that merges PG-Git codebase search with Homelab episodic memory.</strong>
+  <strong>Unified Model Context Protocol server that merges PG-Git codebase search with Krusch Memory MCP.</strong>
 </p>
 
 <p align="center">
@@ -34,7 +34,7 @@ The server acts as a unified facade over two distinct PostgreSQL schemas in `kru
 graph TD;
     A[Agent Tool Call] --> B{Krusch Context MCP};
     B -- Semantic Code Search --> C[(PG-Git: blobs)];
-    B -- Episodic Memory --> D[(Homelab: ide_agent_memory)];
+    B -- Episodic Memory --> D[(Krusch Memory MCP: ide_agent_memory)];
     B -- Deep Search --> C;
     B -- Deep Search --> D;
 ```
