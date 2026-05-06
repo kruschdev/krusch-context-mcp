@@ -114,20 +114,32 @@ To effectively use Krusch Context MCP, simply instruct your IDE agent to documen
 
 ---
 
-## 🤖 The Autonomous Agent Workflow (`/close` & `/continue`)
+## 🤖 The Autonomous Agent Lifecycle
 
-Krusch Context MCP is designed for **infinite session continuity** — your agent never starts from zero.
+Krusch Context MCP is designed for **infinite session continuity** — your agent never starts from zero. Four workflows form a complete daily lifecycle:
 
-### 1. The `/close` Workflow (Pause Work)
+### 1. `/open` — Start the Day
+At the beginning of a work session, type `/open`. The agent will:
+1. **Load Priorities:** Call `krusch_context_search_memory` with `category: 'priorities'` to align on today's goals.
+2. **Check Health:** Call `krusch_context_health_check` to verify database connectivity and memory/repo counts.
+3. **Scan for Drift:** Call `krusch_context_deep_search` to cross-reference its understanding of the codebase against the latest indexed state.
+
+### 2. `/close` — Pause Work
 When stepping away, tell your agent `/close`. It will:
 1. **Save Local State:** Write active files, fragile components, and next steps to `INFLIGHT.md`.
 2. **Commit to Long-Term Memory:** Call `krusch_context_add_memory` to embed the session's decisions, outcomes, and bug fixes into the vector database.
 
-### 2. The `/continue` Workflow (Resume Work)
-When starting a new session, type `/continue`. The agent will:
+### 3. `/continue` — Resume Work
+When returning to an existing task, type `/continue`. The agent will:
 1. **Read Local State:** Load `INFLIGHT.md` for the active task list.
 2. **Retrieve Semantic Context:** Call `krusch_context_search_memory` to dynamically load relevant historical context.
 3. **Verify Codebase State:** Call `krusch_context_search_code` to confirm its understanding of the current implementation matches reality.
+
+### 4. `/sweetdreams` — Nightly Consolidation
+While you sleep, `/sweetdreams` runs a fleet-wide maintenance pass:
+1. **Batch Sync:** Re-indexes all project codebases into the `blobs` table via `sync_all_projects.js`.
+2. **Memory Consolidation:** Calls `krusch_context_consolidate` across all categories to merge duplicate memories and prevent vector DB bloat.
+3. **Freshness Sweep:** Identifies stale memories that haven't been referenced in 90+ days.
 
 **The Result:** The agent dynamically pulls the exact context it needs, giving it infinite continuity across sessions without hallucinating stale state.
 
@@ -150,7 +162,9 @@ When starting a new session, type `/continue`. The agent will:
 - [ ] Next task 2
 ```
 
-## 🛠️ Available Tools
+This keeps the context engine lean and accurate without manual intervention.
+
+---
 
 | Tool | Description |
 |------|-------------|
