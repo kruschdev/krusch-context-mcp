@@ -1,3 +1,6 @@
 node_modules/
 .env
 GEMINI_INFLIGHT.md
+spec.md
+AGENTS.md
+.agent/
