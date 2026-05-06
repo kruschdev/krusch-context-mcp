@@ -1,0 +1,18 @@
+{
+  "name": "krusch-context-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Unified MCP server merging PG-Git codebase search with episodic homelab memory",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["mcp", "semantic-search", "pgvector", "context-engine"],
+  "author": "kruschdev",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "pg-git": "file:../pg-git"
+  }
+}
