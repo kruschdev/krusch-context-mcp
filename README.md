@@ -18,6 +18,16 @@
 
 Previously, each IDE agent session needed two separate MCP servers (`pg-git-mcp` + `krusch-memory-mcp`), each with its own Node.js process, PostgreSQL pool, and Ollama connection. This unified server collapses them into a single process and introduces **Zero-Trust Context** — the philosophy that an AI agent must *verify* its understanding of your codebase before acting, never assuming stale context is current.
 
+### 🛡️ Provider Independence & Sovereign Infrastructure
+
+By leveraging local Ollama instances (`qwen2.5-coder:1.5b` for embeddings, `llama3.2` for tagging) and local PostgreSQL with `pgvector`, Krusch Context MCP drastically decreases reliance on external LLM providers (like OpenAI, Anthropic, or Google).
+
+- **Universal Codebase Search & Repository Browsing:** You aren't reliant on a provider's proprietary file-upload UI (like Claude Projects or OpenAI Custom GPTs). Because your entire codebase is stored in local PostgreSQL, any model you plug in instantly gains deep semantic search (`krusch_context_search_code`) AND the ability to autonomously browse project file structures by following directory links (`krusch_context_read_tree` and `krusch_context_read_blob`).
+- **External Framework & Manual Independence:** You aren't reliant on an LLM's pre-trained knowledge or provider-hosted web searches. By ingesting external code manuals into your local vector database, any model has instant, hallucination-free access to the exact library versions you use via the `krusch_docs_list` and `krusch_docs_search` tools.
+- **Zero API Costs for Context:** You aren't charged per-token to continuously embed, re-index, or search your own codebase, manuals, and episodic memories.
+- **Data Privacy & IP Protection:** Your proprietary code, architectural decisions, and bug reports stay entirely on your own metal.
+- **Provider Agnostic (No Lock-In):** By decoupling long-term memory and codebase context from the reasoning engine, you can seamlessly switch your primary IDE model—using different models for their unique strengths (e.g., Claude for deep refactoring, Gemini for massive context windows, OpenAI for general reasoning)—while maintaining continuous project history and context. Because the retrieval pipeline runs locally, you are immune to provider outages, model deprecations, and pricing changes. You control the intelligence stack from the metal up.
+
 ### Key Features
 - **💾 Shared Connection Pool:** A single `pg.Pool` connected to `kruschdb`, eliminating duplicate database connections.
 - **🧠 Shared Embeddings:** Shared Ollama embedding logic with fleet-wide round-robin load balancing across multiple GPU nodes.
