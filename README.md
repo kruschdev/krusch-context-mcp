@@ -26,7 +26,17 @@ By leveraging local Ollama instances (`qwen2.5-coder:1.5b` for embeddings, `llam
 - **External Framework & Manual Independence:** You aren't reliant on an LLM's pre-trained knowledge or provider-hosted web searches. By ingesting external code manuals into your local vector database, any model has instant, hallucination-free access to the exact library versions you use via the `krusch_docs_list` and `krusch_docs_search` tools.
 - **Zero API Costs for Context:** You aren't charged per-token to continuously embed, re-index, or search your own codebase, manuals, and episodic memories.
 - **Data Privacy & IP Protection:** Your proprietary code, architectural decisions, and bug reports stay entirely on your own metal.
-- **Provider Agnostic (No Lock-In):** By decoupling long-term memory and codebase context from the reasoning engine, you can seamlessly switch your primary IDE model—using different models for their unique strengths (e.g., Claude for deep refactoring, Gemini for massive context windows, OpenAI for general reasoning)—while maintaining continuous project history and context. Because the retrieval pipeline runs locally, you are immune to provider outages, model deprecations, and pricing changes. You control the intelligence stack from the metal up.
+
+### 🔄 Seamless Model Switching (The "Swappable Brain")
+
+By decoupling long-term memory and codebase context from the reasoning engine, your project history outlives any individual chat session or provider context window. This enables you to seamlessly switch your primary IDE agent mid-project:
+
+- **Start your day** with **Gemini Pro** to leverage its massive context window for planning a large refactor.
+- **Switch to** **Claude Opus** for meticulous, precise code execution and bug hunting.
+- **Pivot to** **GPT-4o** for generalized reasoning or exploring a new framework.
+- **Failover to** a local **Ollama** model if your internet drops or a cloud provider experiences an outage.
+
+Because the intelligence stack and retrieval pipeline run locally on your metal, the new agent immediately inherits the exact same knowledge, codebase understanding, and episodic memory as the previous one. You are immune to model deprecation, provider outages, and ecosystem lock-in.
 
 ### Key Features
 - **💾 Shared Connection Pool:** A single `pg.Pool` connected to `kruschdb`, eliminating duplicate database connections.

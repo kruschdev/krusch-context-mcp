@@ -2,33 +2,31 @@ import { pool } from 'pg-git/db/pool.js';
 import { getEmbedding } from 'pg-git/lib/embedding.js';
 import { config } from 'pg-git/config.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { ollamaQueue, PRIORITY } from '../../../lib/llm-queue.js';
 
 const DECAY_RATE = 0.01;
 const AUTO_TAG = true; // Hardcoded for context MCP
 
-/** Resolve the best Ollama generate endpoint from pg-git config or env. */
-function getOllamaGenerateUrl() {
-    const base = process.env.OLLAMA_URL || config.ai?.ollamaUrl || 'http://localhost:11434';
-    return `${base.replace(/\/$/, '')}/api/generate`;
-}
-
 async function generateTags(text) {
     try {
-        const res = await fetch(getOllamaGenerateUrl(), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: "llama3.2",
-                prompt: `Extract 3 to 5 concise keywords or tags from the following text. Respond ONLY with a comma-separated list of tags, nothing else.\n\nText: "${text}"`,
-                stream: false
-            })
-        });
-        
-        if (!res.ok) return null;
-        
-        const data = await res.json();
-        const tags = data.response.split(',').map(t => t.trim()).filter(t => t.length > 0);
-        return JSON.stringify(tags);
+        return await ollamaQueue.enqueue(async (endpoint) => {
+            const url = `${endpoint.replace(/\/$/, '')}/api/generate`;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: "llama3.2",
+                    prompt: `Extract 3 to 5 concise keywords or tags from the following text. Respond ONLY with a comma-separated list of tags, nothing else.\n\nText: "${text}"`,
+                    stream: false
+                })
+            });
+            
+            if (!res.ok) throw new Error(`Status ${res.status}`);
+            
+            const data = await res.json();
+            const tags = data.response.split(',').map(t => t.trim()).filter(t => t.length > 0);
+            return JSON.stringify(tags);
+        }, PRIORITY.MEDIUM);
     } catch (err) {
         console.error(`[krusch-context] Warning: Tag generation failed: ${err.message}`);
         return null;
@@ -63,7 +61,7 @@ export async function addMemory({ category, content, tags, project, _embedding }
 export async function searchMemory({ category, query, limit = 3, active_project, _embedding }) {
     if (!category || !query) throw new McpError(ErrorCode.InvalidParams, "Missing params");
 
-    const embeddingArray = _embedding || await getEmbedding(query);
+    const embeddingArray = _embedding || await getEmbedding(query, PRIORITY.HIGH);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
 
     const client = await pool.connect();
