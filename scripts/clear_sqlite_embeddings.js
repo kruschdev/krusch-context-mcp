@@ -1,4 +1,4 @@
-import { SQLiteDatabase } from '@krusch/toolkit/db';
+import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
@@ -15,7 +15,7 @@ function clearProjectDb(project) {
     const dbPath = path.join(HOMELAB_ROOT, project, '.agent', 'memory.db');
     if (fs.existsSync(dbPath)) {
         try {
-            const db = new SQLiteDatabase(dbPath);
+            const db = new Database(dbPath);
             db.pragma('journal_mode = WAL');
             
             console.log(`[${project}] Clearing embeddings in ide_agent_memory...`);

@@ -8,6 +8,11 @@ import { getProjectDb, cosineSimilarity } from './sqlite-engine.js';
 const DECAY_RATE = 0.01;
 const AUTO_TAG = true; // Hardcoded for context MCP
 
+/**
+ * Generates semantic tags for memory content using a local LLM.
+ * @param {string} text - The text content to tag.
+ * @returns {Promise<string|null>} JSON string array of tags or null if failed.
+ */
 async function generateTags(text) {
     try {
         return await ollamaQueue.enqueue(async (endpoint) => {
@@ -35,6 +40,50 @@ async function generateTags(text) {
 }
 
 /**
+ * Persists a memory to the local project-specific SQLite cache and queues for async sync.
+ * @param {string} project - Project name.
+ * @param {string} category - Category.
+ * @param {string} content - Memory content.
+ * @param {string|null} finalTags - JSON string array of tags.
+ * @param {string} embeddingStr - Vector representation.
+ * @returns {Promise<{content: Array}>}
+ */
+async function _addProjectMemory(project, category, content, finalTags, embeddingStr) {
+    const db = await getProjectDb(project);
+    if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${project} not found.` }] };
+    db.prepare(`
+        INSERT INTO ide_agent_memory (category, content, tags, embedding)
+        VALUES (?, ?, ?, ?)
+    `).run(category, content, finalTags, embeddingStr);
+    
+    import('./sqlite-engine.js').then(({ pushProjectMemory }) => {
+        pushProjectMemory(project, db).catch(e => console.error(`[memory-engine] Async push failed for ${project}:`, e));
+    });
+    return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${project} (${category})` }] };
+}
+
+/**
+ * Persists a memory to the global Postgres fleet memory store.
+ * @param {string} category - Category.
+ * @param {string} content - Memory content.
+ * @param {string|null} finalTags - JSON string array of tags.
+ * @param {string} embeddingStr - Vector representation.
+ * @returns {Promise<{content: Array}>}
+ */
+async function _addGlobalMemory(category, content, finalTags, embeddingStr) {
+    const client = await pool.connect();
+    try {
+        await client.query(`
+            INSERT INTO ide_agent_memory (project, category, content, embedding, tags)
+            VALUES (NULL, $1, $2, $3::vector, $4)
+        `, [category, content, embeddingStr, finalTags]);
+    } finally {
+        client.release();
+    }
+    return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved GLOBAL memory to category: ${category}` }] };
+}
+
+/**
  * Adds a new episodic memory to the persistent IDE database.
  * @param {object} params
  * @param {string} params.category - Category of memory ('priorities', 'bugs', 'outcomes', 'lessons', 'activity')
@@ -58,37 +107,18 @@ export async function addMemory({ category, content, tags, project, _embedding }
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 
     if (project) {
-        // Project-specific SQLite memory
-        const db = await getProjectDb(project);
-        if (db) {
-            db.prepare(`
-                INSERT INTO ide_agent_memory (category, content, tags, embedding)
-                VALUES (?, ?, ?, ?)
-            `).run(category, content, finalTags, embeddingStr);
-            
-            // Asynchronous write-behind (Compute Cache -> Object Storage)
-            import('./sqlite-engine.js').then(({ pushProjectMemory }) => {
-                pushProjectMemory(project, db).catch(e => console.error(`[memory-engine] Async push failed for ${project}:`, e));
-            });
-
-            return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${project} (${category})` }] };
-        }
+        return await _addProjectMemory(project, category, content, finalTags, embeddingStr);
     }
-
-    // Global PostgreSQL memory
-    const client = await pool.connect();
-    try {
-        await client.query(`
-            INSERT INTO ide_agent_memory (project, category, content, embedding, tags)
-            VALUES (NULL, $1, $2, $3::vector, $4)
-        `, [category, content, embeddingStr, finalTags]);
-    } finally {
-        client.release();
-    }
-    
-    return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved GLOBAL memory to category: ${category}` }] };
+    return await _addGlobalMemory(category, content, finalTags, embeddingStr);
 }
 
+/**
+ * Performs semantic search on global Postgres memories.
+ * @param {string} category - Category to search.
+ * @param {number[]} embeddingArray - Query embedding vector.
+ * @param {number} limit - Result count limit.
+ * @returns {Promise<Array>} Ranked and decayed memory objects.
+ */
 async function _searchGlobalMemory(category, embeddingArray, limit) {
     const client = await pool.connect();
     try {
@@ -114,6 +144,14 @@ async function _searchGlobalMemory(category, embeddingArray, limit) {
     }
 }
 
+/**
+ * Performs semantic search on local SQLite project memories.
+ * @param {string} active_project - Target project string.
+ * @param {string} category - Category to search.
+ * @param {number[]} embeddingArray - Query embedding vector.
+ * @param {number} limit - Result count limit.
+ * @returns {Promise<Array>} Ranked and decayed memory objects.
+ */
 async function _searchProjectMemory(active_project, category, embeddingArray, limit) {
     if (!active_project) return [];
     const db = await getProjectDb(active_project);
@@ -123,7 +161,12 @@ async function _searchProjectMemory(active_project, category, embeddingArray, li
     const now = Date.now();
     return rows.map(r => {
         let rowEmb = [];
-        try { rowEmb = JSON.parse(r.embedding); } catch(e) { console.warn(`[krusch-context] Warning: Failed to parse JSON embedding for memory ID ${r.id}`); }
+        try { 
+            const parsed = JSON.parse(r.embedding); 
+            if (Array.isArray(parsed)) rowEmb = parsed;
+        } catch(e) { 
+            console.warn(`[krusch-context] Warning: Failed to parse JSON embedding for memory ID ${r.id}`); 
+        }
         const sim = cosineSimilarity(embeddingArray, rowEmb);
         const date = r.created_at.includes('Z') ? new Date(r.created_at) : new Date(r.created_at + 'Z');
         const ageDays = (now - date.getTime()) / (1000 * 60 * 60 * 24);
@@ -222,26 +265,28 @@ export async function listMemories({ category, project, limit = 10 }) {
 }
 
 /**
- * Deletes a memory by ID.
- * @param {object} params
- * @param {number} params.id - ID of the memory to delete
- * @param {string} [params.source_project] - Project context for SQLite isolation
- * @returns {Promise<{content: Array}>} MCP tool response
+ * Internal helper to delete a memory from the local SQLite project cache.
+ * @param {number} id - Memory ID.
+ * @param {string} source_project - Project name.
+ * @returns {Promise<{content: Array}>}
  */
-export async function deleteMemory({ id, source_project }) {
-    if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
-
-    if (source_project) {
-        const db = await getProjectDb(source_project);
-        if (db) {
-            const res = db.prepare(`DELETE FROM ide_agent_memory WHERE id = ?`).run(id);
-            if (res.changes === 0) {
-                return { content: [{ type: "text", text: `[krusch-context] ⚠️ No SQLite memory found with ID: ${id} in project: ${source_project}` }] };
-            }
-            return { content: [{ type: "text", text: `[krusch-context] 🗑️ Deleted SQLite memory ID: ${id}` }] };
-        }
+async function _deleteProjectMemory(id, source_project) {
+    const db = await getProjectDb(source_project);
+    if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${source_project} not found.` }] };
+    
+    const res = db.prepare(`DELETE FROM ide_agent_memory WHERE id = ?`).run(id);
+    if (res.changes === 0) {
+        return { content: [{ type: "text", text: `[krusch-context] ⚠️ No SQLite memory found with ID: ${id} in project: ${source_project}` }] };
     }
+    return { content: [{ type: "text", text: `[krusch-context] 🗑️ Deleted SQLite memory ID: ${id}` }] };
+}
 
+/**
+ * Internal helper to delete a memory from the global Postgres store.
+ * @param {number} id - Memory ID.
+ * @returns {Promise<{content: Array}>}
+ */
+async function _deleteGlobalMemory(id) {
     const client = await pool.connect();
     try {
         const res = await client.query(`DELETE FROM ide_agent_memory WHERE id = $1 AND project IS NULL RETURNING id`, [id]);
@@ -255,50 +300,63 @@ export async function deleteMemory({ id, source_project }) {
 }
 
 /**
- * Updates an existing memory's content, tags, or project.
+ * Deletes a memory by ID.
  * @param {object} params
- * @param {number} params.id - Memory ID to update
- * @param {string} [params.content] - New content (triggers re-embedding)
- * @param {string[]} [params.tags] - New tags
- * @param {string} [params.project] - New project assignment
+ * @param {number} params.id - ID of the memory to delete
  * @param {string} [params.source_project] - Project context for SQLite isolation
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function updateMemory({ id, content, tags, project, source_project }) {
+export async function deleteMemory({ id, source_project }) {
     if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
-    if (!content && !tags && (project === undefined)) {
-        throw new McpError(ErrorCode.InvalidParams, "Must provide at least one field to update (content, tags, or project)");
-    }
+    if (source_project) return await _deleteProjectMemory(id, source_project);
+    return await _deleteGlobalMemory(id);
+}
 
-    if (source_project) {
-        const db = await getProjectDb(source_project);
-        if (db) {
-            const setClauses = [];
-            const params = [];
-            
-            if (content) {
-                const embeddingArray = await getEmbedding(content);
-                if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
-                setClauses.push(`content = ?`);
-                params.push(content);
-                setClauses.push(`embedding = ?`);
-                params.push(`[${embeddingArray.join(',')}]`);
-            }
-            if (tags) {
-                setClauses.push(`tags = ?`);
-                params.push(JSON.stringify(tags));
-            }
-            
-            if (setClauses.length > 0) {
-                params.push(id);
-                const res = db.prepare(`UPDATE ide_agent_memory SET ${setClauses.join(', ')} WHERE id = ?`).run(...params);
-                if (res.changes === 0) return { content: [{ type: "text", text: `[krusch-context] ⚠️ No memory found with ID: ${id} in project: ${source_project}` }] };
-                return { content: [{ type: "text", text: `[krusch-context] ✏️ Updated SQLite memory ID: ${id}` }] };
-            }
-            return { content: [{ type: "text", text: `[krusch-context] ✏️ Project reassignment not supported for SQLite memories yet.` }] };
-        }
+/**
+ * Internal helper to update a memory in the local SQLite project cache.
+ * @param {number} id - Memory ID.
+ * @param {string} [content] - Optional new content.
+ * @param {string[]} [tags] - Optional new tags.
+ * @param {string} source_project - Project name.
+ * @returns {Promise<{content: Array}>}
+ */
+async function _updateProjectMemory(id, content, tags, source_project) {
+    const db = await getProjectDb(source_project);
+    if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${source_project} not found.` }] };
+    
+    const setClauses = [];
+    const params = [];
+    
+    if (content) {
+        const embeddingArray = await getEmbedding(content);
+        if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
+        setClauses.push(`content = ?`);
+        params.push(content);
+        setClauses.push(`embedding = ?`);
+        params.push(`[${embeddingArray.join(',')}]`);
     }
+    if (tags) {
+        setClauses.push(`tags = ?`);
+        params.push(JSON.stringify(tags));
+    }
+    
+    if (setClauses.length > 0) {
+        params.push(id);
+        const res = db.prepare(`UPDATE ide_agent_memory SET ${setClauses.join(', ')} WHERE id = ?`).run(...params);
+        if (res.changes === 0) return { content: [{ type: "text", text: `[krusch-context] ⚠️ No memory found with ID: ${id} in project: ${source_project}` }] };
+        return { content: [{ type: "text", text: `[krusch-context] ✏️ Updated SQLite memory ID: ${id}` }] };
+    }
+    return { content: [{ type: "text", text: `[krusch-context] ✏️ Project reassignment not supported for SQLite memories yet.` }] };
+}
 
+/**
+ * Internal helper to update a memory in the global Postgres store.
+ * @param {number} id - Memory ID.
+ * @param {string} [content] - Optional new content.
+ * @param {string[]} [tags] - Optional new tags.
+ * @returns {Promise<{content: Array}>}
+ */
+async function _updateGlobalMemory(id, content, tags) {
     const client = await pool.connect();
     try {
         const setClauses = [];
@@ -318,7 +376,6 @@ export async function updateMemory({ id, content, tags, project, source_project 
             params.push(JSON.stringify(tags));
         }
         
-        // Cannot change project of global memories for now
         params.push(id);
         const res = await client.query(
             `UPDATE ide_agent_memory SET ${setClauses.join(', ')} WHERE id = $${idx} AND project IS NULL RETURNING id`,
@@ -333,14 +390,63 @@ export async function updateMemory({ id, content, tags, project, source_project 
     return { content: [{ type: "text", text: `[krusch-context] ✏️ Updated Global PG memory ID: ${id}` }] };
 }
 
+/**
+ * Updates an existing memory's content, tags, or project.
+ * @param {object} params
+ * @param {number} params.id - Memory ID to update
+ * @param {string} [params.content] - New content (triggers re-embedding)
+ * @param {string[]} [params.tags] - New tags
+ * @param {string} [params.project] - New project assignment
+ * @param {string} [params.source_project] - Project context for SQLite isolation
+ * @returns {Promise<{content: Array}>} MCP tool response
+ */
+export async function updateMemory({ id, content, tags, project, source_project }) {
+    if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
+    if (!content && !tags && (project === undefined)) {
+        throw new McpError(ErrorCode.InvalidParams, "Must provide at least one field to update (content, tags, or project)");
+    }
+
+    if (source_project) return await _updateProjectMemory(id, content, tags, source_project);
+    return await _updateGlobalMemory(id, content, tags);
+}
+
+/**
+ * Calculates an L2-normalized centroid between two vector arrays for consolidation.
+ * @param {string} embStrA - JSON string representation of vector A.
+ * @param {string} embStrB - JSON string representation of vector B.
+ * @returns {string} JSON string of the newly normalized centroid vector.
+ */
 function _calculateCentroidStr(embStrA, embStrB) {
-    const arrA = JSON.parse(embStrA);
-    const arrB = JSON.parse(embStrB);
-    let centroid = arrA.map((val, i) => val + arrB[i]);
+    let arrA = [];
+    let arrB = [];
+    try {
+        const parsedA = JSON.parse(embStrA);
+        const parsedB = JSON.parse(embStrB);
+        if (Array.isArray(parsedA)) arrA = parsedA;
+        if (Array.isArray(parsedB)) arrB = parsedB;
+    } catch(e) {}
+    
+    if (!arrA.length || !arrB.length) return `[]`;
+    const len = Math.min(arrA.length, arrB.length);
+    
+    let centroid = [];
+    for(let i=0; i<len; i++) {
+        centroid.push(arrA[i] + arrB[i]);
+    }
+    
     const norm = Math.sqrt(centroid.reduce((sum, val) => sum + val * val, 0));
+    if (norm === 0) return `[${centroid.join(',')}]`;
     return `[${centroid.map(val => val / norm).join(',')}]`;
 }
 
+/**
+ * Consolidates matching semantic memories in the local SQLite project cache.
+ * @param {string} category - Category to search within.
+ * @param {string} project - Project name.
+ * @param {number} threshold - Cosine distance threshold.
+ * @param {boolean} dry_run - Preview without merging.
+ * @returns {Promise<{content: Array}>}
+ */
 async function _consolidateSqlite(category, project, threshold, dry_run) {
     const db = await getProjectDb(project);
     if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${project} not found.` }] };
@@ -350,7 +456,14 @@ async function _consolidateSqlite(category, project, threshold, dry_run) {
     for (let i = 0; i < rows.length; i++) {
         for (let j = i + 1; j < rows.length; j++) {
             let embA = [], embB = [];
-            try { embA = JSON.parse(rows[i].embedding); embB = JSON.parse(rows[j].embedding); } catch(e) { continue; }
+            try { 
+                const pa = JSON.parse(rows[i].embedding); 
+                const pb = JSON.parse(rows[j].embedding); 
+                if(Array.isArray(pa)) embA = pa;
+                if(Array.isArray(pb)) embB = pb;
+            } catch(e) { continue; }
+            if(!embA.length || !embB.length) continue;
+            
             const distance = 1 - cosineSimilarity(embA, embB);
             if (distance < threshold) {
                 pairs.push({
@@ -393,6 +506,13 @@ async function _consolidateSqlite(category, project, threshold, dry_run) {
     return { content: [{ type: "text", text: `[krusch-context] 🔗 Consolidated ${mergeCount} duplicate pairs in SQLite category: ${category}` }] };
 }
 
+/**
+ * Consolidates matching semantic memories in the global Postgres store.
+ * @param {string} category - Category to search within.
+ * @param {number} threshold - Cosine distance threshold.
+ * @param {boolean} dry_run - Preview without merging.
+ * @returns {Promise<{content: Array}>}
+ */
 async function _consolidatePostgres(category, threshold, dry_run) {
     const client = await pool.connect();
     try {
