@@ -44,7 +44,7 @@ Because the intelligence stack and retrieval pipeline run locally on your metal,
 - **🔍 Zero-Trust Context:** The `krusch_context_deep_search` tool queries both codebase (objective) and memory (subjective) in one call, giving agents a holistic reality check.
 - **📌 Zero-Trust Project Separation:** Project-specific episodic memories are physically isolated in local SQLite databases (`<project>/.agent/memory.db`), while global homelab learnings are stored in the central PostgreSQL database. This hybrid approach guarantees project context never leaks.
 - **🏷️ Auto-Tagging:** Memories are automatically tagged with keywords via `llama3.2`, making them discoverable without manual effort.
-- **♻️ Memory Consolidation:** Semantic deduplication detects and merges overlapping memories using $L_2$-normalized centroid averaging, mathematically preserving cluster identity without invoking the Ollama API for fast, native consolidation.
+- **♻️ Memory Consolidation:** Semantic deduplication detects and merges overlapping memories using $L_2$-normalized centroid averaging, mathematically preserving cluster identity without invoking the Ollama API for fast, native consolidation. *Methodology derived from the "Geometry of Consolidation" and [Agentic-imodels (arXiv:2605.03808)](https://arxiv.org/abs/2605.03808) research.*
 - **💎 Holographic Nuggets Memory:** A lightweight Key-Value store integrated into local SQLite (for project-specific nudges) and PostgreSQL (for global facts) to hold steering facts, user preferences, and project guidelines. *Credits to [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets) for the original Holographic Nuggets MCP architecture.*
 
 ---
