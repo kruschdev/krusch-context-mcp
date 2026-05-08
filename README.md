@@ -115,20 +115,26 @@ krusch-context-mcp/           # This project
 └── ...                       
 ```
 
-**1. Install dependencies:**
+**1. Setup PG-Git-MCP (Database & Codebase Ingestion):**
+Krusch Context MCP relies on the `pg-git-mcp` engine to power its semantic codebase search. 
+- You must install it to index your repositories into PostgreSQL.
+- Install it globally: `npm install -g pg-git-mcp`
+- Follow the `pg-git-mcp` documentation to index your codebase (e.g., using its sync scripts) before starting this MCP server.
+
+**2. Install Krusch Context MCP:**
 ```bash
 git clone https://github.com/kruschdev/krusch-context-mcp.git
 cd krusch-context-mcp
 npm install
-cp .env.example .env # (Or copy from your pg-git instance)
+cp .env.example .env # Configure your database connection here
 ```
 
-**2. Start the server:**
+**3. Start the server:**
 ```bash
 npm start
 ```
 
-**3. Add to your IDE MCP settings** (e.g., `claude_desktop_config.json`, `.cursor/mcp.json`, or Antigravity config):
+**4. Add to your IDE MCP settings** (e.g., `claude_desktop_config.json`, `.cursor/mcp.json`, or Antigravity config):
 ```json
 {
   "mcpServers": {
@@ -140,7 +146,7 @@ npm start
 }
 ```
 
-**4. Restart your IDE.** That's it — your agent now has access to all 18 tools.
+**5. Restart your IDE.** That's it — your agent now has access to all 18 tools.
 
 ---
 
