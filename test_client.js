@@ -76,6 +76,26 @@ async function run() {
         console.log(`   ⚠️ ${e.message}`);
     }
 
+    // 2b. Test krusch_context_read_tree
+    console.log('\n🌳 Testing krusch_context_read_tree...');
+    try {
+        const treeRes = await send('tools/call', { name: 'krusch_context_read_tree', arguments: { repository_id: 1 } });
+        const text = treeRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text.substring(0, 200)}`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    // 2c. Test krusch_context_read_blob (using a bogus sha to test error handling)
+    console.log('\n📄 Testing krusch_context_read_blob...');
+    try {
+        const blobRes = await send('tools/call', { name: 'krusch_context_read_blob', arguments: { blob_id: '1234567890abcdef' } });
+        const text = blobRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text.substring(0, 200)}`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
     // 3. Test list_memories
     console.log('\n📋 Testing krusch_context_list_memories...');
     try {

@@ -100,7 +100,7 @@ export async function pullProjectMemory(projectName, db) {
         
         const memTx = db.transaction((rows) => {
             for (const row of rows) {
-                insertMem.run(row.id, row.category, row.content, JSON.stringify(row.tags), row.embedding, row.id);
+                insertMem.run(row.id, row.category, row.content, row.tags, row.embedding, row.id);
             }
         });
         memTx(memRes.rows);
@@ -146,10 +146,12 @@ export async function pushProjectMemory(projectName, db) {
                  embedStr = `[${embedStr}]`;
             }
             
+            let parsedTags = null;
+            try { parsedTags = mem.tags ? JSON.parse(mem.tags) : null; } catch { parsedTags = mem.tags; }
             const res = await client.query(
                 `INSERT INTO ide_agent_memory (project, category, content, tags, embedding)
                  VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-                [projectName, mem.category, mem.content, mem.tags ? JSON.parse(mem.tags) : null, embedStr]
+                [projectName, mem.category, mem.content, parsedTags, embedStr]
             );
             
             const newPgId = res.rows[0].id;

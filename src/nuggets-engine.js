@@ -2,7 +2,7 @@ import { pool } from 'pg-git/db/pool.js';
 import { getEmbedding } from 'pg-git/lib/embedding.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 
-import { getProjectDb } from './sqlite-engine.js';
+import { getProjectDb, cosineSimilarity } from './sqlite-engine.js';
 
 const VALID_KINDS = new Set(['project', 'user', 'agent']);
 
@@ -57,16 +57,6 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
     return { content: [{ type: "text", text: `[krusch-context] 🧠 Global Nugget remembered (Postgres): '${key}'` }] };
 }
 
-function computeCosineSimilarity(vecA, vecB) {
-    let dotProduct = 0, normA = 0, normB = 0;
-    for (let i = 0; i < vecA.length; i++) {
-        dotProduct += vecA[i] * vecB[i];
-        normA += vecA[i] * vecA[i];
-        normB += vecB[i] * vecB[i];
-    }
-    if (normA === 0 || normB === 0) return 0;
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}
 
 /**
  * Return short, relevant nugget facts to gently steer the agent.
@@ -127,7 +117,7 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project }) 
             for (const row of localRows) {
                 try {
                     const dbEmbedding = JSON.parse(row.embedding);
-                    const similarity = computeCosineSimilarity(embeddingArray, dbEmbedding);
+                    const similarity = cosineSimilarity(embeddingArray, dbEmbedding);
                     const distance = 1 - similarity;
                     combinedResults.push({
                         key: row.key,

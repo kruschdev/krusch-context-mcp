@@ -1,8 +1,7 @@
 import { pool } from 'pg-git/db/pool.js';
 import { getEmbedding } from 'pg-git/lib/embedding.js';
-import { config } from 'pg-git/config.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { ollamaQueue, PRIORITY } from './llm-queue.js';
+import { ollamaQueue, PRIORITY } from '../../../lib/llm-queue.js';
 import { getProjectDb, cosineSimilarity } from './sqlite-engine.js';
 
 const DECAY_RATE = 0.01;
@@ -157,6 +156,7 @@ async function _searchProjectMemory(active_project, category, embeddingArray, li
     const db = await getProjectDb(active_project);
     if (!db) return [];
     
+    // NOTE: Full-table scan with in-JS cosine — scales to ~500 memories per project-category
     const rows = db.prepare(`SELECT id, category, content, tags, embedding, created_at FROM ide_agent_memory WHERE category = ?`).all(category);
     const now = Date.now();
     return rows.map(r => {
@@ -168,9 +168,11 @@ async function _searchProjectMemory(active_project, category, embeddingArray, li
             console.warn(`[krusch-context] Warning: Failed to parse JSON embedding for memory ID ${r.id}`); 
         }
         const sim = cosineSimilarity(embeddingArray, rowEmb);
-        const date = r.created_at.includes('Z') ? new Date(r.created_at) : new Date(r.created_at + 'Z');
+        const dateStr = r.created_at || new Date().toISOString();
+        const date = dateStr.includes('Z') ? new Date(dateStr) : new Date(dateStr + 'Z');
         const ageDays = (now - date.getTime()) / (1000 * 60 * 60 * 24);
         const decay = Math.exp(-DECAY_RATE * ageDays);
+        // +0.1 bias intentionally boosts project-local results to prefer local context
         return {
             id: r.id, project: active_project, content: r.content, tags: r.tags,
             created_at: r.created_at, similarity: (sim + 0.1) * decay, source: 'project'
@@ -356,7 +358,7 @@ async function _updateProjectMemory(id, content, tags, source_project) {
  * @param {string[]} [tags] - Optional new tags.
  * @returns {Promise<{content: Array}>}
  */
-async function _updateGlobalMemory(id, content, tags) {
+async function _updateGlobalMemory(id, content, tags, project) {
     const client = await pool.connect();
     try {
         const setClauses = [];
@@ -374,6 +376,10 @@ async function _updateGlobalMemory(id, content, tags) {
         if (tags) {
             setClauses.push(`tags = $${idx++}`);
             params.push(JSON.stringify(tags));
+        }
+        if (project !== undefined) {
+            setClauses.push(`project = $${idx++}`);
+            params.push(project);
         }
         
         params.push(id);
@@ -407,7 +413,7 @@ export async function updateMemory({ id, content, tags, project, source_project 
     }
 
     if (source_project) return await _updateProjectMemory(id, content, tags, source_project);
-    return await _updateGlobalMemory(id, content, tags);
+    return await _updateGlobalMemory(id, content, tags, project);
 }
 
 /**
@@ -452,6 +458,10 @@ async function _consolidateSqlite(category, project, threshold, dry_run) {
     if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${project} not found.` }] };
     
     const rows = db.prepare(`SELECT id, content, tags, embedding, created_at FROM ide_agent_memory WHERE category = ? AND embedding IS NOT NULL`).all(category);
+    // Scaling guard: O(n²) pairwise comparison
+    if (rows.length > 500) {
+        return { content: [{ type: "text", text: `[krusch-context] ⚠️ Too many memories (${rows.length}) for in-memory consolidation. Filter by project.` }] };
+    }
     const pairs = [];
     for (let i = 0; i < rows.length; i++) {
         for (let j = i + 1; j < rows.length; j++) {
@@ -488,21 +498,24 @@ async function _consolidateSqlite(category, project, threshold, dry_run) {
     
     const merged = new Set();
     let mergeCount = 0;
-    for (const p of pairs) {
-        if (merged.has(p.id_a) || merged.has(p.id_b)) continue;
-        const keepId = p.created_a > p.created_b ? p.id_a : p.id_b;
-        const dropId = keepId === p.id_a ? p.id_b : p.id_a;
-        const keepContent = keepId === p.id_a ? p.content_a : p.content_b;
-        const dropContent = keepId === p.id_a ? p.content_b : p.content_a;
+    const mergeTx = db.transaction(() => {
+        for (const p of pairs) {
+            if (merged.has(p.id_a) || merged.has(p.id_b)) continue;
+            const keepId = p.created_a > p.created_b ? p.id_a : p.id_b;
+            const dropId = keepId === p.id_a ? p.id_b : p.id_a;
+            const keepContent = keepId === p.id_a ? p.content_a : p.content_b;
+            const dropContent = keepId === p.id_a ? p.content_b : p.content_a;
 
-        const mergedContent = `${keepContent}\n\n[Consolidated from ID ${dropId}]: ${dropContent}`;
-        const embeddingStr = _calculateCentroidStr(p.emb_a, p.emb_b);
-        
-        db.prepare(`UPDATE ide_agent_memory SET content = ?, embedding = ? WHERE id = ?`).run(mergedContent, embeddingStr, keepId);
-        db.prepare(`DELETE FROM ide_agent_memory WHERE id = ?`).run(dropId);
-        merged.add(dropId);
-        mergeCount++;
-    }
+            const mergedContent = `${keepContent}\n\n[Consolidated from ID ${dropId}]: ${dropContent}`;
+            const embeddingStr = _calculateCentroidStr(p.emb_a, p.emb_b);
+            
+            db.prepare(`UPDATE ide_agent_memory SET content = ?, embedding = ? WHERE id = ?`).run(mergedContent, embeddingStr, keepId);
+            db.prepare(`DELETE FROM ide_agent_memory WHERE id = ?`).run(dropId);
+            merged.add(dropId);
+            mergeCount++;
+        }
+    });
+    mergeTx();
     return { content: [{ type: "text", text: `[krusch-context] 🔗 Consolidated ${mergeCount} duplicate pairs in SQLite category: ${category}` }] };
 }
 

@@ -14,38 +14,57 @@
 
 ---
 
-## ⚡ Why Krusch Context MCP?
+## The Problem
 
-Previously, each IDE agent session needed two separate MCP servers (`pg-git-mcp` + `krusch-memory-mcp`), each with its own Node.js process, PostgreSQL pool, and Ollama connection. This unified server collapses them into a single process and introduces **Zero-Trust Context** — the philosophy that an AI agent must *verify* its understanding of your codebase before acting, never assuming stale context is current.
+Every time you start a new AI coding session, your agent starts from zero. It doesn't remember the bug you fixed yesterday, the architectural decision you made last week, or even what files exist in your project. You end up re-explaining context, watching it hallucinate stale assumptions, and losing momentum to the "goldfish memory" problem.
 
-### 🛡️ Provider Independence & Sovereign Infrastructure
+**Krusch Context MCP fixes this.** It gives your AI coding agent persistent, searchable memory across every session — and pairs it with semantic search over your entire codebase — so your agent always knows *what* your code does, *why* you built it that way, and *what went wrong last time*.
 
-By leveraging local Ollama instances (`bge-large` for embeddings, `llama3.2` for tagging) and local PostgreSQL with `pgvector`, Krusch Context MCP drastically decreases reliance on external LLM providers (like OpenAI, Anthropic, or Google).
+## What It Does
 
-- **Universal Codebase Search & Repository Browsing:** You aren't reliant on a provider's proprietary file-upload UI (like Claude Projects or OpenAI Custom GPTs). Because your entire codebase is stored in local PostgreSQL, any model you plug in instantly gains deep semantic search (`krusch_context_search_code`) AND the ability to autonomously browse project file structures by following directory links (`krusch_context_read_tree` and `krusch_context_read_blob`).
-- **External Framework & Manual Independence:** You aren't reliant on an LLM's pre-trained knowledge or provider-hosted web searches. By ingesting external code manuals into your local vector database, any model has instant, hallucination-free access to the exact library versions you use via the `krusch_docs_list` and `krusch_docs_search` tools.
-- **Zero API Costs for Context:** You aren't charged per-token to continuously embed, re-index, or search your own codebase, manuals, and episodic memories.
-- **Data Privacy & IP Protection:** Your proprietary code, architectural decisions, and bug reports stay entirely on your own metal.
+Krusch Context MCP is a single [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes 18 tools to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
 
-### 🔄 Seamless Model Switching (The "Swappable Brain")
+- **🔍 Semantic Codebase Search** — Your agent can search the *meaning* of your code, not just filenames. "How do we handle auth?" returns the actual implementation across all your repos.
+- **🧠 Episodic Memory** — Bugs found, decisions made, lessons learned, and priorities set are stored as vector-embedded memories that persist across sessions and are retrieved by semantic relevance with temporal decay.
+- **💎 Steering Nudges** — Lightweight key-value facts (preferences, conventions, corrections) that give the agent behavioral continuity without re-prompting.
+- **📖 Documentation Search** — Ingested external manuals (framework docs, API references) are searchable locally, so your agent references *your* versions, not its training data.
+- **🌍 Zero-Trust Deep Search** — A single tool call that cross-references codebase reality with historical memory, so the agent *verifies* what it knows before acting.
 
-By decoupling long-term memory and codebase context from the reasoning engine, your project history outlives any individual chat session or provider context window. This enables you to seamlessly switch your primary IDE agent mid-project:
+The result: your agent picks up exactly where you left off, every time, without you explaining a thing.
 
-- **Start your day** with **Gemini Pro** to leverage its massive context window for planning a large refactor.
-- **Switch to** **Claude Opus** for meticulous, precise code execution and bug hunting.
-- **Pivot to** **GPT-4o** for generalized reasoning or exploring a new framework.
-- **Failover to** a local **Ollama** model if your internet drops or a cloud provider experiences an outage.
+## Why You'd Want It
 
-Because the intelligence stack and retrieval pipeline run locally on your metal, the new agent immediately inherits the exact same knowledge, codebase understanding, and episodic memory as the previous one. You are immune to model deprecation, provider outages, and ecosystem lock-in.
+### 🛡️ Your Context Lives On Your Metal
 
-### Key Features
-- **💾 Shared Connection Pool:** A single `pg.Pool` connected to `kruschdb`, eliminating duplicate database connections.
-- **🧠 Shared Embeddings:** Shared Ollama embedding logic with fleet-wide round-robin load balancing across multiple GPU nodes.
-- **🔍 Zero-Trust Context:** The `krusch_context_deep_search` tool queries both codebase (objective) and memory (subjective) in one call, giving agents a holistic reality check.
-- **📌 Zero-Trust Project Separation (SQLite Lakebase Architecture):** Inspired by [Neon's decoupled lakebase architecture](https://neon.com/docs/introduction/architecture-overview), we explicitly decouple compute from storage. The central `kruschdb` PostgreSQL instance acts as the durable **Object Storage** for fleet-wide history, while local SQLite databases (`<project>/.agent/memory.db`) act as fast, ephemeral **Compute Caches**. When a project is loaded, context is pulled down into SQLite for zero-latency local vector math. When new memories are added, an asynchronous write-behind process flushes them back up to PostgreSQL.
-- **🏷️ Auto-Tagging:** Memories are automatically tagged with keywords via `llama3.2`, making them discoverable without manual effort.
-- **♻️ Memory Consolidation:** Semantic deduplication detects and merges overlapping memories using $L_2$-normalized centroid averaging, mathematically preserving cluster identity without invoking the Ollama API for fast, native consolidation. *Methodology derived from the [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation) research.*
-- **💎 Holographic Nuggets Memory:** A lightweight Key-Value store integrated into local SQLite (for project-specific nudges) and PostgreSQL (for global facts) to hold steering facts, user preferences, and project guidelines. *Credits to [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets) for the original Holographic Nuggets MCP architecture.*
+All embeddings are generated locally via [Ollama](https://ollama.com/) (`bge-large` for vectors, `llama3.2` for tagging). All storage is local PostgreSQL + pgvector + SQLite. Nothing leaves your machine.
+
+- **Zero API costs** for context retrieval — you aren't paying per-token to search your own code
+- **Full data sovereignty** — proprietary code, architecture decisions, and bug reports stay on your hardware
+- **No provider lock-in** — your context infrastructure works regardless of which LLM provider you're using today
+
+### 🔄 Switch Models Without Losing Your Mind
+
+Because memory and codebase context are decoupled from the reasoning engine, you can swap your IDE agent mid-project and the new model inherits everything:
+
+- Start your morning with **Gemini** for planning
+- Switch to **Claude** for precise refactoring
+- Pivot to **GPT-4o** for exploring a new API
+- Fall back to a **local model** when your internet drops
+
+Every model gets the same memories, the same codebase search, the same nudges. Your project history outlives any individual chat session or provider context window.
+
+### ⚡ One Server, Not Three
+
+This used to require running separate MCP servers for memory, codebase search, and nuggets — each with its own Node.js process and database connections. Krusch Context MCP collapses all of it into a single process with a shared connection pool and embedding pipeline.
+
+### Key Capabilities
+
+- **💾 Shared Connection Pool** — Single `pg.Pool` to `kruschdb`, no duplicate connections
+- **🧠 Fleet-Balanced Embeddings** — Round-robin load balancing across multiple Ollama GPU nodes
+- **📌 Lakebase Architecture** — Inspired by [Neon's decoupled architecture](https://neon.com/docs/introduction/architecture-overview): local SQLite caches for zero-latency reads, async write-behind to durable PostgreSQL storage
+- **🏷️ Auto-Tagging** — Memories are automatically tagged via `llama3.2` for discoverability
+- **♻️ Memory Consolidation** — Semantic dedup using L₂-normalized centroid averaging without re-embedding. *Derived from [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation).*
+- **💎 Holographic Nuggets** — Lightweight steering facts split between project-local SQLite and global PostgreSQL. *Adapted from [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets).*
 
 ---
 
@@ -137,7 +156,7 @@ To effectively use Krusch Context MCP, simply instruct your IDE agent to documen
 
 **Example 3: Zero-Trust Context check**
 > **You:** "Before we start, verify what you know about the database schema."
-> **Agent:** *[Calls `krusch_context_deep_search`]* "Cross-referencing codebase search (blobs) with episodic memory — the schema uses pgvector with 1536 dims, and our last session noted we added the `tags` column."
+> **Agent:** *[Calls `krusch_context_deep_search`]* "Cross-referencing codebase search (blobs) with episodic memory — the schema uses pgvector with 1024 dims (bge-large), and our last session noted we added the `tags` column."
 
 **Example 4: Memory Consolidation**
 > **You:** "Clean up the repetitive notes about the migration."
@@ -367,8 +386,7 @@ krusch-context-mcp/
 │   ├── index.js            # MCP server entry point — tool registration & routing
 │   ├── memory-engine.js    # Episodic memory CRUD (add, search, list, delete, update, consolidate)
 │   ├── nuggets-engine.js   # Holographic Nuggets CRUD (remember, nudges, forget, list)
-│   ├── sqlite-engine.js    # Lakebase SQLite layer (project DB init, pull/push sync)
-│   └── llm-queue.js        # Priority queue for Ollama fleet GPU load balancing
+│   └── sqlite-engine.js    # Lakebase SQLite layer (project DB init, pull/push sync)
 ├── scripts/
 │   ├── benchmark_latency.js      # Measure embedding + search latency across the fleet
 │   ├── clear_sqlite_embeddings.js # Reset local SQLite embedding columns

@@ -26,7 +26,7 @@ The **Krusch Context MCP Server** is a unified Model Context Protocol server tha
 | `krusch_context_search_code` | Must-have | Search semantic codebase blobs across tracked homelab projects. |
 | `krusch_context_deep_search` | Nice-to-have | A composite tool that takes a single query and returns both codebase matches and relevant historical lessons to quickly establish baseline context in one turn. |
 | Shared DB Connection Pool | Must-have | Single `pg.Pool` instance connected to `kruschdb` on `kruschserv:5434`. |
-| Shared Embedding Engine | Must-have | Shared logic for generating 1536-dim embeddings via `qwen2.5-coder:1.5b` on `kruschgame`. |
+| Shared Embedding Engine | Must-have | Shared logic for generating 1024-dim embeddings via `bge-large` on `kruschgame`. |
 
 ## 4. Technical Constraints
 
@@ -43,19 +43,19 @@ The server will interface with two distinct areas of `kruschdb`:
 **Episodic Memory (from `krusch-memory-mcp`)**
 ```sql
 -- Table: homelab_memory (or similar existing table)
--- Columns: id, category (enum), content (text), embedding (vector 1536), created_at
+-- Columns: id, category (enum), content (text), embedding (vector 1024), created_at
 ```
 
 **Semantic Codebase (from `pg-git`)**
 ```sql
 -- Table: blobs (or similar existing pg-git table)
--- Columns: id, project (text), filepath (text), content (text), embedding (vector 1536), updated_at
+-- Columns: id, project (text), filepath (text), content (text), embedding (vector 1024), updated_at
 ```
 
 ## 6. Edge Cases & Gotchas
 
 - **Silent Connection Failures**: `pg.Pool` is lazy. We must explicitly run a `SELECT 1` health check on startup and throw errors properly (lessons learned from the previous `krusch-memory-mcp` audit).
-- **Ollama Model Tags**: The embedding request must specify the exact model tag (`qwen2.5-coder:1.5b`). If kruschgame only has `qwen2.5-coder:1.5b-base`, the MCP will fail with a 404.
+- **Ollama Model Tags**: The embedding request must specify the exact model tag (`bge-large`). If kruschgame only has a different variant, the MCP will fail with a 404.
 - **Context Window Bloat**: If `deep_context_search` returns too many files and too many memory snippets, it could overwhelm the agent's context window. We need strict limits (e.g., max 3 files, max 3 memories) for the composite tool.
 
 ## 7. Acceptance Criteria

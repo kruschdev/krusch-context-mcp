@@ -6,7 +6,7 @@
 
 - **Database schema (`ide_agent_memory`)**: Must maintain `project` and `tags` columns added via dynamic migration. Do NOT alter the column order or types — backward compatibility with existing episodic records is critical.
 - **pg-git dependency**: All DB pooling and embedding logic is imported from the sibling `pg-git` project via `file:` link. This project has NO `.env` of its own — it inherits `pg-git/.env` configuration.
-- **Ollama model**: Embeddings use `qwen2.5-coder:1.5b` (1536 dims). Tag generation uses `llama3.2` for keyword extraction.
+- **Ollama model**: Embeddings use `bge-large` (1024 dims). Tag generation uses `llama3.2` for keyword extraction.
 
 ## Tool Surface
 
@@ -24,6 +24,12 @@
 | `krusch_context_read_blob` | `src/index.js` (calls `pg-git/server/git-engine.js`) |
 | `krusch_context_deep_search` | `src/index.js` (composite, all categories) |
 | `krusch_context_health_check` | `src/index.js` (DB connectivity + counts) |
+| `krusch_docs_list` | `src/index.js` (external manual inventory) |
+| `krusch_docs_search` | `src/index.js` (semantic manual search) |
+| `krusch_context_nugget_remember` | `src/nuggets-engine.js` |
+| `krusch_context_nugget_nudges` | `src/nuggets-engine.js` |
+| `krusch_context_nugget_forget` | `src/nuggets-engine.js` |
+| `krusch_context_nugget_list` | `src/nuggets-engine.js` |
 
 ## Fragile / Don't Touch
 
