@@ -86,7 +86,7 @@ graph TD;
 - [Node.js](https://nodejs.org/) 18+
 - [Ollama](https://ollama.com/) running with `bge-large` and `llama3.2` models
 - PostgreSQL with `pgvector` extension
-- The sibling `pg-git` project with a configured `.env`
+- **[PG-Git](https://github.com/kruschdev/pg-git) (Required Sibling Dependency):** You must clone the `pg-git` repository into the same parent directory. Krusch Context MCP directly imports database pooling logic from it and relies on `../pg-git/.env` for its configuration. The server **will fail to start** if `pg-git` is missing.
 
 **1. Install dependencies:**
 ```bash
