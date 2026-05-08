@@ -63,7 +63,7 @@ This used to require running separate MCP servers for memory, codebase search, a
 - **🧠 Fleet-Balanced Embeddings** — Round-robin load balancing across multiple Ollama GPU nodes
 - **📌 Lakebase Architecture** — Inspired by [Neon's decoupled architecture](https://neon.com/docs/introduction/architecture-overview): local SQLite caches for zero-latency reads, async write-behind to durable PostgreSQL storage
 - **🏷️ Auto-Tagging** — Memories are automatically tagged via `llama3.2` for discoverability
-- **♻️ Memory Consolidation** — Semantic dedup using L₂-normalized centroid averaging without re-embedding. *Derived from [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation).*
+- **♻️ Memory Consolidation** — Semantic dedup using L2-normalized centroid averaging without re-embedding. *Derived from [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation).*
 - **💎 Holographic Nuggets** — Lightweight steering facts split between project-local SQLite and global PostgreSQL. *Adapted from [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets).*
 
 ---
@@ -363,7 +363,7 @@ Update an existing memory's content, tags, or project assignment. Content change
 
 #### `krusch_context_consolidate`
 
-Find and merge semantically duplicate memories within a category. Uses L₂-normalized centroid averaging to merge embeddings without re-embedding.
+Find and merge semantically duplicate memories within a category. Uses L2-normalized centroid averaging to merge embeddings without re-embedding.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
