@@ -26,7 +26,7 @@ Project-scoped data follows a two-tier model:
 | Operation | `project`/`active_project` provided | `project`/`active_project` omitted |
 |-----------|--------------------------------------|-------------------------------------|
 | **Write memory** | SQLite + async PG push | Postgres directly |
-| **Search memory** | Merge: SQLite + Postgres (SQLite gets +0.1 bias) | Postgres only |
+| **Search memory** | Merge: SQLite + Postgres (SQLite gets +0.3 bias) | Postgres only |
 | **Write nugget** (`kind: 'project'`) | SQLite + async PG push | Postgres fallback |
 | **Write nugget** (`kind: 'user'`/`'agent'`) | Always Postgres | Always Postgres |
 | **Delete/Update memory** | SQLite (via `source_project`) | Postgres |
@@ -37,6 +37,7 @@ Project-scoped data follows a two-tier model:
 - **pg-git dependency**: All DB pooling and embedding logic is imported from the sibling `pg-git` project via `file:` link in `package.json`. This project has NO `.env` of its own — it inherits `pg-git/.env` configuration.
 - **Ollama models**: Embeddings use `bge-large` (1024 dims). Tag generation uses `llama3.2` for keyword extraction. Both are dispatched through a shared LLM queue at `../../../lib/llm-queue.js`.
 - **Memory categories**: Only 5 valid values: `priorities`, `bugs`, `outcomes`, `lessons`, `activity`. Using any other category name will fail silently or error.
+- **Strict Project Isolation**: For `search_code` and `deep_search`, if the `project` argument is provided, it must EXACTLY match a known repository name. The server will throw an error rather than falling back to a global codebase search.
 - **Nugget kinds**: Only 3 valid values: `project`, `user`, `agent`.
 - **Temporal decay**: Search results are weighted by `similarity × e^(-0.01 × age_in_days)`. A memory's relevance drops ~26% after 30 days of inactivity.
 
