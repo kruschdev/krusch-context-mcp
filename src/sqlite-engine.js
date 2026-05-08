@@ -64,12 +64,12 @@ export async function getProjectDb(projectName) {
     try {
         db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN pg_id INTEGER;`);
     } catch (e) {
-        // Column likely already exists
+        if (!e.message.includes('duplicate column name')) throw e;
     }
     try {
         db.exec(`ALTER TABLE ide_agent_nuggets ADD COLUMN pg_synced BOOLEAN DEFAULT 0;`);
     } catch (e) {
-        // Column likely already exists
+        if (!e.message.includes('duplicate column name')) throw e;
     }
     
     dbCache.set(projectName, db);

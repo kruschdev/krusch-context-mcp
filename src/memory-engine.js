@@ -34,6 +34,16 @@ async function generateTags(text) {
     }
 }
 
+/**
+ * Adds a new episodic memory to the persistent IDE database.
+ * @param {object} params
+ * @param {string} params.category - Category of memory ('priorities', 'bugs', 'outcomes', 'lessons', 'activity')
+ * @param {string} params.content - Text content of the memory
+ * @param {string[]} [params.tags] - Optional user-defined tags
+ * @param {string} [params.project] - Optional project association (saves to local SQLite if provided)
+ * @param {number[]} [params._embedding] - Optional pre-computed embedding to avoid redundant LLM calls
+ * @returns {Promise<{content: Array}>} MCP tool response
+ */
 export async function addMemory({ category, content, tags, project, _embedding }) {
     if (!category || !content) throw new McpError(ErrorCode.InvalidParams, "Missing params");
     
@@ -79,13 +89,7 @@ export async function addMemory({ category, content, tags, project, _embedding }
     return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved GLOBAL memory to category: ${category}` }] };
 }
 
-export async function searchMemory({ category, query, limit = 3, active_project, _embedding }) {
-    if (!category || !query) throw new McpError(ErrorCode.InvalidParams, "Missing params");
-
-    const embeddingArray = _embedding || await getEmbedding(query, PRIORITY.HIGH);
-    if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
-
-    let pgResults = [];
+async function _searchGlobalMemory(category, embeddingArray, limit) {
     const client = await pool.connect();
     try {
         const embeddingStr = `[${embeddingArray.join(',')}]`;
@@ -98,50 +102,58 @@ export async function searchMemory({ category, query, limit = 3, active_project,
                 LIMIT 100
             )
             SELECT 
-                id,
-                project,
-                content, 
-                tags, 
-                created_at,
+                id, project, content, tags, created_at,
                 (1 - distance) * exp(-$4::float * EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at))/86400) as similarity
             FROM semantic_matches
             ORDER BY similarity DESC
             LIMIT $3
         `, [embeddingStr, category, limit, DECAY_RATE]);
-        pgResults = res.rows.map(r => ({ ...r, source: 'global' }));
+        return res.rows.map(r => ({ ...r, source: 'global' }));
     } finally {
         client.release();
     }
+}
 
-    let sqliteResults = [];
-    if (active_project) {
-        const db = await getProjectDb(active_project);
-        if (db) {
-            const rows = db.prepare(`SELECT id, category, content, tags, embedding, created_at FROM ide_agent_memory WHERE category = ?`).all(category);
-            const now = Date.now();
-            sqliteResults = rows.map(r => {
-                let rowEmb = [];
-                try { rowEmb = JSON.parse(r.embedding); } catch(e) {}
-                const sim = cosineSimilarity(embeddingArray, rowEmb);
-                // Boost active project memories by 0.1
-                const date = r.created_at.includes('Z') ? new Date(r.created_at) : new Date(r.created_at + 'Z');
-                const ageDays = (now - date.getTime()) / (1000 * 60 * 60 * 24);
-                const decay = Math.exp(-DECAY_RATE * ageDays);
-                const similarity = (sim + 0.1) * decay;
-                return {
-                    id: r.id,
-                    project: active_project,
-                    content: r.content,
-                    tags: r.tags,
-                    created_at: r.created_at,
-                    similarity,
-                    source: 'project'
-                };
-            }).sort((a, b) => b.similarity - a.similarity).slice(0, limit);
-        }
-    }
+async function _searchProjectMemory(active_project, category, embeddingArray, limit) {
+    if (!active_project) return [];
+    const db = await getProjectDb(active_project);
+    if (!db) return [];
+    
+    const rows = db.prepare(`SELECT id, category, content, tags, embedding, created_at FROM ide_agent_memory WHERE category = ?`).all(category);
+    const now = Date.now();
+    return rows.map(r => {
+        let rowEmb = [];
+        try { rowEmb = JSON.parse(r.embedding); } catch(e) { console.warn(`[krusch-context] Warning: Failed to parse JSON embedding for memory ID ${r.id}`); }
+        const sim = cosineSimilarity(embeddingArray, rowEmb);
+        const date = r.created_at.includes('Z') ? new Date(r.created_at) : new Date(r.created_at + 'Z');
+        const ageDays = (now - date.getTime()) / (1000 * 60 * 60 * 24);
+        const decay = Math.exp(-DECAY_RATE * ageDays);
+        return {
+            id: r.id, project: active_project, content: r.content, tags: r.tags,
+            created_at: r.created_at, similarity: (sim + 0.1) * decay, source: 'project'
+        };
+    }).sort((a, b) => b.similarity - a.similarity).slice(0, limit);
+}
 
-    // Merge and sort
+/**
+ * Searches the persistent IDE database via semantic embeddings.
+ * @param {object} params
+ * @param {string} params.category - Category to search
+ * @param {string} params.query - Semantic search query
+ * @param {number} [params.limit=3] - Max results to return
+ * @param {string} [params.active_project] - Project context for SQLite isolation
+ * @param {number[]} [params._embedding] - Optional pre-computed embedding
+ * @returns {Promise<{content: Array}>} MCP tool response
+ */
+export async function searchMemory({ category, query, limit = 3, active_project, _embedding }) {
+    if (!category || !query) throw new McpError(ErrorCode.InvalidParams, "Missing params");
+
+    const embeddingArray = _embedding || await getEmbedding(query, PRIORITY.HIGH);
+    if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
+
+    const pgResults = await _searchGlobalMemory(category, embeddingArray, limit);
+    const sqliteResults = await _searchProjectMemory(active_project, category, embeddingArray, limit);
+
     const results = [...pgResults, ...sqliteResults]
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, limit);
@@ -154,7 +166,7 @@ export async function searchMemory({ category, query, limit = 3, active_project,
     for (const r of results) {
         let tagsStr = '';
         if (r.tags) {
-            try { tagsStr = ` [Tags: ${JSON.parse(r.tags).join(', ')}]`; } catch(e) {}
+            try { tagsStr = ` [Tags: ${JSON.parse(r.tags).join(', ')}]`; } catch(e) { console.warn(`[krusch-context] Warning: Failed to parse JSON tags for memory ID ${r.id}`); }
         }
         const dateStr = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : 'unknown';
         const projectStr = r.source === 'project' ? ` | Project: ${r.project}` : ' | Global';
@@ -163,6 +175,14 @@ export async function searchMemory({ category, query, limit = 3, active_project,
     return { content: [{ type: "text", text: output }] };
 }
 
+/**
+ * Lists memories without semantic search (chronological order).
+ * @param {object} params
+ * @param {string} params.category - Category to list
+ * @param {string} [params.project] - Optional project filter
+ * @param {number} [params.limit=10] - Max results to return
+ * @returns {Promise<{content: Array}>} MCP tool response
+ */
 export async function listMemories({ category, project, limit = 10 }) {
     if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
 
@@ -192,7 +212,7 @@ export async function listMemories({ category, project, limit = 10 }) {
     for (const r of results) {
         let tagsStr = '';
         if (r.tags) {
-            try { tagsStr = ` [Tags: ${JSON.parse(r.tags).join(', ')}]`; } catch(e) {}
+            try { tagsStr = ` [Tags: ${JSON.parse(r.tags).join(', ')}]`; } catch(e) { console.warn(`[krusch-context] Warning: Failed to parse JSON tags for memory ID ${r.id}`); }
         }
         const dateStr = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : 'unknown';
         const projectStr = r.source === 'project' ? ` | Project: ${r.project}` : ' | Global';
@@ -201,6 +221,13 @@ export async function listMemories({ category, project, limit = 10 }) {
     return { content: [{ type: "text", text: output }] };
 }
 
+/**
+ * Deletes a memory by ID.
+ * @param {object} params
+ * @param {number} params.id - ID of the memory to delete
+ * @param {string} [params.source_project] - Project context for SQLite isolation
+ * @returns {Promise<{content: Array}>} MCP tool response
+ */
 export async function deleteMemory({ id, source_project }) {
     if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
 
@@ -227,6 +254,16 @@ export async function deleteMemory({ id, source_project }) {
     return { content: [{ type: "text", text: `[krusch-context] 🗑️ Deleted Global PG memory ID: ${id}` }] };
 }
 
+/**
+ * Updates an existing memory's content, tags, or project.
+ * @param {object} params
+ * @param {number} params.id - Memory ID to update
+ * @param {string} [params.content] - New content (triggers re-embedding)
+ * @param {string[]} [params.tags] - New tags
+ * @param {string} [params.project] - New project assignment
+ * @param {string} [params.source_project] - Project context for SQLite isolation
+ * @returns {Promise<{content: Array}>} MCP tool response
+ */
 export async function updateMemory({ id, content, tags, project, source_project }) {
     if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
     if (!content && !tags && (project === undefined)) {
@@ -296,73 +333,67 @@ export async function updateMemory({ id, content, tags, project, source_project 
     return { content: [{ type: "text", text: `[krusch-context] ✏️ Updated Global PG memory ID: ${id}` }] };
 }
 
-export async function consolidateMemories({ category, project, threshold = 0.15, dry_run = false }) {
-    if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
+function _calculateCentroidStr(embStrA, embStrB) {
+    const arrA = JSON.parse(embStrA);
+    const arrB = JSON.parse(embStrB);
+    let centroid = arrA.map((val, i) => val + arrB[i]);
+    const norm = Math.sqrt(centroid.reduce((sum, val) => sum + val * val, 0));
+    return `[${centroid.map(val => val / norm).join(',')}]`;
+}
 
-    if (project) {
-        const db = await getProjectDb(project);
-        if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${project} not found.` }] };
-        
-        const rows = db.prepare(`SELECT id, content, tags, embedding, created_at FROM ide_agent_memory WHERE category = ? AND embedding IS NOT NULL`).all(category);
-        const pairs = [];
-        for (let i = 0; i < rows.length; i++) {
-            for (let j = i + 1; j < rows.length; j++) {
-                let embA = [], embB = [];
-                try { embA = JSON.parse(rows[i].embedding); embB = JSON.parse(rows[j].embedding); } catch(e) { continue; }
-                const sim = cosineSimilarity(embA, embB);
-                const distance = 1 - sim;
-                if (distance < threshold) {
-                    pairs.push({
-                        id_a: rows[i].id, content_a: rows[i].content, created_a: rows[i].created_at, emb_a: rows[i].embedding,
-                        id_b: rows[j].id, content_b: rows[j].content, created_b: rows[j].created_at, emb_b: rows[j].embedding,
-                        distance
-                    });
-                }
+async function _consolidateSqlite(category, project, threshold, dry_run) {
+    const db = await getProjectDb(project);
+    if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${project} not found.` }] };
+    
+    const rows = db.prepare(`SELECT id, content, tags, embedding, created_at FROM ide_agent_memory WHERE category = ? AND embedding IS NOT NULL`).all(category);
+    const pairs = [];
+    for (let i = 0; i < rows.length; i++) {
+        for (let j = i + 1; j < rows.length; j++) {
+            let embA = [], embB = [];
+            try { embA = JSON.parse(rows[i].embedding); embB = JSON.parse(rows[j].embedding); } catch(e) { continue; }
+            const distance = 1 - cosineSimilarity(embA, embB);
+            if (distance < threshold) {
+                pairs.push({
+                    id_a: rows[i].id, content_a: rows[i].content, created_a: rows[i].created_at, emb_a: rows[i].embedding,
+                    id_b: rows[j].id, content_b: rows[j].content, created_b: rows[j].created_at, emb_b: rows[j].embedding,
+                    distance
+                });
             }
         }
-        
-        pairs.sort((a, b) => a.distance - b.distance);
-        
-        if (pairs.length === 0) return { content: [{ type: "text", text: `[krusch-context] ✅ No duplicate SQLite memories found in category: ${category} (threshold: ${threshold})` }] };
-        
-        if (dry_run) {
-            let output = `=== 🔍 Consolidation Preview (SQLite): ${category} (${pairs.length} pairs) ===\n`;
-            for (const p of pairs) {
-                output += `\n--- Distance: ${p.distance.toFixed(3)} ---\n`;
-                output += `  ID ${p.id_a}: ${p.content_a.substring(0, 100)}...\n`;
-                output += `  ID ${p.id_b}: ${p.content_b.substring(0, 100)}...\n`;
-            }
-            return { content: [{ type: "text", text: output }] };
-        }
-        
-        const merged = new Set();
-        let mergeCount = 0;
-        for (const p of pairs) {
-            if (merged.has(p.id_a) || merged.has(p.id_b)) continue;
-            
-            const keepId = p.created_a > p.created_b ? p.id_a : p.id_b;
-            const dropId = keepId === p.id_a ? p.id_b : p.id_a;
-            const keepContent = keepId === p.id_a ? p.content_a : p.content_b;
-            const dropContent = keepId === p.id_a ? p.content_b : p.content_a;
-
-            const mergedContent = `${keepContent}\n\n[Consolidated from ID ${dropId}]: ${dropContent}`;
-
-            const arrA = JSON.parse(p.emb_a);
-            const arrB = JSON.parse(p.emb_b);
-            let centroid = arrA.map((val, i) => val + arrB[i]);
-            const norm = Math.sqrt(centroid.reduce((sum, val) => sum + val * val, 0));
-            centroid = centroid.map(val => val / norm);
-            
-            const embeddingStr = `[${centroid.join(',')}]`;
-            
-            db.prepare(`UPDATE ide_agent_memory SET content = ?, embedding = ? WHERE id = ?`).run(mergedContent, embeddingStr, keepId);
-            db.prepare(`DELETE FROM ide_agent_memory WHERE id = ?`).run(dropId);
-            merged.add(dropId);
-            mergeCount++;
-        }
-        return { content: [{ type: "text", text: `[krusch-context] 🔗 Consolidated ${mergeCount} duplicate pairs in SQLite category: ${category}` }] };
     }
+    
+    pairs.sort((a, b) => a.distance - b.distance);
+    if (pairs.length === 0) return { content: [{ type: "text", text: `[krusch-context] ✅ No duplicate SQLite memories found in category: ${category} (threshold: ${threshold})` }] };
+    
+    if (dry_run) {
+        let output = `=== 🔍 Consolidation Preview (SQLite): ${category} (${pairs.length} pairs) ===\n`;
+        for (const p of pairs) {
+            output += `\n--- Distance: ${p.distance.toFixed(3)} ---\n  ID ${p.id_a}: ${p.content_a.substring(0, 100)}...\n  ID ${p.id_b}: ${p.content_b.substring(0, 100)}...\n`;
+        }
+        return { content: [{ type: "text", text: output }] };
+    }
+    
+    const merged = new Set();
+    let mergeCount = 0;
+    for (const p of pairs) {
+        if (merged.has(p.id_a) || merged.has(p.id_b)) continue;
+        const keepId = p.created_a > p.created_b ? p.id_a : p.id_b;
+        const dropId = keepId === p.id_a ? p.id_b : p.id_a;
+        const keepContent = keepId === p.id_a ? p.content_a : p.content_b;
+        const dropContent = keepId === p.id_a ? p.content_b : p.content_a;
 
+        const mergedContent = `${keepContent}\n\n[Consolidated from ID ${dropId}]: ${dropContent}`;
+        const embeddingStr = _calculateCentroidStr(p.emb_a, p.emb_b);
+        
+        db.prepare(`UPDATE ide_agent_memory SET content = ?, embedding = ? WHERE id = ?`).run(mergedContent, embeddingStr, keepId);
+        db.prepare(`DELETE FROM ide_agent_memory WHERE id = ?`).run(dropId);
+        merged.add(dropId);
+        mergeCount++;
+    }
+    return { content: [{ type: "text", text: `[krusch-context] 🔗 Consolidated ${mergeCount} duplicate pairs in SQLite category: ${category}` }] };
+}
+
+async function _consolidatePostgres(category, threshold, dry_run) {
     const client = await pool.connect();
     try {
         const sql = `
@@ -384,16 +415,12 @@ export async function consolidateMemories({ category, project, threshold = 0.15,
         const res = await client.query(sql, [category, threshold]);
         const pairs = res.rows;
 
-        if (pairs.length === 0) {
-            return { content: [{ type: "text", text: `[krusch-context] ✅ No duplicate Global PG memories found in category: ${category} (threshold: ${threshold})` }] };
-        }
+        if (pairs.length === 0) return { content: [{ type: "text", text: `[krusch-context] ✅ No duplicate Global PG memories found in category: ${category} (threshold: ${threshold})` }] };
 
         if (dry_run) {
             let output = `=== 🔍 Consolidation Preview (Global PG): ${category} (${pairs.length} pairs) ===\n`;
             for (const p of pairs) {
-                output += `\n--- Distance: ${Number(p.distance).toFixed(3)} ---\n`;
-                output += `  ID ${p.id_a} (${new Date(p.created_a).toISOString().split('T')[0]}): ${p.content_a.substring(0, 100)}...\n`;
-                output += `  ID ${p.id_b} (${new Date(p.created_b).toISOString().split('T')[0]}): ${p.content_b.substring(0, 100)}...\n`;
+                output += `\n--- Distance: ${Number(p.distance).toFixed(3)} ---\n  ID ${p.id_a} (${new Date(p.created_a).toISOString().split('T')[0]}): ${p.content_a.substring(0, 100)}...\n  ID ${p.id_b} (${new Date(p.created_b).toISOString().split('T')[0]}): ${p.content_b.substring(0, 100)}...\n`;
             }
             return { content: [{ type: "text", text: output }] };
         }
@@ -402,25 +429,15 @@ export async function consolidateMemories({ category, project, threshold = 0.15,
         let mergeCount = 0;
         for (const p of pairs) {
             if (merged.has(p.id_a) || merged.has(p.id_b)) continue;
-
             const keepId = p.created_a > p.created_b ? p.id_a : p.id_b;
             const dropId = keepId === p.id_a ? p.id_b : p.id_a;
             const keepContent = keepId === p.id_a ? p.content_a : p.content_b;
             const dropContent = keepId === p.id_a ? p.content_b : p.content_a;
 
             const mergedContent = `${keepContent}\n\n[Consolidated from ID ${dropId}]: ${dropContent}`;
-
-            const arrA = JSON.parse(p.emb_a);
-            const arrB = JSON.parse(p.emb_b);
-            let centroid = arrA.map((val, i) => val + arrB[i]);
-            const norm = Math.sqrt(centroid.reduce((sum, val) => sum + val * val, 0));
-            centroid = centroid.map(val => val / norm);
+            const embeddingStr = _calculateCentroidStr(p.emb_a, p.emb_b);
             
-            const embeddingStr = `[${centroid.join(',')}]`;
-            await client.query(
-                `UPDATE ide_agent_memory SET content = $1, embedding = $2::vector WHERE id = $3`,
-                [mergedContent, embeddingStr, keepId]
-            );
+            await client.query(`UPDATE ide_agent_memory SET content = $1, embedding = $2::vector WHERE id = $3`, [mergedContent, embeddingStr, keepId]);
             await client.query(`DELETE FROM ide_agent_memory WHERE id = $1`, [dropId]);
             merged.add(dropId);
             mergeCount++;
@@ -429,4 +446,21 @@ export async function consolidateMemories({ category, project, threshold = 0.15,
     } finally {
         client.release();
     }
+}
+
+/**
+ * Finds and merges semantically duplicate memories within a category.
+ * @param {object} params
+ * @param {string} params.category - Category to consolidate
+ * @param {string} [params.project] - Optional project filter for SQLite consolidation
+ * @param {number} [params.threshold=0.15] - Cosine distance threshold for duplicates
+ * @param {boolean} [params.dry_run=false] - Preview matches without merging
+ * @returns {Promise<{content: Array}>} MCP tool response
+ */
+export async function consolidateMemories({ category, project, threshold = 0.15, dry_run = false }) {
+    if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
+    if (project) {
+        return await _consolidateSqlite(category, project, threshold, dry_run);
+    }
+    return await _consolidatePostgres(category, threshold, dry_run);
 }

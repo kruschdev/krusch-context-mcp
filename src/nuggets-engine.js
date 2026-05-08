@@ -138,7 +138,7 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project }) 
                         source: `sqlite:${active_project}`
                     });
                 } catch (e) {
-                    // Ignore bad embeddings
+                    console.warn(`[krusch-context] Warning: Failed to parse JSON embedding for nugget key '${row.key}'`);
                 }
             }
         }
