@@ -42,32 +42,35 @@ Because the intelligence stack and retrieval pipeline run locally on your metal,
 - **💾 Shared Connection Pool:** A single `pg.Pool` connected to `kruschdb`, eliminating duplicate database connections.
 - **🧠 Shared Embeddings:** Shared Ollama embedding logic with fleet-wide round-robin load balancing across multiple GPU nodes.
 - **🔍 Zero-Trust Context:** The `krusch_context_deep_search` tool queries both codebase (objective) and memory (subjective) in one call, giving agents a holistic reality check.
-- **📌 Soft Project Separation:** Memories are tagged by `project`, with dynamic relevance boosting for the agent's active project — preventing cross-project hallucinations.
+- **📌 Zero-Trust Project Separation:** Project-specific episodic memories are physically isolated in local SQLite databases (`<project>/.agent/memory.db`), while global homelab learnings are stored in the central PostgreSQL database. This hybrid approach guarantees project context never leaks.
 - **🏷️ Auto-Tagging:** Memories are automatically tagged with keywords via `llama3.2`, making them discoverable without manual effort.
 - **♻️ Memory Consolidation:** Semantic deduplication detects and merges overlapping memories to prevent context bloat.
+- **💎 Holographic Nuggets Memory:** A unified, lightweight Key-Value store integrated directly into PostgreSQL to hold steering facts, user preferences, and project guidelines. *Credits to [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets) for the original Holographic Nuggets MCP architecture.*
 
 ---
 
-## 🧠 Architecture: Zero-Trust Context Engine
+## 🧠 Architecture: Hybrid Zero-Trust Context Engine
 
-The server acts as a unified facade over two distinct PostgreSQL schemas in `kruschdb`:
+The server acts as a unified facade over local SQLite databases and PostgreSQL schemas in `kruschdb`:
 
 ```mermaid
 graph TD;
     A[Agent Tool Call] --> B{Krusch Context MCP};
     B -- Semantic Code Search --> C[(PG-Git: blobs)];
-    B -- Episodic Memory --> D[(Memory: ide_agent_memory)];
+    B -- Project Episodic Memory --> D[(SQLite: .agent/memory.db)];
+    B -- Global Episodic Memory --> E[(Postgres: ide_agent_memory)];
     B -- Deep Search --> C;
     B -- Deep Search --> D;
-    E[Ollama Fleet] -. embeddings .-> B;
+    B -- Deep Search --> E;
+    F[Ollama Fleet] -. embeddings .-> B;
 ```
 
 | Component | Details |
 |-----------|---------|
-| **Database** | PostgreSQL + pgvector (`kruschdb` on `kruschserv:5434`) |
+| **Database** | Hybrid: Local SQLite (Project Memories) + PostgreSQL (Global & Codebase) |
 | **Embeddings** | Ollama `qwen2.5-coder:1.5b` @ 1536 dims, fleet load-balanced |
 | **Tagging** | Ollama `llama3.2` for automatic keyword extraction |
-| **Tables** | `blobs` (6,500+ indexed codebase files), `ide_agent_memory` (episodic) |
+| **Tables** | `blobs` (Codebase), `ide_agent_memory` (Episodic), `ide_agent_nuggets` (Steering facts) |
 | **Protocol** | MCP Stdio transport |
 | **Temporal Decay** | Exponential decay rate of 0.01 — a memory's relevance drops ~26% after 30 days of inactivity |
 
@@ -104,7 +107,7 @@ npm start
 }
 ```
 
-**4. Restart your IDE.** That's it — your agent now has access to all 14 tools.
+**4. Restart your IDE.** That's it — your agent now has access to all 18 tools.
 
 ---
 
@@ -141,25 +144,29 @@ Krusch Context MCP is designed for **infinite session continuity** — your agen
 ### 1. `/open` — Start the Day
 At the beginning of a work session, type `/open`. The agent will:
 1. **Load Priorities:** Call `krusch_context_search_memory` with `category: 'priorities'` to align on today's goals.
-2. **Check Health:** Call `krusch_context_health_check` to verify database connectivity and memory/repo counts.
-3. **Scan for Drift:** Call `krusch_context_deep_search` to cross-reference its understanding of the codebase against the latest indexed state.
+2. **Load Outcomes:** Call `krusch_context_search_memory` with `category: 'outcomes'` to review what happened yesterday.
+3. **Retrieve Nudges:** Call `krusch_context_nugget_nudges` to load lightweight project hints and preferences.
+4. **Scan for Drift:** Call `krusch_context_search_code` to verify its understanding of the codebase hasn't drifted.
 
 ### 2. `/close` — Pause Work
 When stepping away, tell your agent `/close`. It will:
-1. **Save Local State:** Write active files, fragile components, and next steps to `INFLIGHT.md`.
-2. **Commit to Long-Term Memory:** Call `krusch_context_add_memory` to embed the session's decisions, outcomes, and bug fixes into the vector database.
+1. **Self-Sync:** Take a semantic snapshot of the project codebase into `kruschdb.blobs`.
+2. **Save Local State:** Write active files, fragile components, and next steps to `INFLIGHT.md`.
+3. **Commit to Long-Term Memory:** Call `krusch_context_add_memory` to embed the session's decisions and outcomes into the vector database.
+4. **Save Steering Facts:** Call `krusch_context_nugget_remember` to persist lightweight behavioral patterns for future sessions.
 
 ### 3. `/continue` — Resume Work
 When returning to an existing task, type `/continue`. The agent will:
 1. **Read Local State:** Load `INFLIGHT.md` for the active task list.
 2. **Retrieve Semantic Context:** Call `krusch_context_search_memory` to dynamically load relevant historical context.
-3. **Verify Codebase State:** Call `krusch_context_search_code` to confirm its understanding of the current implementation matches reality.
+3. **Retrieve Nudges:** Call `krusch_context_nugget_nudges` to load lightweight project hints.
+4. **Verify Codebase State:** Call `krusch_context_search_code` to confirm its understanding of the current implementation matches reality.
 
 ### 4. `/sweetdreams` — Nightly Consolidation
 While you sleep, `/sweetdreams` runs a fleet-wide maintenance pass:
 1. **Batch Sync:** Re-indexes all project codebases into the `blobs` table via `sync_all_projects.js`.
-2. **Memory Consolidation:** Calls `krusch_context_consolidate` across all categories to merge duplicate memories and prevent vector DB bloat.
-3. **Freshness Sweep:** Identifies stale memories that haven't been referenced in 90+ days.
+2. **Memory Optimization:** Runs `optimize_ide_agent_memory.js` to ensure B-Tree and HNSW indexes are in place for fast retrieval.
+3. **Swarm Dispatch:** Queues overnight analysis tasks for the Chrysalis execution swarm (fleet health sweep, memory synthesis).
 
 **The Result:** The agent dynamically pulls the exact context it needs, giving it infinite continuity across sessions without hallucinating stale state.
 
@@ -184,6 +191,90 @@ While you sleep, `/sweetdreams` runs a fleet-wide maintenance pass:
 
 This keeps the context engine lean and accurate without manual intervention.
 
+### Workflow Example: `/close`
+
+Here is a real example of a project-level `.agent/workflows/close.md` that leverages both the deep episodic memory and the lightweight holographic nuggets:
+
+```markdown
+# /close
+
+1. **Self-Sync**: Take a semantic snapshot of this project.
+   \`\`\`bash
+   node /home/kruschdev/homelab/projects/pg-git/scripts/sync_to_pg.js .
+   \`\`\`
+
+2. **Update INFLIGHT.md**:
+   - Overwrite \`INFLIGHT.md\` in this project root.
+   - Document any **Fragile** files and transient state.
+
+3. **Log Activity**:
+   - Execute \`krusch_context_add_memory\` with \`category: 'activity'\`, \`project: 'my-project'\` and content summarizing this session's work.
+
+4. **Save Steering Facts**:
+   - Store any new patterns via \`krusch_context_nugget_remember\` with \`kind: 'project'\`, key prefixed \`my-project:\`.
+
+5. **Summarize**:
+   > "State saved. See you next session."
+```
+
+### Workflow Example: `/open`
+
+This global workflow sets the tone for the entire day, grabbing cross-project context:
+
+```markdown
+# /open
+
+1. **Context Load & Alignment**: Immediately run parallel tool calls to construct the context for the day:
+   - **Priorities**: Query \`krusch_context_search_memory(category: 'priorities')\` to load current global goals.
+   - **Outcomes**: Query \`krusch_context_search_memory(category: 'outcomes')\` to review what happened yesterday.
+   - **Nuggets**: Query \`krusch_context_nugget_nudges\` to grab any lightweight project hints or preferences.
+   - **Zero-Trust Codebase**: Execute \`krusch_context_search_code\` to query codebase state natively.
+
+2. **Summarize**: 
+   - State what is currently mid-flight and ask for confirmation to resume the active \`INFLIGHT.md\` task.
+```
+
+### Workflow Example: `/continue`
+
+A project-scoped workflow to resume work exactly where you left off:
+
+```markdown
+# /continue
+
+1. **Context Load** (parallel):
+   - Read \`INFLIGHT.md\` from this project root.
+   - Query \`krusch_context_search_memory\` with \`category: 'activity'\` for the active project.
+   - Query \`krusch_context_nugget_nudges\` with \`kinds: ['project', 'user']\`.
+   - Execute \`krusch_context_search_code\` to verify codebase state hasn't drifted.
+
+2. **Task Generation**: Generate or update the \`task.md\` artifact from the inflight next steps.
+
+3. **Execution**: Autonomously execute the next logical step.
+```
+
+### Workflow Example: `/sweetdreams`
+
+The nightly consolidation script that keeps the Context MCP fresh and hallucination-free:
+
+```markdown
+# /sweetdreams
+
+1. **Full Fleet Semantic Sync**: Sync all active projects into pg-git's kruschdb.blobs.
+   \`\`\`bash
+   node /home/kruschdev/homelab/projects/pg-git/scripts/sync_all_projects.js
+   \`\`\`
+
+2. **Memory Optimization**: Ensure B-Tree and HNSW indexes are current.
+   \`\`\`bash
+   nohup node /home/kruschdev/homelab/scripts/optimize_ide_agent_memory.js > memory_optimizer.log &
+   \`\`\`
+
+3. **Swarm Dispatch**: Queue overnight fleet analysis and memory synthesis.
+   \`\`\`bash
+   node /home/kruschdev/homelab/scripts/dispatch_mcp_jobs.js
+   \`\`\`
+```
+
 ---
 
 | Tool | Description |
@@ -199,6 +290,10 @@ This keeps the context engine lean and accurate without manual intervention.
 | `krusch_context_read_tree` | Browse the file tree of an indexed repository |
 | `krusch_context_read_blob` | Read full content of a specific file by blob ID |
 | `krusch_context_deep_search` | Composite zero-trust search across both memory and codebase |
+| `krusch_context_nugget_remember` | Store a short, durable Nuggets memory fact |
+| `krusch_context_nugget_nudges` | Return short, relevant Nuggets facts to gently steer the agent |
+| `krusch_context_nugget_forget` | Delete a specific nugget by key |
+| `krusch_context_nugget_list` | List all saved nuggets chronologically |
 | `krusch_docs_list` | List all available external manuals and documentation |
 | `krusch_docs_search` | Semantically search a specific external manual |
 | `krusch_context_health_check` | Verify server connectivity, database status, and memory/repo counts |
@@ -209,7 +304,8 @@ This keeps the context engine lean and accurate without manual intervention.
 
 Krusch Context MCP unifies two complementary halves of the **Agentic Brain**:
 
-- **Episodic Memory (The "Why")**: The `ide_agent_memory` table stores *intent* — architectural decisions, user preferences, bugs encountered, and project goals. Powered by exponential temporal decay so the agent always prefers fresh context.
+- **Episodic Memory (The "Why")**: The `ide_agent_memory` system stores *intent* — architectural decisions, bugs encountered, and project goals. Project-specific memories are isolated in local SQLite (`memory.db`), while global patterns are centralized in Postgres. Powered by exponential temporal decay so the agent always prefers fresh context.
+- **Holographic Nuggets (The "How to Behave")**: The `ide_agent_nuggets` table stores lightweight steering facts — user preferences, project conventions, and behavioral corrections. These are retrieved via semantic similarity for fast, targeted nudges without the overhead of full episodic retrieval.
 - **Codebase Memory (The "What" & "How")**: The `blobs` table stores *implementation* — semantically embedded source files across your entire codebase. The index scales horizontally: batch ingestion scripts (`sync_to_pg.js`, `sync_all_projects.js`) distribute embedding generation across multiple GPU nodes via fleet-aware Ollama load balancing, allowing you to index thousands of files without bottlenecking a single machine.
 
 By querying both simultaneously via `krusch_context_deep_search`, the agent can cross-reference *why* you chose a specific architecture with *how* it's currently implemented.
@@ -255,7 +351,7 @@ Krusch Context MCP inherits its configuration from the sibling `pg-git/.env` fil
 node test_client.js
 ```
 
-This script connects to the live `kruschdb` instance and verifies registration and execution of all 11 tools.
+This script connects to the live `kruschdb` instance and verifies registration and execution of all 18 tools.
 
 ---
 
@@ -267,6 +363,8 @@ This script connects to the live `kruschdb` instance and verifies registration a
 | [Krusch Memory MCP](https://github.com/kruschdev/krusch-memory-mcp) | Legacy standalone episodic memory (superseded by this project) |
 | [Krusch Sequential MCP](https://github.com/kruschdev/krusch-sequential-mcp) | Sequential thinking with PG persistence |
 | [Krusch Cascade Router](https://github.com/kruschdev/krusch-cascade-router) | Automated LLM inference routing and gateway |
+| [NeoVertex Nuggets](https://github.com/NeoVertex1/nuggets) | Original Holographic Nuggets MCP architecture adapted for this project |
+| [Context Labs HALO](https://github.com/context-labs/halo) | RLM-based tracing engine used to synthesize nudges from agent execution logs |
 
 ---
 

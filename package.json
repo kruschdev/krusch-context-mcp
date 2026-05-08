@@ -13,6 +13,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "pg-git": "file:../pg-git"
+    "pg-git": "file:../pg-git",
+    "@krusch/toolkit": "file:../../lib"
   }
 }

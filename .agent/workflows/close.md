@@ -20,7 +20,7 @@ description: Pause krusch-context-mcp and save state
    - Execute `krusch_context_add_memory` with `category: 'activity'`, `project: 'krusch-context-mcp'` and content summarizing this session's work.
 
 4. **Save Steering Facts**:
-   - Store any new patterns via `mcp_nuggets-memory_remember` with `kind: 'project'`, key prefixed `krusch-context-mcp:`.
+   - Store any new patterns via `krusch_context_nugget_remember` with `kind: 'project'`, key prefixed `krusch-context-mcp:`.
 
 5. **Summarize**:
    > "krusch-context-mcp state saved. See you next session."

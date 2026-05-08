@@ -14,6 +14,7 @@ import path from 'path';
 
 // Import logic from our required MCP packages
 import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, consolidateMemories } from './memory-engine.js';
+import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
 import { getEmbedding } from 'pg-git/lib/embedding.js';
 import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git/server/git-engine.js';
 import { pool } from 'pg-git/db/pool.js';
@@ -32,6 +33,20 @@ async function verifyDatabase() {
         } catch (e) {
             if (e.code !== '42701') throw e;
         }
+
+        // Add ide_agent_nuggets table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS ide_agent_nuggets (
+                id SERIAL PRIMARY KEY,
+                key VARCHAR(255) UNIQUE NOT NULL,
+                value TEXT NOT NULL,
+                kind VARCHAR(50) DEFAULT 'project',
+                embedding vector(1536),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
         console.error('[krusch-context-mcp] Database connection verified via pg-git pool. Migrations completed.');
     } catch (err) {
         console.error('[krusch-context-mcp] FATAL: Cannot reach PostgreSQL:', err.message);
@@ -117,7 +132,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            id: { type: "number", description: "The numeric ID of the memory to delete" }
+            id: { type: "number", description: "The numeric ID of the memory to delete" },
+            source_project: { type: "string", description: "The project name if this is a project-specific SQLite memory. Leave empty for Global PG memories." }
           },
           required: ["id"]
         }
@@ -129,6 +145,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             id: { type: "number", description: "The numeric ID of the memory to update" },
+            source_project: { type: "string", description: "The project name if this is a project-specific SQLite memory. Leave empty for Global PG memories." },
             content: { type: "string", description: "New content (triggers re-embedding)" },
             tags: { type: "array", items: { type: "string" } },
             project: { type: "string", description: "New project assignment" }
@@ -208,6 +225,57 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             limit: { type: "number", default: 5 }
           },
           required: ["manual_name", "query"]
+        }
+      },
+      {
+        name: "krusch_context_nugget_remember",
+        description: "Store a short, durable Nuggets memory fact. Best for lightweight nudges like preferences or corrections.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            key: { type: "string" },
+            value: { type: "string" },
+            kind: { type: "string", enum: ['project', 'user', 'agent'] },
+            active_project: { type: "string", description: "The active project context. Required for 'project' kind nuggets." }
+          },
+          required: ["key", "value"]
+        }
+      },
+      {
+        name: "krusch_context_nugget_nudges",
+        description: "Return short, relevant Nuggets facts to gently steer the agent.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            kinds: { type: "array", items: { type: "string", enum: ['project', 'user', 'agent'] } },
+            limit: { type: "number", default: 3 },
+            active_project: { type: "string", description: "The active project context. Required to retrieve 'project' kind nuggets." }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "krusch_context_nugget_forget",
+        description: "Delete a specific nugget by key.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            key: { type: "string" },
+            active_project: { type: "string", description: "The active project context. Required to delete 'project' kind nuggets." }
+          },
+          required: ["key"]
+        }
+      },
+      {
+        name: "krusch_context_nugget_list",
+        description: "List all saved nuggets chronologically.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            kinds: { type: "array", items: { type: "string", enum: ['project', 'user', 'agent'] } },
+            active_project: { type: "string", description: "The active project context. Required to list 'project' kind nuggets." }
+          }
         }
       }
     ]
@@ -347,9 +415,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     } else if (request.params.name === "krusch_context_health_check") {
       const dbCheck = await pool.query('SELECT COUNT(*) as count FROM ide_agent_memory');
       const repoCheck = await pool.query('SELECT COUNT(*) as count FROM repositories');
+      const nuggetCheck = await pool.query('SELECT COUNT(*) as count FROM ide_agent_nuggets');
       const memoryCount = dbCheck.rows[0].count;
       const repoCount = repoCheck.rows[0].count;
-      return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories: ${memoryCount}\n- Indexed repositories: ${repoCount}\n- Database: kruschdb (pgvector)\n- Version: 1.0.0` }] };
+      const nuggetCount = nuggetCheck.rows[0].count;
+      return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories: ${memoryCount}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Database: kruschdb (pgvector)\n- Version: 1.0.0` }] };
 
     } else if (request.params.name === "krusch_docs_list") {
       try {
@@ -390,6 +460,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           output += (r.summary || '(no preview)') + '\n';
       }
       return { content: [{ type: "text", text: output }] };
+
+    } else if (request.params.name === "krusch_context_nugget_remember") {
+      return await nuggetRemember(args);
+
+    } else if (request.params.name === "krusch_context_nugget_nudges") {
+      return await nuggetNudges(args);
+
+    } else if (request.params.name === "krusch_context_nugget_forget") {
+      return await nuggetForget(args);
+
+    } else if (request.params.name === "krusch_context_nugget_list") {
+      return await nuggetList(args);
 
     } else {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
