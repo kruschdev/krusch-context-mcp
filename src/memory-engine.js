@@ -2,7 +2,7 @@ import { pool } from 'pg-git/db/pool.js';
 import { getEmbedding } from 'pg-git/lib/embedding.js';
 import { config } from 'pg-git/config.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { ollamaQueue, PRIORITY } from '../../../lib/llm-queue.js';
+import { ollamaQueue, PRIORITY } from './llm-queue.js';
 import { getProjectDb, cosineSimilarity } from './sqlite-engine.js';
 
 const DECAY_RATE = 0.01;

@@ -86,17 +86,14 @@ graph TD;
 - [Node.js](https://nodejs.org/) 22+
 - [Ollama](https://ollama.com/) running with `bge-large` and `llama3.2` models pulled
 - PostgreSQL with the [`pgvector`](https://github.com/pgvector/pgvector) extension enabled
-- **[PG-Git](https://github.com/kruschdev/pg-git) (Required Sibling Dependency):** You must clone the `pg-git` repository into the same parent directory **and** configure its `.env` file (see [PG-Git README](https://github.com/kruschdev/pg-git#readme) for setup). Krusch Context MCP directly imports database pooling and embedding logic from it via a `file:` link in `package.json`. The server **will fail to start** if `pg-git` is missing or its `.env` is unconfigured.
-- **[@krusch/toolkit](https://github.com/kruschdev/homelab/tree/main/lib) (Required Sibling Dependency):** The shared utility library must be available at `../../lib` relative to this project. It provides SQLite bindings (`better-sqlite3`) and the fleet-aware Ollama queue (`llm-queue.js`) used for GPU load balancing.
+- **PG-Git (Required Sibling Dependency):** Krusch Context MCP directly imports database pooling and embedding logic from the [`pg-git`](https://github.com/kruschdev/krusch-context-mcp#-the-agentic-brain-synergy-with-pg-git) project via a `file:` link in `package.json`. You must clone `pg-git` into the same parent directory **and** configure its `.env` file. The server **will fail to start** if `pg-git` is missing or its `.env` is unconfigured.
 
 **Expected directory layout:**
 ```
-projects/           # or any shared parent directory
-├── pg-git/         # Required — DB pool, embeddings, config (.env lives here)
-├── krusch-context-mcp/   # This project
-└── ...             # Other project directories (get their own .agent/memory.db)
-
-lib/                # @krusch/toolkit — two levels up from this project
+projects/                     # or any shared parent directory
+├── pg-git/                   # Required — DB pool, embeddings, config (.env lives here)
+├── krusch-context-mcp/       # This project
+└── ...                       # Other project directories (get their own .agent/memory.db)
 ```
 
 **1. Install dependencies:**
@@ -370,7 +367,8 @@ krusch-context-mcp/
 │   ├── index.js            # MCP server entry point — tool registration & routing
 │   ├── memory-engine.js    # Episodic memory CRUD (add, search, list, delete, update, consolidate)
 │   ├── nuggets-engine.js   # Holographic Nuggets CRUD (remember, nudges, forget, list)
-│   └── sqlite-engine.js    # Lakebase SQLite layer (project DB init, pull/push sync)
+│   ├── sqlite-engine.js    # Lakebase SQLite layer (project DB init, pull/push sync)
+│   └── llm-queue.js        # Priority queue for Ollama fleet GPU load balancing
 ├── scripts/
 │   ├── benchmark_latency.js      # Measure embedding + search latency across the fleet
 │   ├── clear_sqlite_embeddings.js # Reset local SQLite embedding columns
@@ -382,7 +380,7 @@ krusch-context-mcp/
 ├── test_lakebase.js        # Lakebase pull/push sync verification
 ├── test_sqlite_memory.js   # SQLite memory engine unit tests
 ├── spec.md                 # Original project specification
-└── package.json            # ESM, file: links to pg-git and @krusch/toolkit
+└── package.json            # ESM, file: link to pg-git
 ```
 
 ---
@@ -424,7 +422,7 @@ node scripts/spectral_calibration.js
 
 | Project | Role |
 |---------|------|
-| [PG-Git](https://github.com/kruschdev/pg-git) | Semantic codebase search engine (sibling dependency) |
+| PG-Git | Semantic codebase search engine (sibling dependency, same monorepo) |
 | [Krusch Memory MCP](https://github.com/kruschdev/krusch-memory-mcp) | Legacy standalone episodic memory (superseded by this project) |
 | [Krusch Sequential MCP](https://github.com/kruschdev/krusch-sequential-mcp) | Sequential thinking with PG persistence |
 | [Krusch Cascade Router](https://github.com/kruschdev/krusch-cascade-router) | Automated LLM inference routing and gateway |

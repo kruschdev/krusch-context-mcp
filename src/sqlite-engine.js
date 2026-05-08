@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { SQLiteDatabase } from '@krusch/toolkit/db';
+import Database from 'better-sqlite3';
 import { pool } from 'pg-git/db/pool.js';
 
 import { fileURLToPath } from 'url';
@@ -37,7 +37,7 @@ export async function getProjectDb(projectName) {
     }
     
     const dbPath = path.join(agentDir, 'memory.db');
-    const db = new SQLiteDatabase(dbPath);
+    const db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
     
     // Ensure schema

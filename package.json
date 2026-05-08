@@ -17,8 +17,8 @@
   "author": "kruschdev",
   "license": "MIT",
   "dependencies": {
-    "@krusch/toolkit": "file:../../lib",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^11.0.0",
     "ml-pca": "^4.1.1",
     "pg-git": "file:../pg-git"
   }
