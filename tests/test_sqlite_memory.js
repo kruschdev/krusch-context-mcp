@@ -1,4 +1,4 @@
-import { addMemory, searchMemory, listMemories } from './src/memory-engine.js';
+import { addMemory, searchMemory, listMemories } from '../src/memory-engine.js';
 
 (async () => {
     try {

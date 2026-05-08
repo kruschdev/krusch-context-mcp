@@ -1,5 +1,5 @@
-import { getProjectDb, pushProjectMemory } from './src/sqlite-engine.js';
-import { addMemory } from './src/memory-engine.js';
+import { getProjectDb, pushProjectMemory } from '../src/sqlite-engine.js';
+import { addMemory } from '../src/memory-engine.js';
 import { pool } from 'pg-git/db/pool.js';
 
 async function runTest() {

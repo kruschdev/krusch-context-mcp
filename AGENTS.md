@@ -89,9 +89,10 @@ krusch-context-mcp/
 │   ├── eval_accuracy.js      # Retrieval precision/recall evaluation
 │   └── spectral_calibration.js     # Embedding space quality analysis
 ├── tests/                    # Test suite (node --test)
-├── test_client.js            # Smoke test for all 18 tools
-├── test_lakebase.js          # Lakebase pull/push sync verification
-├── test_sqlite_memory.js     # SQLite memory engine unit tests
+│   ├── memory-engine.test.js # Integration tests (pg-git + consolidation)
+│   ├── test_client.js        # Smoke test for all 18 tools via JSON-RPC
+│   ├── test_lakebase.js      # Lakebase pull/push sync verification
+│   └── test_sqlite_memory.js # SQLite memory engine unit tests
 ├── docs/assets/              # Banner and documentation images
 ├── spec.md                   # Original project specification
 ├── INFLIGHT.md               # Session state persistence
@@ -102,7 +103,7 @@ krusch-context-mcp/
 
 - `ide_agent_memory` column migrations in `verifyDatabase()` — these are idempotent guards; removing them breaks fresh installs
 - The `_embedding` internal parameter on `searchMemory`/`addMemory` — used for dedup optimization in `krusch_context_deep_search` (generates one embedding, shares across 6 queries)
-- `src/memory-engine.js:4` — LLM queue import uses fragile relative path `../../../lib/llm-queue.js` (root monorepo). If this file or the project folder is moved, the import breaks.
+- `pg-git/lib/embedding.js:8` — LLM queue import uses fragile relative path `../../../lib/llm-queue.js` (root monorepo). Re-exported as `ollamaQueue` and `PRIORITY` for downstream consumers.
 - `src/sqlite-engine.js:25` — `projectsRoot` is resolved relative to `__dirname`. Moving the project folder changes which sibling directories are discoverable for project SQLite DBs.
 
 ## Dependencies
@@ -126,10 +127,10 @@ npm start
 npm test
 
 # Smoke test all 18 tools against live kruschdb
-node test_client.js
+node tests/test_client.js
 
 # Verify Lakebase sync
-node test_lakebase.js
+node tests/test_lakebase.js
 
 # Benchmark embedding + search latency
 node scripts/benchmark_latency.js

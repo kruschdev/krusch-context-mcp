@@ -9,7 +9,7 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
-const SERVER = new URL('./src/index.js', import.meta.url).pathname;
+const SERVER = new URL('../src/index.js', import.meta.url).pathname;
 let nextId = 1;
 const pending = new Map();
 

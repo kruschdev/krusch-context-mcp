@@ -1007,10 +1007,11 @@ krusch-context-mcp/
 │   ├── eval_accuracy.js           # Evaluate retrieval accuracy (precision/recall)
 │   └── spectral_calibration.js    # Spectral analysis of embedding space quality
 ├── tests/                  # Test suite
+│   ├── memory-engine.test.js     # Integration tests (pg-git + consolidation)
+│   ├── test_client.js            # Quick smoke test for all 18 tools via JSON-RPC
+│   ├── test_lakebase.js          # Lakebase pull/push sync verification
+│   └── test_sqlite_memory.js     # SQLite memory engine unit tests
 ├── docs/assets/            # Banner and documentation images
-├── test_client.js          # Quick smoke test for all 18 tools
-├── test_lakebase.js        # Lakebase pull/push sync verification
-├── test_sqlite_memory.js   # SQLite memory engine unit tests
 ├── spec.md                 # Original project specification
 └── package.json            # ESM, file: link to pg-git
 ```
@@ -1020,7 +1021,7 @@ krusch-context-mcp/
 ## 🧪 Testing
 
 ```bash
-node test_client.js
+node tests/test_client.js
 ```
 
 This script connects to the live `kruschdb` instance and verifies registration and execution of all 18 tools.
@@ -1029,10 +1030,10 @@ Additional test scripts:
 
 ```bash
 # Verify Lakebase pull/push sync between SQLite and Postgres
-node test_lakebase.js
+node tests/test_lakebase.js
 
 # Test SQLite-based memory operations in isolation
-node test_sqlite_memory.js
+node tests/test_sqlite_memory.js
 ```
 
 ### Benchmarking & Evaluation Scripts
