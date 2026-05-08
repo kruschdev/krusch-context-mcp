@@ -20,7 +20,13 @@ description: Commit krusch-context-mcp changes with conventional format
    - Scope: `krusch-context-mcp`
    - Example: `feat(krusch-context-mcp): add consolidate_memories tool`
 
-4. **Push**:
+4. **Push to monorepo**:
    ```bash
    git push origin main
+   ```
+
+5. **Sync standalone repo**: Push the subtree to `github.com/kruschdev/krusch-context-mcp`.
+   ```bash
+   # turbo
+   cd /home/kruschdev/homelab && git push krusch-context-mcp $(git subtree split --prefix=projects/krusch-context-mcp):main --force
    ```
