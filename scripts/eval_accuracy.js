@@ -68,7 +68,7 @@ async function run() {
             let foundAt = -1;
             
             for (let i = 0; i < topFiles.length; i++) {
-                if (matches.some(m => topFiles[i].includes(m))) {
+                if (topFiles[i] && matches.some(m => topFiles[i].includes(m))) {
                     foundAt = i;
                     break;
                 }

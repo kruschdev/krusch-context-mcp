@@ -60,8 +60,127 @@ export async function getProjectDb(projectName) {
         );
     `);
     
+    // Schema Evolution (Lakebase Architecture)
+    try {
+        db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN pg_id INTEGER;`);
+    } catch (e) {
+        // Column likely already exists
+    }
+    try {
+        db.exec(`ALTER TABLE ide_agent_nuggets ADD COLUMN pg_synced BOOLEAN DEFAULT 0;`);
+    } catch (e) {
+        // Column likely already exists
+    }
+    
     dbCache.set(projectName, db);
+    
+    // Asynchronous read-ahead (Pull from Object Store to Compute Cache)
+    pullProjectMemory(projectName, db).catch(e => console.error(`[sqlite-engine] Async pull failed for ${projectName}:`, e));
+    
     return db;
+}
+
+/**
+ * PULL: Object Storage (Postgres) -> Compute Cache (SQLite)
+ * Fetches all memories and nuggets for the project and populates the local cache.
+ */
+export async function pullProjectMemory(projectName, db) {
+    const client = await pool.connect();
+    try {
+        // 1. Pull Episodic Memories
+        const memRes = await client.query(
+            `SELECT id, category, content, tags, embedding::text FROM ide_agent_memory WHERE project = $1`,
+            [projectName]
+        );
+        
+        const insertMem = db.prepare(`
+            INSERT INTO ide_agent_memory (pg_id, category, content, tags, embedding)
+            SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM ide_agent_memory WHERE pg_id = ?)
+        `);
+        
+        const memTx = db.transaction((rows) => {
+            for (const row of rows) {
+                insertMem.run(row.id, row.category, row.content, JSON.stringify(row.tags), row.embedding, row.id);
+            }
+        });
+        memTx(memRes.rows);
+
+        // 2. Pull Nuggets
+        const nugRes = await client.query(
+            `SELECT key, value, kind, embedding::text FROM ide_agent_nuggets WHERE project = $1`,
+            [projectName]
+        );
+        
+        const insertNug = db.prepare(`
+            INSERT OR IGNORE INTO ide_agent_nuggets (key, value, kind, embedding, pg_synced)
+            VALUES (?, ?, ?, ?, 1)
+        `);
+        
+        const nugTx = db.transaction((rows) => {
+            for (const row of rows) {
+                insertNug.run(row.key, row.value, row.kind, row.embedding);
+            }
+        });
+        nugTx(nugRes.rows);
+        
+    } finally {
+        client.release();
+    }
+}
+
+/**
+ * PUSH: Compute Cache (SQLite) -> Object Storage (Postgres)
+ * Asynchronous write-behind to persist local learnings to the durable fleet history.
+ */
+export async function pushProjectMemory(projectName, db) {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        // 1. Push unsynced episodic memories
+        const unsyncedMems = db.prepare(`SELECT id, category, content, tags, embedding FROM ide_agent_memory WHERE pg_id IS NULL`).all();
+        for (const mem of unsyncedMems) {
+            // Reconstruct array string if necessary
+            let embedStr = mem.embedding;
+            if (embedStr && !embedStr.startsWith('[')) {
+                 embedStr = `[${embedStr}]`;
+            }
+            
+            const res = await client.query(
+                `INSERT INTO ide_agent_memory (project, category, content, tags, embedding)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+                [projectName, mem.category, mem.content, mem.tags ? JSON.parse(mem.tags) : null, embedStr]
+            );
+            
+            const newPgId = res.rows[0].id;
+            db.prepare(`UPDATE ide_agent_memory SET pg_id = ? WHERE id = ?`).run(newPgId, mem.id);
+        }
+
+        // 2. Push unsynced nuggets
+        const unsyncedNugs = db.prepare(`SELECT key, value, kind, embedding FROM ide_agent_nuggets WHERE pg_synced = 0`).all();
+        for (const nug of unsyncedNugs) {
+             let embedStr = nug.embedding;
+             if (embedStr && !embedStr.startsWith('[')) {
+                 embedStr = `[${embedStr}]`;
+             }
+             
+             await client.query(
+                 `INSERT INTO ide_agent_nuggets (project, key, value, kind, embedding)
+                  VALUES ($1, $2, $3, $4, $5)
+                  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, embedding = EXCLUDED.embedding, updated_at = CURRENT_TIMESTAMP`,
+                 [projectName, nug.key, nug.value, nug.kind, embedStr]
+             );
+             
+             db.prepare(`UPDATE ide_agent_nuggets SET pg_synced = 1 WHERE key = ?`).run(nug.key);
+        }
+        
+        await client.query('COMMIT');
+    } catch (e) {
+        await client.query('ROLLBACK');
+        console.error(`[sqlite-engine] Async push failed for ${projectName}:`, e);
+    } finally {
+        client.release();
+    }
 }
 
 /**

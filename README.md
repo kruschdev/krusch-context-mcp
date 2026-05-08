@@ -42,7 +42,7 @@ Because the intelligence stack and retrieval pipeline run locally on your metal,
 - **💾 Shared Connection Pool:** A single `pg.Pool` connected to `kruschdb`, eliminating duplicate database connections.
 - **🧠 Shared Embeddings:** Shared Ollama embedding logic with fleet-wide round-robin load balancing across multiple GPU nodes.
 - **🔍 Zero-Trust Context:** The `krusch_context_deep_search` tool queries both codebase (objective) and memory (subjective) in one call, giving agents a holistic reality check.
-- **📌 Zero-Trust Project Separation:** Project-specific episodic memories are physically isolated in local SQLite databases (`<project>/.agent/memory.db`), while global homelab learnings are stored in the central PostgreSQL database. This hybrid approach guarantees project context never leaks.
+- **📌 Zero-Trust Project Separation (SQLite Lakebase Architecture):** Inspired by [Neon's decoupled lakebase architecture](https://neon.com/docs/introduction/architecture-overview), we explicitly decouple compute from storage. The central `kruschdb` PostgreSQL instance acts as the durable **Object Storage** for fleet-wide history, while local SQLite databases (`<project>/.agent/memory.db`) act as fast, ephemeral **Compute Caches**. When a project is loaded, context is pulled down into SQLite for zero-latency local vector math. When new memories are added, an asynchronous write-behind process flushes them back up to PostgreSQL.
 - **🏷️ Auto-Tagging:** Memories are automatically tagged with keywords via `llama3.2`, making them discoverable without manual effort.
 - **♻️ Memory Consolidation:** Semantic deduplication detects and merges overlapping memories using $L_2$-normalized centroid averaging, mathematically preserving cluster identity without invoking the Ollama API for fast, native consolidation. *Methodology derived from the [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation) research.*
 - **💎 Holographic Nuggets Memory:** A lightweight Key-Value store integrated into local SQLite (for project-specific nudges) and PostgreSQL (for global facts) to hold steering facts, user preferences, and project guidelines. *Credits to [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets) for the original Holographic Nuggets MCP architecture.*
@@ -57,8 +57,12 @@ The server acts as a unified facade over local SQLite databases and PostgreSQL s
 graph TD;
     A[Agent Tool Call] --> B{Krusch Context MCP};
     B -- Semantic Code Search --> C[(PG-Git: blobs)];
-    B -- Project Episodic & Nuggets --> D[(SQLite: .agent/memory.db)];
-    B -- Global Episodic & Nuggets --> E[(Postgres: ide_agent_memory & nuggets)];
+    B -- Read/Write --> D[(SQLite Compute Cache: .agent/memory.db)];
+    B -- Read/Write --> E[(Postgres Object Storage: ide_agent_memory)];
+    
+    %% Lakebase Architecture Sync
+    D -. Asynchronous Pull/Push .-> E;
+
     B -- Deep Search --> C;
     B -- Deep Search --> D;
     B -- Deep Search --> E;

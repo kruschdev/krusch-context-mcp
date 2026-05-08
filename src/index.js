@@ -46,6 +46,12 @@ async function verifyDatabase() {
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+        
+        try {
+            await pool.query('ALTER TABLE ide_agent_nuggets ADD COLUMN project VARCHAR(255)');
+        } catch (e) {
+            if (e.code !== '42701') throw e; // 42701 is duplicate column
+        }
 
         console.error('[krusch-context-mcp] Database connection verified via pg-git pool. Migrations completed.');
     } catch (err) {

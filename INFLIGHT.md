@@ -1,20 +1,14 @@
-# Krusch Context MCP - Session State
+# krusch-context-mcp INFLIGHT
 
-**Status**: Stable, Prioritized Fleet Routing Implemented.
-**Last Updated**: 2026-05-06
+## Current Status
+- **Goal**: Apply the mathematical findings from *The Geometry of Consolidation* to the homelab's episodic memory engine.
+- **State**: COMPLETED. Both the Global PostgreSQL store and the local SQLite project databases in `memory-engine.js` now use $L_2$-normalized centroid averaging for `consolidateMemories`, completely bypassing the slow `getEmbedding` Ollama queue call.
+- **Fragile Files**: `src/memory-engine.js` (recently modified logic, but math is sound).
 
-## Current State
-- Implemented `ollamaQueue` (`@krusch/toolkit/llm-queue.js`) to manage concurrent Ollama requests across the fleet nodes (`kruschgame`, `kruschdev`, `kruschserv`).
-- Updated `pg-git/lib/embedding.js` to enqueue tasks with `LOW` priority by default.
-- Refactored `krusch-context-mcp/src/memory-engine.js` to route `searchMemory` queries with `HIGH` priority, leapfrogging bulk batch processing.
-- Tool surface verified: 14 tools active. No schema migrations pending.
+## Next Steps
+- [ ] Monitor logs for consolidation events to ensure the centroid math is persisting and clustering effectively.
+- [ ] Roll out the updated MCP to the fleet if testing proves robust.
 
-## Fragile Files / Transient State
-- `src/memory-engine.js`: Contains specific `ide_agent_memory` column definitions (`project`, `tags`). The `_embedding` internal parameter must remain untouched in `searchMemory`/`addMemory` for `krusch_context_deep_search` optimization.
-- `../../lib/llm-queue.js`: Shared fleet queue. Ensure any changes respect `concurrency` caps to prevent overwhelming local VRAM.
-
-## Pending / Next Steps
-- `[ ]` Expand integration tests for `read_tree`, `read_blob`, and `consolidate` utility tools.
-- `[ ]` Monitor fleet inference latency now that multiple agents are forced through the Priority Queue during deep context searches.
-- `[ ]` Monitor memory and CPU overhead following the consolidation of previously siloed MCP servers.
-- `[ ]` Evaluate the accuracy of the `qwen2.5-coder:1.5b` embeddings for very large repositories.
+## Notes
+- The "Embedding Agent" loop is officially obsolete for memory consolidation.
+- Centroid is theoretically optimal for preserving cluster identity in tight semantic regimes.

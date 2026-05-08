@@ -55,6 +55,12 @@ export async function addMemory({ category, content, tags, project, _embedding }
                 INSERT INTO ide_agent_memory (category, content, tags, embedding)
                 VALUES (?, ?, ?, ?)
             `).run(category, content, finalTags, embeddingStr);
+            
+            // Asynchronous write-behind (Compute Cache -> Object Storage)
+            import('./sqlite-engine.js').then(({ pushProjectMemory }) => {
+                pushProjectMemory(project, db).catch(e => console.error(`[memory-engine] Async push failed for ${project}:`, e));
+            });
+
             return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${project} (${category})` }] };
         }
     }

@@ -102,6 +102,58 @@ async function run() {
         console.log(`   ⚠️ ${e.message}`);
     }
 
+    // 5. Test krusch_context_nugget_remember
+    console.log('\n💎 Testing krusch_context_nugget_remember...');
+    try {
+        const rememberRes = await send('tools/call', {
+            name: 'krusch_context_nugget_remember',
+            arguments: { key: '__test_nugget__', value: 'Test nugget from smoke test', kind: 'agent' }
+        });
+        const text = rememberRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text}`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    // 6. Test krusch_context_nugget_nudges
+    console.log('\n💎 Testing krusch_context_nugget_nudges...');
+    try {
+        const nudgesRes = await send('tools/call', {
+            name: 'krusch_context_nugget_nudges',
+            arguments: { query: 'test nugget smoke', limit: 2 }
+        });
+        const text = nudgesRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text.substring(0, 300)}`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    // 7. Test krusch_context_nugget_list
+    console.log('\n💎 Testing krusch_context_nugget_list...');
+    try {
+        const listNugRes = await send('tools/call', {
+            name: 'krusch_context_nugget_list',
+            arguments: { kinds: ['agent'] }
+        });
+        const text = listNugRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text.substring(0, 300)}`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    // 8. Test krusch_context_nugget_forget (cleanup)
+    console.log('\n💎 Testing krusch_context_nugget_forget...');
+    try {
+        const forgetRes = await send('tools/call', {
+            name: 'krusch_context_nugget_forget',
+            arguments: { key: '__test_nugget__' }
+        });
+        const text = forgetRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text}`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
     console.log('\n✅ All tests completed.');
     child.kill('SIGTERM');
     setTimeout(() => process.exit(0), 1000);

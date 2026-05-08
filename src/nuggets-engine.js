@@ -27,11 +27,17 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
         const localDb = await getProjectDb(active_project);
         if (localDb) {
             localDb.prepare(`
-                INSERT INTO ide_agent_nuggets (key, value, kind, embedding, created_at, updated_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                INSERT INTO ide_agent_nuggets (key, value, kind, embedding, created_at, updated_at, pg_synced)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
                 ON CONFLICT (key) DO UPDATE 
-                SET value = excluded.value, kind = excluded.kind, embedding = excluded.embedding, updated_at = CURRENT_TIMESTAMP
+                SET value = excluded.value, kind = excluded.kind, embedding = excluded.embedding, updated_at = CURRENT_TIMESTAMP, pg_synced = 0
             `).run(key, value, kind, embeddingStr);
+            
+            // Asynchronous write-behind (Compute Cache -> Object Storage)
+            import('./sqlite-engine.js').then(({ pushProjectMemory }) => {
+                pushProjectMemory(active_project, localDb).catch(e => console.error(`[nuggets-engine] Async push failed for ${active_project}:`, e));
+            });
+
             return { content: [{ type: "text", text: `[krusch-context] 🧠 Nugget remembered natively in SQLite (.agent/memory.db) for project '${active_project}': '${key}'` }] };
         }
     }

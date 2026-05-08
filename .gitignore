@@ -1,5 +1,6 @@
 node_modules/
 .env
+*.log
 GEMINI_INFLIGHT.md
 spec.md
 AGENTS.md

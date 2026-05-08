@@ -8,12 +8,18 @@
     "start": "node src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["mcp", "semantic-search", "pgvector", "context-engine"],
+  "keywords": [
+    "mcp",
+    "semantic-search",
+    "pgvector",
+    "context-engine"
+  ],
   "author": "kruschdev",
   "license": "MIT",
   "dependencies": {
+    "@krusch/toolkit": "file:../../lib",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "pg-git": "file:../pg-git",
-    "@krusch/toolkit": "file:../../lib"
+    "ml-pca": "^4.1.1",
+    "pg-git": "file:../pg-git"
   }
 }
