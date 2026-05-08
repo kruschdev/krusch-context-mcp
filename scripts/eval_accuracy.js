@@ -26,7 +26,7 @@ const QUERIES = [
 ];
 
 async function run() {
-    console.log('🚀 Starting Accuracy Evaluation for qwen2.5-coder:1.5b...\n');
+    console.log('🚀 Starting Accuracy Evaluation for bge-large...\n');
     
     let totalQueries = QUERIES.length;
     let recallAt1 = 0;
