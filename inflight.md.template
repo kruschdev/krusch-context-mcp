@@ -1,0 +1,19 @@
+# INFLIGHT - [Project Name]
+
+## Tool Surface Status
+- Tools: [List of operational or new tools]
+- Status: [Current state of the tool surface]
+- Asynchronous Sync: [Status of async background jobs or DB syncs]
+
+## Pending Schema Migrations
+- [Any pending SQLite or PG migrations]
+
+## Ollama Model / Fleet Health
+- [Any active issues with embedding models or edge nodes]
+
+## Fragile Files / Transient State
+- [Files currently in an incomplete or delicate state]
+
+## Pending / Next Steps
+- [ ] [Task 1]
+- [ ] [Task 2]
