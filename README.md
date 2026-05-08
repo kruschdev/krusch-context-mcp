@@ -83,10 +83,21 @@ graph TD;
 ## 📦 Quick Start
 
 **Prerequisites:**
-- [Node.js](https://nodejs.org/) 18+
-- [Ollama](https://ollama.com/) running with `bge-large` and `llama3.2` models
-- PostgreSQL with `pgvector` extension
-- **[PG-Git](https://github.com/kruschdev/pg-git) (Required Sibling Dependency):** You must clone the `pg-git` repository into the same parent directory. Krusch Context MCP directly imports database pooling logic from it and relies on `../pg-git/.env` for its configuration. The server **will fail to start** if `pg-git` is missing.
+- [Node.js](https://nodejs.org/) 22+
+- [Ollama](https://ollama.com/) running with `bge-large` and `llama3.2` models pulled
+- PostgreSQL with the [`pgvector`](https://github.com/pgvector/pgvector) extension enabled
+- **[PG-Git](https://github.com/kruschdev/pg-git) (Required Sibling Dependency):** You must clone the `pg-git` repository into the same parent directory **and** configure its `.env` file (see [PG-Git README](https://github.com/kruschdev/pg-git#readme) for setup). Krusch Context MCP directly imports database pooling and embedding logic from it via a `file:` link in `package.json`. The server **will fail to start** if `pg-git` is missing or its `.env` is unconfigured.
+- **[@krusch/toolkit](https://github.com/kruschdev/homelab/tree/main/lib) (Required Sibling Dependency):** The shared utility library must be available at `../../lib` relative to this project. It provides SQLite bindings (`better-sqlite3`) and the fleet-aware Ollama queue (`llm-queue.js`) used for GPU load balancing.
+
+**Expected directory layout:**
+```
+projects/           # or any shared parent directory
+├── pg-git/         # Required — DB pool, embeddings, config (.env lives here)
+├── krusch-context-mcp/   # This project
+└── ...             # Other project directories (get their own .agent/memory.db)
+
+lib/                # @krusch/toolkit — two levels up from this project
+```
 
 **1. Install dependencies:**
 ```bash
@@ -323,11 +334,13 @@ Krusch Context MCP inherits its configuration from the sibling `pg-git/.env` fil
 | Variable | Description | Default |
 |----------|-------------|---------| 
 | `PG_CONNECTION_STRING` | PostgreSQL connection string for `kruschdb` | *(required, from pg-git)* |
-| `OLLAMA_URL` | Ollama endpoint for embeddings | `http://localhost:11434` |
+| `OLLAMA_URL` | Primary Ollama endpoint for embeddings | `http://localhost:11434` |
+| `OLLAMA_FLEET_URLS` | Comma-separated list of additional Ollama endpoints for GPU fleet load balancing | *(none — single node)* |
 | `EMBED_MODEL` | Ollama embedding model | `bge-large` |
 | `DECAY_RATE` | Exponential decay rate for temporal memory scoring | `0.01` |
 | `AUTO_TAG` | Auto-generate keyword tags on new memories | `true` (hardcoded) |
 | `TAG_MODEL` | Ollama model for tag extraction | `llama3.2` |
+| `EXTERNAL_DOCS_CONFIG_PATH` | Path to the JSON config listing ingested external manuals | `pg-git/config/external_docs.json` |
 
 ### Troubleshooting
 
@@ -349,6 +362,31 @@ Krusch Context MCP inherits its configuration from the sibling `pg-git/.env` fil
 
 ---
 
+## 📂 Project Structure
+
+```
+krusch-context-mcp/
+├── src/
+│   ├── index.js            # MCP server entry point — tool registration & routing
+│   ├── memory-engine.js    # Episodic memory CRUD (add, search, list, delete, update, consolidate)
+│   ├── nuggets-engine.js   # Holographic Nuggets CRUD (remember, nudges, forget, list)
+│   └── sqlite-engine.js    # Lakebase SQLite layer (project DB init, pull/push sync)
+├── scripts/
+│   ├── benchmark_latency.js      # Measure embedding + search latency across the fleet
+│   ├── clear_sqlite_embeddings.js # Reset local SQLite embedding columns
+│   ├── eval_accuracy.js           # Evaluate retrieval accuracy (precision/recall)
+│   └── spectral_calibration.js    # Spectral analysis of embedding space quality
+├── tests/                  # Test suite
+├── docs/assets/            # Banner and documentation images
+├── test_client.js          # Quick smoke test for all 18 tools
+├── test_lakebase.js        # Lakebase pull/push sync verification
+├── test_sqlite_memory.js   # SQLite memory engine unit tests
+├── spec.md                 # Original project specification
+└── package.json            # ESM, file: links to pg-git and @krusch/toolkit
+```
+
+---
+
 ## 🧪 Testing
 
 ```bash
@@ -356,6 +394,29 @@ node test_client.js
 ```
 
 This script connects to the live `kruschdb` instance and verifies registration and execution of all 18 tools.
+
+Additional test scripts:
+
+```bash
+# Verify Lakebase pull/push sync between SQLite and Postgres
+node test_lakebase.js
+
+# Test SQLite-based memory operations in isolation
+node test_sqlite_memory.js
+```
+
+### Benchmarking & Evaluation Scripts
+
+```bash
+# Measure end-to-end embedding + search latency
+node scripts/benchmark_latency.js
+
+# Evaluate retrieval precision/recall against known queries
+node scripts/eval_accuracy.js
+
+# Spectral analysis of embedding space health
+node scripts/spectral_calibration.js
+```
 
 ---
 
