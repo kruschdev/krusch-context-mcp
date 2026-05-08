@@ -144,27 +144,637 @@ npm start
 
 ## 🚀 Real-World Usage Examples
 
-To effectively use Krusch Context MCP, simply instruct your IDE agent to document its findings or query its memory.
+To effectively use Krusch Context MCP, instruct your IDE agent to document its findings or query its memory. Here are real-world examples covering every tool category:
 
-**Example 1: Documenting a bug fix**
+### Episodic Memory
+
+**Documenting a bug fix**
 > **You:** "That fixed the port conflict! Save this to memory so we don't forget the fix."
 > **Agent:** *[Calls `krusch_context_add_memory`]* "Saved a memory in the 'bugs' category noting that port 5441 conflicts with the legacy DB and we should use 5442 instead."
 
-**Example 2: Recalling architectural decisions**
+**Recalling architectural decisions**
 > **You:** "How did we decide to structure the auth system?"
 > **Agent:** *[Calls `krusch_context_search_memory`]* "According to the 'lessons' category, we chose a singleton JWT factory to avoid circular dependencies."
 
-**Example 3: Zero-Trust Context check**
+**Browsing recent activity**
+> **You:** "What did we work on yesterday?"
+> **Agent:** *[Calls `krusch_context_list_memories`]* "Here are the 5 most recent activity entries..."
+
+**Correcting stale context**
+> **You:** "That priority is outdated — update it to reflect the new deadline."
+> **Agent:** *[Calls `krusch_context_update_memory`]* "Updated memory ID 42 with new content. The embedding was regenerated to match."
+
+**Cleaning up noise**
+> **You:** "Delete that duplicate bug report."
+> **Agent:** *[Calls `krusch_context_delete_memory`]* "Deleted memory ID 17 from the global store."
+
+### Memory Consolidation
+
+**Deduplicating memories**
+> **You:** "Clean up the repetitive notes about the migration."
+> **Agent:** *[Calls `krusch_context_consolidate` with `dry_run: true`]* "Found 4 overlapping pairs. Here's a preview..." → *[Calls again with `dry_run: false`]* "Consolidated into 2 clean records."
+
+### Codebase Search
+
+**Semantic code lookup**
+> **You:** "How does our auth middleware work?"
+> **Agent:** *[Calls `krusch_context_search_code`]* "Found 3 relevant files — here's the implementation in `lib/auth.js`..."
+
+**Browsing indexed repos**
+> **You:** "What repos are indexed?"
+> **Agent:** *[Calls `krusch_context_list_repos`]* "28 repositories indexed in PG-Git, including krusch-context-mcp, pg-git, pocket-lawyer..."
+
+**Browsing a file tree**
+> **You:** "Show me the file tree for the krusch-context-mcp repo."
+> **Agent:** *[Calls `krusch_context_read_tree`]* "Here's the indexed tree: `src/index.js`, `src/memory-engine.js`, `package.json`..."
+
+**Reading a specific file**
+> **You:** "Show me the contents of that config file."
+> **Agent:** *[Calls `krusch_context_read_blob`]* "Here's the full content of the blob..."
+
+### Zero-Trust Verification
+
+**Cross-referencing before acting**
 > **You:** "Before we start, verify what you know about the database schema."
 > **Agent:** *[Calls `krusch_context_deep_search`]* "Cross-referencing codebase search (blobs) with episodic memory — the schema uses pgvector with 1024 dims (bge-large), and our last session noted we added the `tags` column."
 
-**Example 4: Memory Consolidation**
-> **You:** "Clean up the repetitive notes about the migration."
-> **Agent:** *[Calls `krusch_context_consolidate`]* "Found 4 overlapping memories, consolidated into 2 clean records."
+### Steering Nudges
 
-**Example 5: Browsing indexed code**
-> **You:** "Show me the file tree for the krusch-context-mcp repo."
-> **Agent:** *[Calls `krusch_context_read_tree`]* "Here's the indexed tree: `src/index.js`, `src/memory-engine.js`, `package.json`..."
+**Saving a preference**
+> **You:** "Always use `const` over `let` in this project."
+> **Agent:** *[Calls `krusch_context_nugget_remember`]* "Saved nugget: `coding-style:const-over-let`."
+
+**Getting behavioral hints**
+> **You:** "Remind yourself of our project conventions before coding."
+> **Agent:** *[Calls `krusch_context_nugget_nudges`]* "Retrieved 3 nudges: prefer const, use JSDoc on exports, 40-line function limit."
+
+**Listing all saved nudges**
+> **You:** "What nudges do we have saved?"
+> **Agent:** *[Calls `krusch_context_nugget_list`]* "12 nuggets across user, project, and agent kinds."
+
+**Removing an obsolete nudge**
+> **You:** "We don't use that convention anymore — forget it."
+> **Agent:** *[Calls `krusch_context_nugget_forget`]* "Deleted nugget: `old-convention`."
+
+### Documentation Search
+
+**Searching external docs**
+> **You:** "How does Anthropic's tool use work?"
+> **Agent:** *[Calls `krusch_docs_search`]* "Found 3 relevant sections from the `anthropic-docs` manual..."
+
+**Listing available manuals**
+> **You:** "What documentation do we have indexed?"
+> **Agent:** *[Calls `krusch_docs_list`]* "3 manuals available: anthropic-docs, mcp-spec, ollama-api."
+
+### Health Check
+
+**Verifying the system is alive**
+> **You:** "Is the context engine healthy?"
+> **Agent:** *[Calls `krusch_context_health_check`]* "🟢 Server healthy. 247 episodic memories, 34 nuggets, 28 repositories indexed."
+
+---
+
+## 📋 Complete Tool Reference
+
+Every tool, every parameter, every default — everything an agent needs to call these tools correctly.
+
+### Episodic Memory Tools
+
+#### `krusch_context_add_memory`
+
+Store a new episodic memory. Automatically generates a vector embedding and semantic tags via local LLM.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `category` | `string` | ✅ | — | One of: `priorities`, `bugs`, `outcomes`, `lessons`, `activity` |
+| `content` | `string` | ✅ | — | The text content of the memory |
+| `project` | `string` | ❌ | `null` | If provided, saves to local SQLite (`.agent/memory.db`). If omitted, saves to global Postgres. |
+| `tags` | `string[]` | ❌ | *auto-generated* | User-defined tags. If omitted, tags are auto-generated via `llama3.2`. |
+
+**Storage routing:**
+- `project` provided → writes to `<project>/.agent/memory.db` (SQLite), async pushes to Postgres
+- `project` omitted → writes directly to global `kruschdb.ide_agent_memory` (Postgres)
+
+**Example call:**
+```json
+{
+  "category": "bugs",
+  "content": "Port 5441 conflicts with the legacy PocketLawyer DB. Use 5442 for krusch-context-mcp.",
+  "project": "krusch-context-mcp",
+  "tags": ["port-conflict", "database", "config"]
+}
+```
+
+---
+
+#### `krusch_context_search_memory`
+
+Semantic search over episodic memories with exponential temporal decay. Recent memories score higher.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `category` | `string` | ✅ | — | One of: `priorities`, `bugs`, `outcomes`, `lessons`, `activity` |
+| `query` | `string` | ✅ | — | Natural language search query |
+| `limit` | `number` | ❌ | `3` | Maximum results to return |
+| `active_project` | `string` | ❌ | `null` | If provided, also searches the project's local SQLite DB and merges results |
+
+**How results are ranked:**
+1. Embedding similarity is computed via cosine distance (Postgres) or cosine similarity (SQLite)
+2. Temporal decay is applied: `score = similarity × e^(-0.01 × age_in_days)`
+3. Project-local results get a `+0.1` bias to prefer local context over global
+4. Results from both stores are merged, re-ranked, and truncated to `limit`
+
+**Example call:**
+```json
+{
+  "category": "lessons",
+  "query": "authentication middleware patterns",
+  "limit": 5,
+  "active_project": "pocket-lawyer"
+}
+```
+
+---
+
+#### `krusch_context_list_memories`
+
+Fast chronological listing without embedding generation. Use this when you want to browse recent entries, not search semantically.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `category` | `string` | ✅ | — | One of: `priorities`, `bugs`, `outcomes`, `lessons`, `activity` |
+| `project` | `string` | ❌ | `null` | If provided, lists from the project's SQLite DB. If omitted, lists from global Postgres. |
+| `limit` | `number` | ❌ | `10` | Maximum results to return |
+
+**Example call:**
+```json
+{
+  "category": "activity",
+  "project": "krusch-context-mcp",
+  "limit": 5
+}
+```
+
+---
+
+#### `krusch_context_delete_memory`
+
+Delete a specific memory by its numeric ID. Use `list_memories` or `search_memory` first to find the ID.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `number` | ✅ | — | Numeric ID of the memory to delete |
+| `source_project` | `string` | ❌ | `null` | If provided, deletes from the project's SQLite DB. If omitted, deletes from global Postgres. |
+
+**Example call:**
+```json
+{
+  "id": 42,
+  "source_project": "krusch-context-mcp"
+}
+```
+
+---
+
+#### `krusch_context_update_memory`
+
+Update an existing memory's content, tags, or project assignment. Content changes trigger re-embedding.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `number` | ✅ | — | Numeric ID of the memory to update |
+| `source_project` | `string` | ❌ | `null` | If provided, updates in the project's SQLite DB. If omitted, updates in global Postgres. |
+| `content` | `string` | ❌ | — | New content (triggers re-embedding if changed) |
+| `tags` | `string[]` | ❌ | — | New tags array |
+| `project` | `string` | ❌ | — | New project assignment (Postgres only — reassigns the memory to a different project) |
+
+> ⚠️ At least one of `content`, `tags`, or `project` must be provided.
+
+**Example call:**
+```json
+{
+  "id": 42,
+  "content": "Updated: Port 5442 is now the canonical DB port for all new services.",
+  "tags": ["port-config", "canonical"]
+}
+```
+
+---
+
+#### `krusch_context_consolidate`
+
+Find and merge semantically duplicate memories within a category. Uses L₂-normalized centroid averaging to merge embeddings without re-embedding.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `category` | `string` | ✅ | — | One of: `priorities`, `bugs`, `outcomes`, `lessons`, `activity` |
+| `project` | `string` | ❌ | `null` | If provided, consolidates in the project's SQLite DB. If omitted, consolidates global Postgres. |
+| `threshold` | `number` | ❌ | `0.15` | Cosine distance threshold — pairs closer than this are considered duplicates. Lower = stricter. |
+| `dry_run` | `boolean` | ❌ | `false` | If `true`, only previews matches without merging |
+
+> 💡 **Best practice:** Always call with `dry_run: true` first to preview which pairs would be merged.
+
+> ⚠️ SQLite consolidation has a 500-row scaling guard. If exceeded, filter by project.
+
+**Example call (preview):**
+```json
+{
+  "category": "bugs",
+  "project": "pocket-lawyer",
+  "threshold": 0.12,
+  "dry_run": true
+}
+```
+
+---
+
+### Codebase Search Tools
+
+#### `krusch_context_search_code`
+
+Semantic search over all files indexed in PG-Git (`kruschdb.blobs`). Results are ranked by embedding similarity.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | `string` | ✅ | — | Natural language search query (e.g., "how does the scheduler work") |
+| `limit` | `number` | ❌ | `5` | Maximum results to return |
+| `project` | `string` | ❌ | `null` | Filter results to a specific project/repository name |
+| `repository_id` | `number` | ❌ | `null` | Filter by exact repository ID (overrides `project` name lookup) |
+
+**Example call:**
+```json
+{
+  "query": "express middleware authentication JWT",
+  "limit": 3,
+  "project": "pocket-lawyer"
+}
+```
+
+---
+
+#### `krusch_context_list_repos`
+
+List all repositories indexed in PG-Git. No parameters required.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| *(none)* | — | — | — | Returns all repos with ID, name, description, and creation date |
+
+**Example call:**
+```json
+{}
+```
+
+---
+
+#### `krusch_context_read_tree`
+
+Browse the file tree of an indexed repository. Use `krusch_context_list_repos` first to get a repository ID.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `repository_id` | `number` | ✅ | — | Repository ID (from `krusch_context_list_repos`) |
+| `tree_id` | `string` | ❌ | *root* | SHA hash of the tree to browse. Omit to get the root tree. Use a child tree's `object_id` to drill down. |
+
+**Workflow pattern (drill into a repo):**
+```
+1. krusch_context_list_repos → get repo ID (e.g., 5)
+2. krusch_context_read_tree({ repository_id: 5 }) → root tree entries
+3. krusch_context_read_tree({ repository_id: 5, tree_id: "abc123" }) → subdirectory entries
+4. krusch_context_read_blob({ blob_id: "def456" }) → file content
+```
+
+**Example call:**
+```json
+{
+  "repository_id": 5,
+  "tree_id": "a1b2c3d4e5f6"
+}
+```
+
+---
+
+#### `krusch_context_read_blob`
+
+Read the full content of a file by its blob SHA hash. Get blob IDs from `krusch_context_read_tree`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `blob_id` | `string` | ✅ | — | The SHA hash of the blob to read |
+
+**Example call:**
+```json
+{
+  "blob_id": "a1b2c3d4e5f6789012345678901234567890abcd"
+}
+```
+
+---
+
+### Composite Search
+
+#### `krusch_context_deep_search`
+
+**Zero-Trust composite search.** Generates a single embedding and queries both the codebase (PG-Git blobs) and all 5 episodic memory categories simultaneously. Use this to establish a holistic baseline before starting work.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | `string` | ✅ | — | Natural language search query |
+| `project` | `string` | ❌ | `null` | Optional project name to boost/filter results |
+
+**What it searches (in parallel):**
+1. `kruschdb.blobs` — codebase files (top 3)
+2. `ide_agent_memory` — all 5 categories (`lessons`, `bugs`, `priorities`, `outcomes`, `activity`) (top 2 per category)
+
+**Performance:** One embedding call shared across all 6 queries. This is the most efficient way to get comprehensive context.
+
+**Example call:**
+```json
+{
+  "query": "database migration schema changes",
+  "project": "krusch-context-mcp"
+}
+```
+
+---
+
+### Nugget (Steering Facts) Tools
+
+#### `krusch_context_nugget_remember`
+
+Store a short, durable fact for behavioral steering. UPSERTs by key — calling with an existing key updates the value.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `key` | `string` | ✅ | — | Unique identifier (e.g., `coding-style:const-preference`) |
+| `value` | `string` | ✅ | — | The fact content |
+| `kind` | `string` | ❌ | `project` | One of: `project` (project-specific), `user` (global user pref), `agent` (agent-level behavior) |
+| `active_project` | `string` | ❌ | `null` | **Required for `project` kind.** The active project context — routes storage to SQLite. |
+
+**Storage routing:**
+- `kind: 'project'` + `active_project` provided → SQLite (`.agent/memory.db`), async pushes to Postgres
+- `kind: 'user'` or `kind: 'agent'` → always global Postgres
+- `kind: 'project'` + no `active_project` → falls back to global Postgres
+
+**Example call:**
+```json
+{
+  "key": "krusch-context-mcp:embedding-model",
+  "value": "bge-large at 1024 dims. Do NOT use nomic-embed or other models.",
+  "kind": "project",
+  "active_project": "krusch-context-mcp"
+}
+```
+
+---
+
+#### `krusch_context_nugget_nudges`
+
+Return short, relevant nugget facts ranked by semantic similarity. Use this at session start to load behavioral context.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | `string` | ✅ | — | Semantic search query (e.g., "coding conventions" or "deployment patterns") |
+| `kinds` | `string[]` | ❌ | *all kinds* | Filter by kind: `['project']`, `['user', 'agent']`, etc. |
+| `limit` | `number` | ❌ | `3` | Maximum nudges to return |
+| `active_project` | `string` | ❌ | `null` | **Required to retrieve `project` kind nuggets** from the project's SQLite DB. |
+
+**Example call:**
+```json
+{
+  "query": "code style and formatting preferences",
+  "kinds": ["project", "user"],
+  "limit": 5,
+  "active_project": "krusch-context-mcp"
+}
+```
+
+---
+
+#### `krusch_context_nugget_forget`
+
+Delete a specific nugget by key.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `key` | `string` | ✅ | — | The nugget key to delete |
+| `active_project` | `string` | ❌ | `null` | If provided, deletes from the project's SQLite DB first. Falls back to global Postgres. |
+
+**Example call:**
+```json
+{
+  "key": "old-convention:semicolons",
+  "active_project": "krusch-context-mcp"
+}
+```
+
+---
+
+#### `krusch_context_nugget_list`
+
+List all saved nuggets chronologically (most recently updated first).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `kinds` | `string[]` | ❌ | *all kinds* | Filter by kind |
+| `active_project` | `string` | ❌ | `null` | **Required to list `project` kind nuggets** from the project's SQLite DB. |
+
+**Example call:**
+```json
+{
+  "kinds": ["project"],
+  "active_project": "krusch-context-mcp"
+}
+```
+
+---
+
+### Documentation Tools
+
+#### `krusch_docs_list`
+
+List all external manuals ingested into the semantic database. No parameters required.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| *(none)* | — | — | — | Returns all available manual names and source URLs |
+
+---
+
+#### `krusch_docs_search`
+
+Semantically search a specific external manual by name.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `manual_name` | `string` | ✅ | — | Exact name of the manual (from `krusch_docs_list`, e.g., `anthropic-docs`) |
+| `query` | `string` | ✅ | — | Natural language search query |
+| `limit` | `number` | ❌ | `5` | Maximum results |
+
+**Example call:**
+```json
+{
+  "manual_name": "anthropic-docs",
+  "query": "how to use tool_use with streaming responses",
+  "limit": 3
+}
+```
+
+---
+
+### System Tools
+
+#### `krusch_context_health_check`
+
+Verify that the server is alive, connected to the database, and functioning. No parameters required.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| *(none)* | — | — | — | Returns memory count, nugget count, repo count, DB status, and version |
+
+---
+
+## 🧭 Storage Routing Guide
+
+Understanding where data lives is critical for querying correctly.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                        WRITE PATH                                │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  add_memory(project: "my-app")                                   │
+│    └─→ SQLite: my-app/.agent/memory.db                           │
+│         └─→ async push → Postgres (ide_agent_memory)             │
+│                                                                  │
+│  add_memory(project: null)                                       │
+│    └─→ Postgres: ide_agent_memory (project IS NULL)              │
+│                                                                  │
+│  nugget_remember(kind: 'project', active_project: "my-app")      │
+│    └─→ SQLite: my-app/.agent/memory.db                           │
+│         └─→ async push → Postgres (ide_agent_nuggets)            │
+│                                                                  │
+│  nugget_remember(kind: 'user')                                   │
+│    └─→ Postgres: ide_agent_nuggets                               │
+│                                                                  │
+├──────────────────────────────────────────────────────────────────┤
+│                        READ PATH                                 │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  search_memory(active_project: "my-app")                         │
+│    └─→ MERGE: SQLite(my-app) + Postgres(global)                  │
+│         └─→ SQLite results get +0.1 bias                         │
+│                                                                  │
+│  search_memory(active_project: null)                             │
+│    └─→ Postgres only (global memories)                           │
+│                                                                  │
+│  deep_search(project: "my-app")                                  │
+│    └─→ ALL: 5 memory categories + codebase blobs                 │
+│         └─→ Single shared embedding across all queries           │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Key Rules
+
+1. **`project` on writes** routes to SQLite; omitting it routes to Postgres
+2. **`active_project` on reads** merges SQLite + Postgres; omitting it reads Postgres only
+3. **`source_project` on deletes/updates** targets SQLite; omitting it targets Postgres
+4. **Nuggets with `kind: 'project'`** need `active_project` to resolve the SQLite DB
+5. **Nuggets with `kind: 'user'` or `'agent'`** always go to global Postgres
+
+### Memory Categories
+
+| Category | When to Use |
+|----------|-------------|
+| `priorities` | Current goals, roadmap items, and task alignment for `/open` workflows |
+| `bugs` | Bug reports, root causes, workarounds, and fixes |
+| `outcomes` | Session summaries, deployment results, and `/close` wrap-ups |
+| `lessons` | Architectural decisions, "never do this again" rules, and pattern discoveries |
+| `activity` | Session-level work logs (what was done today) |
+
+### Nugget Kinds
+
+| Kind | Scope | Storage | When to Use |
+|------|-------|---------|-------------|
+| `project` | Per-project | SQLite (with async PG push) | Project conventions, local patterns, repo-specific rules |
+| `user` | Global | Postgres | Personal preferences, coding style, communication preferences |
+| `agent` | Global | Postgres | Agent behavioral tuning, self-corrections, operational parameters |
+
+---
+
+## 🤖 Agent Integration Patterns
+
+### Pattern 1: Zero-Trust Session Start
+
+Before writing any code in a new session, verify your understanding:
+
+```
+1. krusch_context_deep_search({ query: "<current topic>", project: "<project>" })
+   → Cross-references codebase + all memory categories in one call
+   
+2. krusch_context_nugget_nudges({ query: "<current task>", active_project: "<project>" })
+   → Loads behavioral hints and project conventions
+```
+
+### Pattern 2: Bug Investigation
+
+```
+1. krusch_context_search_memory({ category: "bugs", query: "<symptoms>", active_project: "<project>" })
+   → Check if this bug has been seen before
+
+2. krusch_context_search_code({ query: "<error message or pattern>", project: "<project>" })
+   → Find the actual implementation
+
+3. [Fix the bug]
+
+4. krusch_context_add_memory({ category: "bugs", content: "<root cause + fix>", project: "<project>" })
+   → Document for future sessions
+```
+
+### Pattern 3: Architecture Decision
+
+```
+1. krusch_context_search_memory({ category: "lessons", query: "<design question>" })
+   → Check if a prior decision exists
+
+2. [Make the decision]
+
+3. krusch_context_add_memory({ category: "lessons", content: "<decision + rationale>", project: "<project>" })
+   → Persist for future reference
+
+4. krusch_context_nugget_remember({ key: "<project>:architecture:<topic>", value: "<one-liner>", kind: "project", active_project: "<project>" })
+   → Quick-reference nudge
+```
+
+### Pattern 4: Session Close
+
+```
+1. krusch_context_add_memory({ category: "activity", content: "<session summary>", project: "<project>" })
+
+2. krusch_context_add_memory({ category: "outcomes", content: "<key decisions and results>" })
+
+3. krusch_context_nugget_remember({ key: "<project>:last-session", value: "<what was in progress>", kind: "project", active_project: "<project>" })
+
+4. krusch_context_consolidate({ category: "activity", project: "<project>", dry_run: true })
+   → Preview and optionally merge duplicate activity logs
+```
+
+### Pattern 5: File Exploration (When You Can't Access the Filesystem)
+
+```
+1. krusch_context_list_repos() → find the repo ID
+2. krusch_context_read_tree({ repository_id: <id> }) → browse root
+3. krusch_context_read_tree({ repository_id: <id>, tree_id: "<subdir hash>" }) → drill down
+4. krusch_context_read_blob({ blob_id: "<file hash>" }) → read file content
+```
+
+### Pattern 6: Documentation Lookup
+
+```
+1. krusch_docs_list() → see what manuals are available
+2. krusch_docs_search({ manual_name: "<name>", query: "<question>" }) → semantic search
+```
 
 ---
 
@@ -307,6 +917,10 @@ The nightly consolidation script that keeps the Context MCP fresh and hallucinat
 ```
 
 ---
+
+## 🗂️ Tool Quick-Reference
+
+> For full parameter details, defaults, and examples, see the [Complete Tool Reference](#-complete-tool-reference) above.
 
 | Tool | Description |
 |------|-------------|
