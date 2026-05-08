@@ -41,7 +41,7 @@ async function verifyDatabase() {
                 key VARCHAR(255) UNIQUE NOT NULL,
                 value TEXT NOT NULL,
                 kind VARCHAR(50) DEFAULT 'project',
-                embedding vector(1536),
+                embedding vector(1024),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )

@@ -9,7 +9,7 @@
 [![Version](https://img.shields.io/github/package-json/v/kruschdev/krusch-context-mcp.svg)](https://github.com/kruschdev/krusch-context-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ![Node](https://img.shields.io/badge/Node.js-22+-green.svg)
-![Ollama](https://img.shields.io/badge/Ollama-qwen2.5--coder:1.5b-blue.svg)
+![Ollama](https://img.shields.io/badge/Ollama-bge--large-blue.svg)
 ![DB](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20pgvector-lightgrey.svg)
 
 ---
@@ -20,7 +20,7 @@ Previously, each IDE agent session needed two separate MCP servers (`pg-git-mcp`
 
 ### 🛡️ Provider Independence & Sovereign Infrastructure
 
-By leveraging local Ollama instances (`qwen2.5-coder:1.5b` for embeddings, `llama3.2` for tagging) and local PostgreSQL with `pgvector`, Krusch Context MCP drastically decreases reliance on external LLM providers (like OpenAI, Anthropic, or Google).
+By leveraging local Ollama instances (`bge-large` for embeddings, `llama3.2` for tagging) and local PostgreSQL with `pgvector`, Krusch Context MCP drastically decreases reliance on external LLM providers (like OpenAI, Anthropic, or Google).
 
 - **Universal Codebase Search & Repository Browsing:** You aren't reliant on a provider's proprietary file-upload UI (like Claude Projects or OpenAI Custom GPTs). Because your entire codebase is stored in local PostgreSQL, any model you plug in instantly gains deep semantic search (`krusch_context_search_code`) AND the ability to autonomously browse project file structures by following directory links (`krusch_context_read_tree` and `krusch_context_read_blob`).
 - **External Framework & Manual Independence:** You aren't reliant on an LLM's pre-trained knowledge or provider-hosted web searches. By ingesting external code manuals into your local vector database, any model has instant, hallucination-free access to the exact library versions you use via the `krusch_docs_list` and `krusch_docs_search` tools.
@@ -44,8 +44,8 @@ Because the intelligence stack and retrieval pipeline run locally on your metal,
 - **🔍 Zero-Trust Context:** The `krusch_context_deep_search` tool queries both codebase (objective) and memory (subjective) in one call, giving agents a holistic reality check.
 - **📌 Zero-Trust Project Separation:** Project-specific episodic memories are physically isolated in local SQLite databases (`<project>/.agent/memory.db`), while global homelab learnings are stored in the central PostgreSQL database. This hybrid approach guarantees project context never leaks.
 - **🏷️ Auto-Tagging:** Memories are automatically tagged with keywords via `llama3.2`, making them discoverable without manual effort.
-- **♻️ Memory Consolidation:** Semantic deduplication detects and merges overlapping memories to prevent context bloat.
-- **💎 Holographic Nuggets Memory:** A unified, lightweight Key-Value store integrated directly into PostgreSQL to hold steering facts, user preferences, and project guidelines. *Credits to [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets) for the original Holographic Nuggets MCP architecture.*
+- **♻️ Memory Consolidation:** Semantic deduplication detects and merges overlapping memories using $L_2$-normalized centroid averaging, mathematically preserving cluster identity without invoking the Ollama API for fast, native consolidation.
+- **💎 Holographic Nuggets Memory:** A lightweight Key-Value store integrated into local SQLite (for project-specific nudges) and PostgreSQL (for global facts) to hold steering facts, user preferences, and project guidelines. *Credits to [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets) for the original Holographic Nuggets MCP architecture.*
 
 ---
 
@@ -57,8 +57,8 @@ The server acts as a unified facade over local SQLite databases and PostgreSQL s
 graph TD;
     A[Agent Tool Call] --> B{Krusch Context MCP};
     B -- Semantic Code Search --> C[(PG-Git: blobs)];
-    B -- Project Episodic Memory --> D[(SQLite: .agent/memory.db)];
-    B -- Global Episodic Memory --> E[(Postgres: ide_agent_memory)];
+    B -- Project Episodic & Nuggets --> D[(SQLite: .agent/memory.db)];
+    B -- Global Episodic & Nuggets --> E[(Postgres: ide_agent_memory & nuggets)];
     B -- Deep Search --> C;
     B -- Deep Search --> D;
     B -- Deep Search --> E;
@@ -68,7 +68,7 @@ graph TD;
 | Component | Details |
 |-----------|---------|
 | **Database** | Hybrid: Local SQLite (Project Memories) + PostgreSQL (Global & Codebase) |
-| **Embeddings** | Ollama `qwen2.5-coder:1.5b` @ 1536 dims, fleet load-balanced |
+| **Embeddings** | Ollama `bge-large` @ 1024 dims, fleet load-balanced |
 | **Tagging** | Ollama `llama3.2` for automatic keyword extraction |
 | **Tables** | `blobs` (Codebase), `ide_agent_memory` (Episodic), `ide_agent_nuggets` (Steering facts) |
 | **Protocol** | MCP Stdio transport |
@@ -80,7 +80,7 @@ graph TD;
 
 **Prerequisites:**
 - [Node.js](https://nodejs.org/) 18+
-- [Ollama](https://ollama.com/) running with `qwen2.5-coder:1.5b` and `llama3.2` models
+- [Ollama](https://ollama.com/) running with `bge-large` and `llama3.2` models
 - PostgreSQL with `pgvector` extension
 - The sibling `pg-git` project with a configured `.env`
 
@@ -305,7 +305,7 @@ The nightly consolidation script that keeps the Context MCP fresh and hallucinat
 Krusch Context MCP unifies two complementary halves of the **Agentic Brain**:
 
 - **Episodic Memory (The "Why")**: The `ide_agent_memory` system stores *intent* — architectural decisions, bugs encountered, and project goals. Project-specific memories are isolated in local SQLite (`memory.db`), while global patterns are centralized in Postgres. Powered by exponential temporal decay so the agent always prefers fresh context.
-- **Holographic Nuggets (The "How to Behave")**: The `ide_agent_nuggets` table stores lightweight steering facts — user preferences, project conventions, and behavioral corrections. These are retrieved via semantic similarity for fast, targeted nudges without the overhead of full episodic retrieval.
+- **Holographic Nuggets (The "How to Behave")**: The `ide_agent_nuggets` system stores lightweight steering facts — user preferences, project conventions, and behavioral corrections. Like episodic memory, nuggets are split between local SQLite for isolated project facts and global Postgres for overarching preferences. These are retrieved via semantic similarity for fast, targeted nudges without the overhead of full episodic retrieval.
 - **Codebase Memory (The "What" & "How")**: The `blobs` table stores *implementation* — semantically embedded source files across your entire codebase. The index scales horizontally: batch ingestion scripts (`sync_to_pg.js`, `sync_all_projects.js`) distribute embedding generation across multiple GPU nodes via fleet-aware Ollama load balancing, allowing you to index thousands of files without bottlenecking a single machine.
 
 By querying both simultaneously via `krusch_context_deep_search`, the agent can cross-reference *why* you chose a specific architecture with *how* it's currently implemented.
@@ -320,7 +320,7 @@ Krusch Context MCP inherits its configuration from the sibling `pg-git/.env` fil
 |----------|-------------|---------| 
 | `PG_CONNECTION_STRING` | PostgreSQL connection string for `kruschdb` | *(required, from pg-git)* |
 | `OLLAMA_URL` | Ollama endpoint for embeddings | `http://localhost:11434` |
-| `EMBED_MODEL` | Ollama embedding model | `qwen2.5-coder:1.5b` |
+| `EMBED_MODEL` | Ollama embedding model | `bge-large` |
 | `DECAY_RATE` | Exponential decay rate for temporal memory scoring | `0.01` |
 | `AUTO_TAG` | Auto-generate keyword tags on new memories | `true` (hardcoded) |
 | `TAG_MODEL` | Ollama model for tag extraction | `llama3.2` |
@@ -329,7 +329,7 @@ Krusch Context MCP inherits its configuration from the sibling `pg-git/.env` fil
 
 - **Ollama API returned 404**
   *Cause:* Embedding model not pulled.
-  *Fix:* Run `ollama pull qwen2.5-coder:1.5b` and `ollama pull llama3.2`.
+  *Fix:* Run `ollama pull bge-large` and `ollama pull llama3.2`.
 
 - **ECONNREFUSED on Ollama URL**
   *Cause:* Ollama is not running.
