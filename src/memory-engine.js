@@ -171,10 +171,10 @@ async function _searchProjectMemory(active_project, category, embeddingArray, li
         const date = dateStr.includes('Z') ? new Date(dateStr) : new Date(dateStr + 'Z');
         const ageDays = (now - date.getTime()) / (1000 * 60 * 60 * 24);
         const decay = Math.exp(-DECAY_RATE * ageDays);
-        // +0.1 bias intentionally boosts project-local results to prefer local context
+        // +0.3 bias intentionally boosts project-local results to prefer local context
         return {
             id: r.id, project: active_project, content: r.content, tags: r.tags,
-            created_at: r.created_at, similarity: (sim + 0.1) * decay, source: 'project'
+            created_at: r.created_at, similarity: (sim + 0.3) * decay, source: 'project'
         };
     }).sort((a, b) => b.similarity - a.similarity).slice(0, limit);
 }

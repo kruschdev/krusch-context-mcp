@@ -283,7 +283,7 @@ Semantic search over episodic memories with exponential temporal decay. Recent m
 **How results are ranked:**
 1. Embedding similarity is computed via cosine distance (Postgres) or cosine similarity (SQLite)
 2. Temporal decay is applied: `score = similarity × e^(-0.01 × age_in_days)`
-3. Project-local results get a `+0.1` bias to prefer local context over global
+3. Project-local results get a `+0.3` bias to prefer local context over global
 4. Results from both stores are merged, re-ranked, and truncated to `limit`
 
 **Example call:**
@@ -400,7 +400,7 @@ Semantic search over all files indexed in PG-Git (`kruschdb.blobs`). Results are
 |-----------|------|----------|---------|-------------|
 | `query` | `string` | ✅ | — | Natural language search query (e.g., "how does the scheduler work") |
 | `limit` | `number` | ❌ | `5` | Maximum results to return |
-| `project` | `string` | ❌ | `null` | Filter results to a specific project/repository name |
+| `project` | `string` | ❌ | `null` | Filter results to a specific project/repository name. If provided, it must exactly match a known repository name, or the tool will throw an error to prevent cross-project hallucination. |
 | `repository_id` | `number` | ❌ | `null` | Filter by exact repository ID (overrides `project` name lookup) |
 
 **Example call:**
@@ -482,7 +482,7 @@ Read the full content of a file by its blob SHA hash. Get blob IDs from `krusch_
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `query` | `string` | ✅ | — | Natural language search query |
-| `project` | `string` | ❌ | `null` | Optional project name to boost/filter results |
+| `project` | `string` | ❌ | `null` | Optional project name to boost/filter results. If provided, it must strictly match a PG-Git repository name to prevent cross-project context bleeding. |
 
 **What it searches (in parallel):**
 1. `kruschdb.blobs` — codebase files (top 3)

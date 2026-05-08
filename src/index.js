@@ -323,7 +323,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let resolvedRepoId = repository_id;
       if (project && !resolvedRepoId) {
           const repoRes = await pool.query(`SELECT id FROM repositories WHERE name = $1`, [project]);
-          if (repoRes.rows.length > 0) resolvedRepoId = repoRes.rows[0].id;
+          if (repoRes.rows.length > 0) {
+              resolvedRepoId = repoRes.rows[0].id;
+          } else {
+              throw new McpError(ErrorCode.InvalidParams, `Project '${project}' not found in PG-Git. Use krusch_context_list_repos to verify exact repository names.`);
+          }
       }
       
       const vector = await getEmbedding(searchQuery);
@@ -355,7 +359,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let resolvedRepoId = undefined;
       if (project) {
           const repoRes = await pool.query(`SELECT id FROM repositories WHERE name = $1`, [project]);
-          if (repoRes.rows.length > 0) resolvedRepoId = repoRes.rows[0].id;
+          if (repoRes.rows.length > 0) {
+              resolvedRepoId = repoRes.rows[0].id;
+          } else {
+              throw new McpError(ErrorCode.InvalidParams, `Project '${project}' not found in PG-Git. Use krusch_context_list_repos to verify exact repository names.`);
+          }
       }
       
       // Search all memory categories + blobs concurrently with shared embedding
