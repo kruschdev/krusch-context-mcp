@@ -20,6 +20,6 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^11.0.0",
     "ml-pca": "^4.1.1",
-    "pg-git": "file:../pg-git"
+    "pg-git-mcp": "^1.0.2"
   }
 }

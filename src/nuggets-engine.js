@@ -1,5 +1,5 @@
-import { pool } from 'pg-git/db/pool.js';
-import { getEmbedding } from 'pg-git/lib/embedding.js';
+import { pool } from 'pg-git-mcp/db/pool.js';
+import { getEmbedding } from 'pg-git-mcp/lib/embedding.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 
 import { getProjectDb, cosineSimilarity } from './sqlite-engine.js';

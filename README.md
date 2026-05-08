@@ -105,20 +105,22 @@ graph TD;
 - [Node.js](https://nodejs.org/) 22+
 - [Ollama](https://ollama.com/) running with `bge-large` and `llama3.2` models pulled
 - PostgreSQL with the [`pgvector`](https://github.com/pgvector/pgvector) extension enabled
-- **PG-Git (Required Sibling Dependency):** Krusch Context MCP directly imports database pooling and embedding logic from the [`pg-git`](https://github.com/kruschdev/krusch-context-mcp#-the-agentic-brain-synergy-with-pg-git) project via a `file:` link in `package.json`. You must clone `pg-git` into the same parent directory **and** configure its `.env` file. The server **will fail to start** if `pg-git` is missing or its `.env` is unconfigured.
+- **PG-Git-MCP (Required Dependency):** Krusch Context MCP directly imports database pooling and embedding logic from the `pg-git-mcp` NPM package. You must provide a valid `.env` file in the root of your `krusch-context-mcp` directory to configure the PostgreSQL pool. The server **will fail to start** if the database is unreachable or the `.env` is unconfigured.
 
 **Expected directory layout:**
 ```
-projects/                     # or any shared parent directory
-├── pg-git/                   # Required — DB pool, embeddings, config (.env lives here)
-├── krusch-context-mcp/       # This project
-└── ...                       # Other project directories (get their own .agent/memory.db)
+krusch-context-mcp/           # This project
+├── .env                      # Required — DB pool, embeddings, config
+├── package.json              
+└── ...                       
 ```
 
 **1. Install dependencies:**
 ```bash
-cd projects/krusch-context-mcp
+git clone https://github.com/kruschdev/krusch-context-mcp.git
+cd krusch-context-mcp
 npm install
+cp .env.example .env # (Or copy from your pg-git instance)
 ```
 
 **2. Start the server:**
@@ -959,11 +961,11 @@ By querying both simultaneously via `krusch_context_deep_search`, the agent can 
 
 ## ⚙️ Configuration
 
-Krusch Context MCP inherits its configuration from the sibling `pg-git/.env` file. It does **not** have its own `.env`.
+Krusch Context MCP inherits its configuration from the underlying `pg-git-mcp` package, but requires its own `.env` file in the project root to supply the database credentials.
 
 | Variable | Description | Default |
 |----------|-------------|---------| 
-| `PG_CONNECTION_STRING` | PostgreSQL connection string for `kruschdb` | *(required, from pg-git)* |
+| `PG_CONNECTION_STRING` | PostgreSQL connection string for `kruschdb` | *(required)* |
 | `OLLAMA_URL` | Primary Ollama endpoint for embeddings | `http://localhost:11434` |
 | `OLLAMA_FLEET_URLS` | Comma-separated list of additional Ollama endpoints for GPU fleet load balancing | *(none — single node)* |
 | `EMBED_MODEL` | Ollama embedding model | `bge-large` |
@@ -983,8 +985,8 @@ Krusch Context MCP inherits its configuration from the sibling `pg-git/.env` fil
   *Fix:* Start Ollama with `ollama serve`, or verify fleet node availability.
 
 - **FATAL: Cannot reach PostgreSQL**
-  *Cause:* `kruschdb` is unreachable or `pg-git/.env` is misconfigured.
-  *Fix:* Verify `PG_CONNECTION_STRING` in `../pg-git/.env` and ensure `kruschserv:5434` is accessible.
+  *Cause:* `kruschdb` is unreachable or `.env` is misconfigured.
+  *Fix:* Verify `PG_CONNECTION_STRING` in `.env` and ensure `kruschserv:5434` is accessible.
 
 - **Column "project" does not exist**
   *Cause:* The `ide_agent_memory` table predates the schema migration.
@@ -1013,7 +1015,7 @@ krusch-context-mcp/
 │   └── test_sqlite_memory.js     # SQLite memory engine unit tests
 ├── docs/assets/            # Banner and documentation images
 ├── spec.md                 # Original project specification
-└── package.json            # ESM, file: link to pg-git
+└── package.json            # ESM configuration
 ```
 
 ---

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { pool } from 'pg-git/db/pool.js';
+import { pool } from 'pg-git-mcp/db/pool.js';
 
 import { fileURLToPath } from 'url';
 

@@ -15,9 +15,9 @@ import path from 'path';
 // Import logic from our required MCP packages
 import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, consolidateMemories } from './memory-engine.js';
 import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
-import { getEmbedding } from 'pg-git/lib/embedding.js';
-import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git/server/git-engine.js';
-import { pool } from 'pg-git/db/pool.js';
+import { getEmbedding } from 'pg-git-mcp/lib/embedding.js';
+import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
+import { pool } from 'pg-git-mcp/db/pool.js';
 
 // Verify DB connection
 async function verifyDatabase() {
