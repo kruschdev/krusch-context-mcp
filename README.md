@@ -61,9 +61,10 @@ This used to require running separate MCP servers for memory, codebase search, a
 
 - **💾 Shared Connection Pool** — Single `pg.Pool` to `kruschdb`, no duplicate connections
 - **🧠 Fleet-Balanced Embeddings** — Round-robin load balancing across multiple Ollama GPU nodes
-- **📌 Lakebase Architecture** — Inspired by [Neon's decoupled architecture](https://neon.com/docs/introduction/architecture-overview): local SQLite caches for zero-latency reads, async write-behind to durable PostgreSQL storage
-- **🏷️ Auto-Tagging** — Memories are automatically tagged via `llama3.2` for discoverability
+- **📌 Lakebase Architecture** — Inspired by [Neon's decoupled architecture](https://neon.com/docs/introduction/architecture-overview): local SQLite caches for zero-latency reads, async write-behind to durable PostgreSQL storage. The `+0.3` local scoring bias acts as hierarchical routing to mitigate Ebbinghaus forgetting (F6) as the global corpus grows.
+- **🏷️ Hybrid Retrieval & Auto-Tagging** — Memories are automatically tagged via `llama3.2` for keyword discoverability, addressing pure-cosine failure modes (F1 Negation, F2 Numeric, F3 Role-Swap) identified by Sentra.
 - **♻️ Memory Consolidation** — Semantic dedup using L2-normalized centroid averaging without re-embedding. *Derived from [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation).*
+- **🛡️ RAG Resilience** — Architected to explicitly avoid "Hubness" (F4) and "Ebbinghaus Forgetting" (F6) dimensional collapse failure modes. *Guided by [Sentra Technical Report: The Geometry of Failure](https://github.com/niashwin/sentra-rag-failure-modes).*
 - **💎 Holographic Nuggets** — Lightweight steering facts split between project-local SQLite and global PostgreSQL. *Adapted from [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets).*
 
 ---

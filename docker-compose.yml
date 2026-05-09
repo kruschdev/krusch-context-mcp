@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  kruschdb:
+    image: pgvector/pgvector:pg16
+    container_name: kruschdb-mcp
+    restart: always
+    environment:
+      POSTGRES_USER: krusch
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: kruschdb
+    ports:
+      - "5442:5432"
+    volumes:
+      - kruschdb_data:/var/lib/postgresql/data
+
+  # Optional: Ollama container for local embedding models if not running natively
+  # ollama:
+  #   image: ollama/ollama
+  #   container_name: ollama-mcp
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   # To initialize models after starting:
+  #   # docker exec -it ollama-mcp ollama run bge-large
+  #   # docker exec -it ollama-mcp ollama run llama3.2
+
+volumes:
+  kruschdb_data:
+  # ollama_data:

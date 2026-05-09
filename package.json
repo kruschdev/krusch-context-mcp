@@ -6,7 +6,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test tests/"
+    "test": "node --test tests/",
+    "install-hook": "node scripts/install_git_hook.js"
   },
   "keywords": [
     "mcp",
@@ -20,6 +21,6 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^11.0.0",
     "ml-pca": "^4.1.1",
-    "pg-git-mcp": "file:../pg-git"
+    "pg-git-mcp": "^1.0.2"
   }
 }
