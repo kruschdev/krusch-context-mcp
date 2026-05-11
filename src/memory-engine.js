@@ -1,7 +1,7 @@
 import { pool } from 'pg-git-mcp/db/pool.js';
 import { getEmbedding, ollamaQueue, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { getProjectDb, cosineSimilarity } from './sqlite-engine.js';
+import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
 
 const DECAY_RATE = 0.01;
 const AUTO_TAG = true; // Hardcoded for context MCP
@@ -37,6 +37,7 @@ async function generateTags(text) {
     }
 }
 
+
 /**
  * Persists a memory to the local project-specific SQLite cache and queues for async sync.
  * @param {string} project - Project name.
@@ -54,9 +55,9 @@ async function _addProjectMemory(project, category, content, finalTags, embeddin
         VALUES (?, ?, ?, ?)
     `).run(category, content, finalTags, embeddingStr);
     
-    import('./sqlite-engine.js').then(({ pushProjectMemory }) => {
-        pushProjectMemory(project, db).catch(e => console.error(`[memory-engine] Async push failed for ${project}:`, e));
-    });
+    pushProjectMemory(project, db).catch(e =>
+        console.error(`[memory-engine] Async push failed for ${project}:`, e)
+    );
     return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${project} (${category})` }] };
 }
 
@@ -266,6 +267,97 @@ export async function listMemories({ category, project, limit = 10 }) {
 }
 
 /**
+ * Proactively compiles recent project state into a unified markdown document.
+ * Uses a single PG pool connection for all queries to prevent pool exhaustion.
+ * @param {object} params
+ * @param {string} params.project - Target project string.
+ * @returns {Promise<{content: Array}>} MCP tool response
+ */
+export async function compileProjectState({ project }) {
+    if (!project) throw new McpError(ErrorCode.InvalidParams, "Missing project");
+
+    const state = { priorities: [], outcomes: [], activity: [], lessons: [], nudges: [] };
+    const db = await getProjectDb(project);
+
+    const fetchCategory = async (client, category, limit) => {
+        let results = [];
+        if (db) {
+            const localRows = db.prepare(`SELECT content, created_at FROM ide_agent_memory WHERE category = ? ORDER BY created_at DESC LIMIT ?`).all(category, limit);
+            results.push(...localRows.map(r => ({ ...r, source: 'project' })));
+        }
+        
+        // Also fetch global lessons/priorities as a fallback to ensure we have context
+        try {
+            const res = await client.query(`SELECT content, created_at FROM ide_agent_memory WHERE category = $1 AND project IS NULL ORDER BY created_at DESC LIMIT $2`, [category, limit]);
+            results.push(...res.rows.map(r => ({ ...r, source: 'global' })));
+        } catch (e) {
+            console.warn(`[krusch-context] Warning: Global fetch failed for ${category} (${e.message})`);
+        }
+        
+        return results.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, limit);
+    };
+
+    const client = await pool.connect();
+    try {
+        state.priorities = await fetchCategory(client, 'priorities', 5);
+        state.outcomes = await fetchCategory(client, 'outcomes', 5);
+        state.activity = await fetchCategory(client, 'activity', 3);
+        state.lessons = await fetchCategory(client, 'lessons', 5);
+
+        if (db) {
+            const nudgeRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets WHERE kind IN ('project', 'agent')`).all();
+            state.nudges.push(...nudgeRows);
+        }
+        try {
+            const res = await client.query(`SELECT key, value, kind FROM ide_agent_nuggets WHERE kind IN ('project', 'agent') AND (project = $1 OR project IS NULL)`, [project]);
+            state.nudges.push(...res.rows);
+        } catch (e) {
+            console.warn(`[krusch-context] Warning: Global nudges fetch failed (${e.message})`);
+        }
+    } finally {
+        client.release();
+    }
+
+    const uniqueNudgesMap = new Map();
+    for (const n of state.nudges) {
+        if (!uniqueNudgesMap.has(n.key)) uniqueNudgesMap.set(n.key, n);
+    }
+    const uniqueNudges = Array.from(uniqueNudgesMap.values());
+
+    let output = `# 🧠 Compiled Project State: ${project}\n\n`;
+
+    output += `## 🎯 Priorities (Current Focus)\n`;
+    if (state.priorities.length === 0) output += `- No recent priorities found.\n`;
+    for (const p of state.priorities) {
+        const prefix = p.source === 'project' ? '' : '[GLOBAL] ';
+        output += `- ${prefix}${p.content}\n`;
+    }
+    output += `\n`;
+
+    output += `## 📌 Outcomes (What just happened)\n`;
+    if (state.outcomes.length === 0) output += `- No recent outcomes found.\n`;
+    for (const o of state.outcomes) {
+        const prefix = o.source === 'project' ? '' : '[GLOBAL] ';
+        output += `- ${prefix}${o.content}\n`;
+    }
+    output += `\n`;
+
+    output += `## 📖 Lessons (Architectural Rules)\n`;
+    if (state.lessons.length === 0) output += `- No recent lessons found.\n`;
+    for (const l of state.lessons) {
+        const prefix = l.source === 'project' ? '' : '[GLOBAL] ';
+        output += `- ${prefix}${l.content}\n`;
+    }
+    output += `\n`;
+
+    output += `## 💎 Nudges (Conventions)\n`;
+    if (uniqueNudges.length === 0) output += `- No nudges found.\n`;
+    for (const n of uniqueNudges) output += `- [${n.kind}] **${n.key}**: ${n.value}\n`;
+
+    return { content: [{ type: "text", text: output }] };
+}
+
+/**
  * Internal helper to delete a memory from the local SQLite project cache.
  * @param {number} id - Memory ID.
  * @param {string} source_project - Project name.
@@ -419,7 +511,7 @@ export async function updateMemory({ id, content, tags, project, source_project 
  * Calculates an L2-normalized centroid between two vector arrays for consolidation.
  * @param {string} embStrA - JSON string representation of vector A.
  * @param {string} embStrB - JSON string representation of vector B.
- * @returns {string} JSON string of the newly normalized centroid vector.
+ * @returns {string|null} JSON string of the newly normalized centroid vector, or null on failure.
  */
 function _calculateCentroidStr(embStrA, embStrB) {
     let arrA = [];
@@ -429,9 +521,12 @@ function _calculateCentroidStr(embStrA, embStrB) {
         const parsedB = JSON.parse(embStrB);
         if (Array.isArray(parsedA)) arrA = parsedA;
         if (Array.isArray(parsedB)) arrB = parsedB;
-    } catch(e) {}
+    } catch(e) {
+        console.warn(`[krusch-context] Warning: Failed to parse embeddings for centroid calculation: ${e.message}`);
+        return null;
+    }
     
-    if (!arrA.length || !arrB.length) return `[]`;
+    if (!arrA.length || !arrB.length) return null;
     const len = Math.min(arrA.length, arrB.length);
     
     let centroid = [];
@@ -442,6 +537,27 @@ function _calculateCentroidStr(embStrA, embStrB) {
     const norm = Math.sqrt(centroid.reduce((sum, val) => sum + val * val, 0));
     if (norm === 0) return `[${centroid.join(',')}]`;
     return `[${centroid.map(val => val / norm).join(',')}]`;
+}
+
+/**
+ * Resolves a duplicate pair into a merge result. Pure function — no side effects.
+ * Keeps the newer record, appends the older's content, computes L2-normalized centroid.
+ * @param {object} pair - Pair with id_a, id_b, content_a, content_b, created_a, created_b, emb_a, emb_b.
+ * @returns {{keepId: *, dropId: *, mergedContent: string, embeddingStr: string}|null} Null if centroid failed.
+ */
+function _mergeMemoryPair(pair) {
+    const keepId = pair.created_a > pair.created_b ? pair.id_a : pair.id_b;
+    const dropId = keepId === pair.id_a ? pair.id_b : pair.id_a;
+    const keepContent = keepId === pair.id_a ? pair.content_a : pair.content_b;
+    const dropContent = keepId === pair.id_a ? pair.content_b : pair.content_a;
+
+    const mergedContent = `${keepContent}\n\n[Consolidated from ID ${dropId}]: ${dropContent}`;
+    const embeddingStr = _calculateCentroidStr(pair.emb_a, pair.emb_b);
+    if (!embeddingStr) {
+        console.warn(`[krusch-context] Skipping merge of IDs ${keepId}/${dropId}: centroid calculation failed`);
+        return null;
+    }
+    return { keepId, dropId, mergedContent, embeddingStr };
 }
 
 /**
@@ -500,17 +616,12 @@ async function _consolidateSqlite(category, project, threshold, dry_run) {
     const mergeTx = db.transaction(() => {
         for (const p of pairs) {
             if (merged.has(p.id_a) || merged.has(p.id_b)) continue;
-            const keepId = p.created_a > p.created_b ? p.id_a : p.id_b;
-            const dropId = keepId === p.id_a ? p.id_b : p.id_a;
-            const keepContent = keepId === p.id_a ? p.content_a : p.content_b;
-            const dropContent = keepId === p.id_a ? p.content_b : p.content_a;
-
-            const mergedContent = `${keepContent}\n\n[Consolidated from ID ${dropId}]: ${dropContent}`;
-            const embeddingStr = _calculateCentroidStr(p.emb_a, p.emb_b);
+            const result = _mergeMemoryPair(p);
+            if (!result) continue;
             
-            db.prepare(`UPDATE ide_agent_memory SET content = ?, embedding = ? WHERE id = ?`).run(mergedContent, embeddingStr, keepId);
-            db.prepare(`DELETE FROM ide_agent_memory WHERE id = ?`).run(dropId);
-            merged.add(dropId);
+            db.prepare(`UPDATE ide_agent_memory SET content = ?, embedding = ? WHERE id = ?`).run(result.mergedContent, result.embeddingStr, result.keepId);
+            db.prepare(`DELETE FROM ide_agent_memory WHERE id = ?`).run(result.dropId);
+            merged.add(result.dropId);
             mergeCount++;
         }
     });
@@ -561,17 +672,12 @@ async function _consolidatePostgres(category, threshold, dry_run) {
         let mergeCount = 0;
         for (const p of pairs) {
             if (merged.has(p.id_a) || merged.has(p.id_b)) continue;
-            const keepId = p.created_a > p.created_b ? p.id_a : p.id_b;
-            const dropId = keepId === p.id_a ? p.id_b : p.id_a;
-            const keepContent = keepId === p.id_a ? p.content_a : p.content_b;
-            const dropContent = keepId === p.id_a ? p.content_b : p.content_a;
-
-            const mergedContent = `${keepContent}\n\n[Consolidated from ID ${dropId}]: ${dropContent}`;
-            const embeddingStr = _calculateCentroidStr(p.emb_a, p.emb_b);
+            const result = _mergeMemoryPair(p);
+            if (!result) continue;
             
-            await client.query(`UPDATE ide_agent_memory SET content = $1, embedding = $2::vector WHERE id = $3`, [mergedContent, embeddingStr, keepId]);
-            await client.query(`DELETE FROM ide_agent_memory WHERE id = $1`, [dropId]);
-            merged.add(dropId);
+            await client.query(`UPDATE ide_agent_memory SET content = $1, embedding = $2::vector WHERE id = $3`, [result.mergedContent, result.embeddingStr, result.keepId]);
+            await client.query(`DELETE FROM ide_agent_memory WHERE id = $1`, [result.dropId]);
+            merged.add(result.dropId);
             mergeCount++;
         }
         return { content: [{ type: "text", text: `[krusch-context] 🔗 Consolidated ${mergeCount} duplicate Global PG pairs in category: ${category}` }] };

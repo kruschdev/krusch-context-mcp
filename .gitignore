@@ -6,3 +6,5 @@ INFLIGHT.md
 spec.md
 AGENTS.md
 .agent/
+scratch_*.js
+scripts/scratch/

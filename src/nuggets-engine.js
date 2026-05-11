@@ -2,7 +2,7 @@ import { pool } from 'pg-git-mcp/db/pool.js';
 import { getEmbedding } from 'pg-git-mcp/lib/embedding.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 
-import { getProjectDb, cosineSimilarity } from './sqlite-engine.js';
+import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
 
 const VALID_KINDS = new Set(['project', 'user', 'agent']);
 
@@ -34,9 +34,9 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
             `).run(key, value, kind, embeddingStr);
             
             // Asynchronous write-behind (Compute Cache -> Object Storage)
-            import('./sqlite-engine.js').then(({ pushProjectMemory }) => {
-                pushProjectMemory(active_project, localDb).catch(e => console.error(`[nuggets-engine] Async push failed for ${active_project}:`, e));
-            });
+            pushProjectMemory(active_project, localDb).catch(e =>
+                console.error(`[nuggets-engine] Async push failed for ${active_project}:`, e)
+            );
 
             return { content: [{ type: "text", text: `[krusch-context] 🧠 Nugget remembered natively in SQLite (.agent/memory.db) for project '${active_project}': '${key}'` }] };
         }

@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { getRepoRootTree, getTreeEntries, getBlob } from '../../pg-git/server/git-engine.js';
+import { getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
 import { consolidateMemories } from '../src/memory-engine.js';
-import { pool } from '../../pg-git/db/pool.js';
+import { writeState, resolveConflict } from '../src/v2-engine.js';
+import { pool } from 'pg-git-mcp/db/pool.js';
 
 test('Integration Test Suite for krusch-context-mcp tools', async (t) => {
     
@@ -56,6 +57,50 @@ test('Integration Test Suite for krusch-context-mcp tools', async (t) => {
         assert.ok(res.content, 'Consolidate should return content');
         const text = res.content[0].text;
         assert.ok(text.includes('Consolidation Preview') || text.includes('No duplicate'), 'Should specify preview or no duplicates in output');
+    });
+
+    await t.test('should write state and resolve conflicts (v2 schema)', async () => {
+        // Write state A
+        const resA = await writeState({
+            content: "Testing state A for conflict resolution",
+            category: "activity",
+            author_id: "agent:test"
+        });
+        assert.ok(resA.content[0].text.includes('New ID:'), 'Should return New ID for state A');
+        const idA = resA.content[0].text.match(/New ID: ([0-9a-fA-F-]+)/)[1];
+
+        // Write state B
+        const resB = await writeState({
+            content: "Testing state B for conflict resolution",
+            category: "activity",
+            author_id: "agent:test"
+        });
+        assert.ok(resB.content[0].text.includes('New ID:'), 'Should return New ID for state B');
+        const idB = resB.content[0].text.match(/New ID: ([0-9a-fA-F-]+)/)[1];
+
+        // Resolve conflicts
+        const resResolve = await resolveConflict({
+            conflict_ids: [idA, idB],
+            resolution_content: "Resolved state AB",
+            author_id: "agent:test"
+        });
+        assert.ok(resResolve.content[0].text.includes('Unified State ID:'), 'Should return Unified State ID');
+        const unifiedId = resResolve.content[0].text.match(/Unified State ID: ([0-9a-fA-F-]+)/)[1];
+        
+        // Verify old states are deprecated
+        const checkRes = await pool.query('SELECT id, status FROM homelab_memory_v2 WHERE id IN ($1, $2, $3)', [idA, idB, unifiedId]);
+        
+        const stateA = checkRes.rows.find(r => r.id === idA);
+        const stateB = checkRes.rows.find(r => r.id === idB);
+        const stateUnified = checkRes.rows.find(r => r.id === unifiedId);
+
+        assert.strictEqual(stateA.status, 'deprecated', 'State A should be deprecated');
+        assert.strictEqual(stateB.status, 'deprecated', 'State B should be deprecated');
+        assert.strictEqual(stateUnified.status, 'active', 'Unified state should be active');
+
+        // Cleanup
+        await pool.query('DELETE FROM memory_to_blob_edges WHERE memory_id IN ($1, $2, $3)', [idA, idB, unifiedId]);
+        await pool.query('DELETE FROM homelab_memory_v2 WHERE id IN ($1, $2, $3)', [idA, idB, unifiedId]);
     });
     
     // Cleanup pool

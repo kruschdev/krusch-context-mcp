@@ -2,7 +2,7 @@
 
 > Unified MCP server: PG-Git codebase search + Homelab episodic memory + Holographic Nuggets + External docs search.
 
-> **Last audit**: 2026-05-08 | **Version**: 1.0.0 | **Tools**: 18
+> **Last audit**: 2026-05-11 | **Version**: 1.0.0 | **Tools**: 25
 
 ## Architecture Overview
 
@@ -46,11 +46,11 @@ Project-scoped data follows a two-tier model:
 | File | Responsibility |
 |------|---------------|
 | `src/index.js` | MCP server entry point — tool registration, routing, DB migration, codebase/docs/health tools |
-| `src/memory-engine.js` | Episodic memory CRUD (add, search, list, delete, update, consolidate), tag generation, centroid merge |
+| `src/memory-engine.js` | Episodic memory CRUD (add, search, list, delete, update, consolidate), v2 substrate (write_state, resolve_conflict, provenance, ontology, lens, graph) |
 | `src/nuggets-engine.js` | Holographic Nuggets CRUD (remember, nudges, forget, list) with hybrid SQLite/Postgres routing |
 | `src/sqlite-engine.js` | Lakebase SQLite layer — project DB init, pull/push sync, cosine similarity helper |
 
-## Tool Surface (18 tools)
+## Tool Surface (25 tools)
 
 | Tool | Source | Key Parameters |
 |------|--------|---------------|
@@ -60,6 +60,13 @@ Project-scoped data follows a two-tier model:
 | `krusch_context_delete_memory` | `memory-engine.js` | `id`★, `source_project` |
 | `krusch_context_update_memory` | `memory-engine.js` | `id`★, `content`, `tags`, `project`, `source_project` |
 | `krusch_context_consolidate` | `memory-engine.js` | `category`★, `project`, `threshold`, `dry_run` |
+| `krusch_context_compile_state` | `memory-engine.js` | `project`★ |
+| `krusch_context_write_state` | `memory-engine.js` | `content`★, `category`★, `author_id`★, `parent_id`, `source_ref`, `ontology_tags` |
+| `krusch_context_resolve_conflict` | `memory-engine.js` | `conflict_ids`★, `resolution_content`★, `author_id`★ |
+| `krusch_context_get_provenance` | `memory-engine.js` | `memory_id`★ |
+| `krusch_context_update_ontology` | `memory-engine.js` | `old_tag`★, `new_tag`★ |
+| `krusch_context_search_lens` | `memory-engine.js` | `query`★, `roles`★, `limit`, `status` |
+| `krusch_context_traverse_graph` | `memory-engine.js` | `memory_id`★, `direction`, `depth` |
 | `krusch_context_search_code` | `index.js` → `pg-git` | `query`★, `limit`, `project`, `repository_id` |
 | `krusch_context_list_repos` | `index.js` → `pg-git` | *(none)* |
 | `krusch_context_read_tree` | `index.js` → `pg-git` | `repository_id`★, `tree_id` |
@@ -81,19 +88,23 @@ Project-scoped data follows a two-tier model:
 krusch-context-mcp/
 ├── src/
 │   ├── index.js              # MCP server entry — tool registration & routing
-│   ├── memory-engine.js      # Episodic memory CRUD + consolidation
+│   ├── memory-engine.js      # Episodic memory CRUD + v2 substrate + consolidation
 │   ├── nuggets-engine.js     # Holographic Nuggets CRUD
 │   └── sqlite-engine.js      # Lakebase SQLite layer (pull/push sync)
 ├── scripts/
 │   ├── benchmark_latency.js  # Embedding + search latency measurement
 │   ├── clear_sqlite_embeddings.js  # Reset local SQLite embedding columns
 │   ├── eval_accuracy.js      # Retrieval precision/recall evaluation
-│   └── spectral_calibration.js     # Embedding space quality analysis
+│   ├── install_git_hook.js   # Post-commit hook installer for Lakebase auto-sync
+│   ├── spectral_calibration.js     # Embedding space quality analysis
+│   └── stress_test_consolidation.js # Synthetic consolidation stress test
 ├── tests/                    # Test suite (node --test)
-│   ├── memory-engine.test.js # Integration tests (pg-git + consolidation)
-│   ├── test_client.js        # Smoke test for all 18 tools via JSON-RPC
+│   ├── memory-engine.test.js # Integration tests (pg-git + consolidation + v2 write/resolve)
+│   ├── test_client.js        # Smoke test for all tools via JSON-RPC
 │   ├── test_lakebase.js      # Lakebase pull/push sync verification
-│   └── test_sqlite_memory.js # SQLite memory engine unit tests
+│   ├── test_sqlite_memory.js # SQLite memory engine unit tests
+│   ├── test_v2_memory.js     # Company Brain v2 multi-agent write + conflict resolution
+│   └── test_v2_lens_graph.js  # Lens-based retrieval + graph traversal
 ├── docs/assets/              # Banner and documentation images
 ├── spec.md                   # Original project specification
 ├── INFLIGHT.md               # Session state persistence

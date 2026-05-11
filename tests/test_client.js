@@ -174,7 +174,106 @@ async function run() {
         console.log(`   ⚠️ ${e.message}`);
     }
 
-    console.log('\n✅ All tests completed.');
+    // ============================================================
+    // v2 Company Brain Substrate Tests
+    // ============================================================
+
+    // 9. Test krusch_context_write_state
+    console.log('\n🧠 Testing krusch_context_write_state...');
+    let v2StateId = null;
+    try {
+        const wsRes = await send('tools/call', {
+            name: 'krusch_context_write_state',
+            arguments: {
+                content: '__smoke_test_v2_state__ — ephemeral test state for smoke testing',
+                category: 'activity',
+                author_id: 'smoke-test-client',
+                ontology_tags: ['smoke-test', 'ephemeral']
+            }
+        });
+        const text = wsRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text}`);
+        // Extract the new state ID from the response
+        const idMatch = text.match(/New ID:\s*([0-9a-f-]+)/i);
+        if (idMatch) v2StateId = idMatch[1];
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    // 10. Test krusch_context_get_provenance (using the state we just wrote)
+    console.log('\n📜 Testing krusch_context_get_provenance...');
+    try {
+        const targetId = v2StateId || '00000000-0000-0000-0000-000000000000';
+        const provRes = await send('tools/call', {
+            name: 'krusch_context_get_provenance',
+            arguments: { memory_id: targetId }
+        });
+        const text = provRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text.substring(0, 300)}`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    // 11. Test krusch_context_search_lens
+    console.log('\n🔭 Testing krusch_context_search_lens...');
+    try {
+        const lensRes = await send('tools/call', {
+            name: 'krusch_context_search_lens',
+            arguments: { query: 'smoke test ephemeral state', roles: ['agent', 'engineer'], limit: 2 }
+        });
+        const text = lensRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text.substring(0, 300)}`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    // 12. Test krusch_context_traverse_graph
+    console.log('\n🕸️ Testing krusch_context_traverse_graph...');
+    try {
+        const targetId = v2StateId || '00000000-0000-0000-0000-000000000000';
+        const graphRes = await send('tools/call', {
+            name: 'krusch_context_traverse_graph',
+            arguments: { memory_id: targetId, direction: 'all', depth: 2 }
+        });
+        const text = graphRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text.substring(0, 300)}`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    // 13. Test krusch_context_update_ontology (rename a tag that won't collide)
+    console.log('\n🏷️ Testing krusch_context_update_ontology...');
+    try {
+        const ontoRes = await send('tools/call', {
+            name: 'krusch_context_update_ontology',
+            arguments: { old_tag: 'smoke-test', new_tag: 'smoke-test-renamed' }
+        });
+        const text = ontoRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text}`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    // 14. Cleanup: delete the v2 test state directly via SQL (not a tool, just best-effort)
+    // Note: resolve_conflict needs 2+ active states, so we just validate it returns the right error
+    console.log('\n🔗 Testing krusch_context_resolve_conflict (expected error: need 2+ states)...');
+    try {
+        const rcRes = await send('tools/call', {
+            name: 'krusch_context_resolve_conflict',
+            arguments: {
+                conflict_ids: ['00000000-0000-0000-0000-000000000000'],
+                resolution_content: 'test resolution',
+                author_id: 'smoke-test-client'
+            }
+        });
+        const text = rcRes.result?.content?.[0]?.text || rcRes.error?.message || '';
+        console.log(`   ${text.substring(0, 300)}`);
+    } catch (e) {
+        // Expected: "Need at least 2 conflict_ids"
+        console.log(`   ✅ Expected error: ${e.message}`);
+    }
+
+    console.log('\n✅ All tests completed (v1 + v2).');
     child.kill('SIGTERM');
     setTimeout(() => process.exit(0), 1000);
 }

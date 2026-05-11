@@ -12,6 +12,9 @@ const dbCache = new Map();
 
 /**
  * Get or initialize a per-project SQLite database connection.
+ * Stores a Promise in dbCache to prevent the pull race condition — concurrent
+ * callers block on the same initialization promise rather than getting a
+ * half-populated DB.
  * Returns null if the project folder is not found.
  */
 export async function getProjectDb(projectName) {
@@ -21,6 +24,33 @@ export async function getProjectDb(projectName) {
         return dbCache.get(projectName);
     }
     
+    // Store the initialization promise immediately to prevent concurrent callers
+    // from re-entering this block before pullProjectMemory completes.
+    const initPromise = _initProjectDb(projectName);
+    dbCache.set(projectName, initPromise);
+    
+    try {
+        const db = await initPromise;
+        // Replace the promise with the resolved DB instance for future fast access
+        if (db) {
+            dbCache.set(projectName, db);
+        } else {
+            dbCache.delete(projectName);
+        }
+        return db;
+    } catch (e) {
+        dbCache.delete(projectName);
+        throw e;
+    }
+}
+
+/**
+ * Internal: Creates, migrates, and seeds a project SQLite database.
+ * Awaits pullProjectMemory so the DB is fully populated before returning.
+ * @param {string} projectName
+ * @returns {Promise<Database|null>}
+ */
+async function _initProjectDb(projectName) {
     // Homelab projects are in the sibling directories of this MCP server
     const projectsRoot = path.resolve(__dirname, '../../');
     const repoPath = path.join(projectsRoot, projectName);
@@ -72,10 +102,12 @@ export async function getProjectDb(projectName) {
         if (!e.message.includes('duplicate column name')) throw e;
     }
     
-    dbCache.set(projectName, db);
-    
-    // Asynchronous read-ahead (Pull from Object Store to Compute Cache)
-    pullProjectMemory(projectName, db).catch(e => console.error(`[sqlite-engine] Async pull failed for ${projectName}:`, e));
+    // Synchronous read-ahead — await pull so callers get a fully populated DB
+    try {
+        await pullProjectMemory(projectName, db);
+    } catch (e) {
+        console.error(`[sqlite-engine] Pull failed for ${projectName}:`, e);
+    }
     
     return db;
 }
