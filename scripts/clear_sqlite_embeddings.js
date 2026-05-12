@@ -1,8 +1,10 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 
-const HOMELAB_ROOT = '/home/kruschdev/homelab/projects';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const HOMELAB_ROOT = path.resolve(__dirname, '../../../');
 const PROJECTS = [
     'annotated', 'berean', 'caren', 'first-things-first', 'heyjb',
     'hivemind-companion-ext', 'home-ai', 'krusch-dbos-mcp', 'krusch-agentic-mcp',
