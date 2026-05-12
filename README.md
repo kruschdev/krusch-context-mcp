@@ -47,7 +47,7 @@ A single [Model Context Protocol](https://modelcontextprotocol.io/) server expos
 **Prerequisites:** [Node.js 22+](https://nodejs.org/) · [Ollama](https://ollama.com/) with `bge-large` and `llama3.2` · PostgreSQL with [`pgvector`](https://github.com/pgvector/pgvector)
 
 ```bash
-# 1. Install PG-Git-MCP (codebase ingestion engine)
+# 1. Install [PG-Git-MCP](https://github.com/kruschdev/pg-git-mcp) (codebase ingestion engine)
 npm install -g pg-git-mcp
 
 # 2. Clone and install
