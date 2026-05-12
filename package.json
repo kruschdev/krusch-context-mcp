@@ -6,7 +6,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.js",
     "install-hook": "node scripts/install_git_hook.js"
   },
   "keywords": [
