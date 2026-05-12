@@ -9,40 +9,25 @@
  */
 
 import { pool } from 'pg-git-mcp/db/pool.js';
-import { getEmbedding, ollamaQueue, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
+import { getEmbedding, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { generateTagsFromLLM } from './llm-tags.js';
 
 const AUTO_TAG = true;
 
+const ONTOLOGY_PROMPT_PREFIX = `Analyze the following text and extract 3 to 5 concise ontology tags. Choose primarily from these categories if they apply: decision, commitment, objection, escalation, dependency, assumption, customer pain, owner, precedent, open question. You may add other relevant keywords. Respond ONLY with a comma-separated list of tags, nothing else.\n\nText: "`;
+
 /**
- * Generates semantic ontology tags for memory content using a local LLM.
+ * Generates semantic ontology tags for memory content using the shared LLM pipeline.
  * Aligned with the Sentra Interaction/Action memory layers.
  * @param {string} text - The text content to tag.
- * @returns {Promise<string[]|null>} Array of tags or null if failed.
+ * @returns {Promise<string[]|null>} Array of lowercase tags or null if failed.
  */
 async function generateOntologyTags(text) {
-    try {
-        return await ollamaQueue.enqueue(async (endpoint) => {
-            const url = `${endpoint.replace(/\/$/, '')}/api/generate`;
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: "llama3.2",
-                    prompt: `Analyze the following text and extract 3 to 5 concise ontology tags. Choose primarily from these categories if they apply: decision, commitment, objection, escalation, dependency, assumption, customer pain, owner, precedent, open question. You may add other relevant keywords. Respond ONLY with a comma-separated list of tags, nothing else.\n\nText: "${text}"`,
-                    stream: false
-                })
-            });
-            
-            if (!res.ok) throw new Error(`Status ${res.status}`);
-            
-            const data = await res.json();
-            return data.response.split(',').map(t => t.trim().toLowerCase()).filter(t => t.length > 0);
-        }, PRIORITY.MEDIUM);
-    } catch (err) {
-        console.error(`[krusch-context] Warning: Ontology tag generation failed: ${err.message}`);
-        return null;
-    }
+    return generateTagsFromLLM(text, {
+        prompt: `${ONTOLOGY_PROMPT_PREFIX}${text}"`,
+        lowercase: true
+    });
 }
 
 /**

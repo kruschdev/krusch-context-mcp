@@ -50,6 +50,7 @@ Project-scoped data follows a two-tier model:
 | `src/v2-engine.js` | Company Brain v2 substrate (write_state, resolve_conflict, provenance, ontology, lens, graph, link_blob) |
 | `src/nuggets-engine.js` | Holographic Nuggets CRUD (remember, nudges, forget, list) with hybrid SQLite/Postgres routing |
 | `src/sqlite-engine.js` | Lakebase SQLite layer — project DB init, pull/push sync, cosine similarity helper |
+| `src/llm-tags.js` | Shared LLM tag generation helper (used by memory-engine + v2-engine) |
 
 ## Tool Surface (26 tools)
 
@@ -93,7 +94,8 @@ krusch-context-mcp/
 │   ├── memory-engine.js      # Episodic memory CRUD + consolidation (v1)
 │   ├── v2-engine.js          # Company Brain v2 substrate (write, resolve, lens, graph, link)
 │   ├── nuggets-engine.js     # Holographic Nuggets CRUD
-│   └── sqlite-engine.js      # Lakebase SQLite layer (pull/push sync)
+│   ├── sqlite-engine.js      # Lakebase SQLite layer (pull/push sync)
+│   └── llm-tags.js           # Shared LLM tag generation (Ollama llama3.2)
 ├── scripts/
 │   ├── action_memory_pattern_match.js  # Proactive escalation detection
 │   ├── benchmark_latency.js  # Embedding + search latency measurement

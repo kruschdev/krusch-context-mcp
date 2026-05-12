@@ -1,41 +1,11 @@
 import { pool } from 'pg-git-mcp/db/pool.js';
-import { getEmbedding, ollamaQueue, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
+import { getEmbedding, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
+import { generateTagsFromLLM } from './llm-tags.js';
 
 const DECAY_RATE = 0.01;
 const AUTO_TAG = true; // Hardcoded for context MCP
-
-/**
- * Generates semantic tags for memory content using a local LLM.
- * @param {string} text - The text content to tag.
- * @returns {Promise<string|null>} JSON string array of tags or null if failed.
- */
-async function generateTags(text) {
-    try {
-        return await ollamaQueue.enqueue(async (endpoint) => {
-            const url = `${endpoint.replace(/\/$/, '')}/api/generate`;
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: "llama3.2",
-                    prompt: `Extract 3 to 5 concise keywords or tags from the following text. Respond ONLY with a comma-separated list of tags, nothing else.\n\nText: "${text}"`,
-                    stream: false
-                })
-            });
-            
-            if (!res.ok) throw new Error(`Status ${res.status}`);
-            
-            const data = await res.json();
-            const tags = data.response.split(',').map(t => t.trim()).filter(t => t.length > 0);
-            return JSON.stringify(tags);
-        }, PRIORITY.MEDIUM);
-    } catch (err) {
-        console.error(`[krusch-context] Warning: Tag generation failed: ${err.message}`);
-        return null;
-    }
-}
 
 
 /**
@@ -100,7 +70,7 @@ export async function addMemory({ category, content, tags, project, _embedding }
 
     let finalTags = tags ? JSON.stringify(tags) : null;
     if (!finalTags && AUTO_TAG) {
-        finalTags = await generateTags(content);
+        finalTags = await generateTagsFromLLM(content, { asJson: true });
     }
 
     const embeddingStr = `[${embeddingArray.join(',')}]`;
