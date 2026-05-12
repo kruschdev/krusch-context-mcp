@@ -2,7 +2,7 @@
 
 > Every tool, every parameter, every default — everything an agent needs to call these tools correctly.
 >
-> For a quick overview, see the [Tool Quick-Reference](../README.md#-tool-quick-reference) in the README.
+> For a quick overview, see the [Tool Quick-Reference](../README.md#tool-quick-reference) in the README. For configuration and troubleshooting, see the [Setup Guide](SETUP.md).
 
 ---
 
