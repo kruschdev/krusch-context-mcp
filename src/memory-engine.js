@@ -25,9 +25,11 @@ async function _addProjectMemory(project, category, content, finalTags, embeddin
         VALUES (?, ?, ?, ?)
     `).run(category, content, finalTags, embeddingStr);
     
-    pushProjectMemory(project, db).catch(e =>
-        console.error(`[memory-engine] Async push failed for ${project}:`, e)
-    );
+    try {
+        await pushProjectMemory(project, db);
+    } catch (e) {
+        console.error(`[memory-engine] Push failed for ${project}:`, e);
+    }
     return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${project} (${category})` }] };
 }
 
@@ -292,7 +294,7 @@ export async function compileProjectState({ project }) {
                 SELECT id, category, content, created_at, ontology_tags 
                 FROM homelab_memory_v2 
                 WHERE status = 'active' 
-                AND $1 = ANY(ontology_tags)
+                AND (project = $1 OR $1 = ANY(ontology_tags))
                 AND ontology_tags && ARRAY['commitment', 'escalation', 'decision']::text[]
                 ORDER BY created_at DESC LIMIT 5
             `, [project]);

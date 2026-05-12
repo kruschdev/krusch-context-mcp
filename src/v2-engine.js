@@ -39,9 +39,10 @@ async function generateOntologyTags(text) {
  * @param {string} [params.parent_id] - UUID for optimistic concurrency
  * @param {string} [params.source_ref] - URI or document hash
  * @param {string[]} [params.ontology_tags] - Optional pre-defined tags
+ * @param {string} [params.project] - Optional project association
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function writeState({ content, category, author_id, parent_id, source_ref, ontology_tags, action_trace }) {
+export async function writeState({ content, category, author_id, parent_id, source_ref, ontology_tags, action_trace, project }) {
     if (!content || !category || !author_id) throw new McpError(ErrorCode.InvalidParams, "Missing required params");
 
     const embeddingArray = await getEmbedding(content);
@@ -78,12 +79,12 @@ export async function writeState({ content, category, author_id, parent_id, sour
         
         const insertQuery = `
             INSERT INTO homelab_memory_v2 
-            (category, content, embedding, author_id, source_ref, parent_id, version_id, status, ontology_tags, action_trace)
-            VALUES ($1, $2, $3::vector, $4, $5, $6, $7, 'active', $8, $9::jsonb)
+            (category, content, embedding, author_id, source_ref, parent_id, version_id, status, ontology_tags, action_trace, project)
+            VALUES ($1, $2, $3::vector, $4, $5, $6, $7, 'active', $8, $9::jsonb, $10)
             RETURNING id
         `;
         const res = await client.query(insertQuery, [
-            category, content, embeddingStr, author_id, source_ref || null, parent_id || null, version_id, tagsStr, actionTraceStr
+            category, content, embeddingStr, author_id, source_ref || null, parent_id || null, version_id, tagsStr, actionTraceStr, project || null
         ]);
         
         await client.query('COMMIT');

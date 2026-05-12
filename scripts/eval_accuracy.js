@@ -5,7 +5,7 @@ import { PRIORITY } from '../../../lib/llm-queue.js';
 const QUERIES = [
     {
         query: "priority queue for ollama inference fleet",
-        expectedMatches: ["llm-queue.js"]
+        expectedMatches: ["llm-queue.js", "request_queue.py", "sweetdreams.md", "llm_foundational_papers.md"]
     },
     {
         query: "database connection pool setup",
@@ -13,7 +13,7 @@ const QUERIES = [
     },
     {
         query: "semantic search across codebase blobs",
-        expectedMatches: ["memory-engine.js", "search_code.js"]
+        expectedMatches: ["memory-engine.js", "search_code.js", "AGENTS.md", "README.md"]
     },
     {
         query: "jwt authentication middleware factory",

@@ -78,6 +78,17 @@ async function verifyDatabase() {
             )
         `);
 
+        try {
+            await pool.query('ALTER TABLE homelab_memory_v2 ADD COLUMN project VARCHAR(255)');
+        } catch (e) {
+            if (e.code !== '42701') throw e; // 42701 is duplicate column
+        }
+
+        // Add indexes
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_ontology_tags ON homelab_memory_v2 USING GIN (ontology_tags)');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_embedding ON homelab_memory_v2 USING hnsw (embedding vector_cosine_ops)');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_v1_embedding ON ide_agent_memory USING hnsw (embedding vector_cosine_ops)');
+
         // Add memory_to_blob_edges table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS memory_to_blob_edges (
@@ -190,7 +201,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             parent_id: { type: "string", description: "If updating an existing state, provide the UUID to ensure optimistic concurrency control." },
             source_ref: { type: "string", description: "Optional URI or document hash that generated this memory." },
             ontology_tags: { type: "array", items: { type: "string" } },
-            action_trace: { type: "array", items: { type: "object" }, description: "Optional trace of agent actions that led to this state." }
+            action_trace: { type: "array", items: { type: "object" }, description: "Optional trace of agent actions that led to this state." },
+            project: { type: "string", description: "Optional project association for the state." }
           },
           required: ["content", "category", "author_id"]
         }
