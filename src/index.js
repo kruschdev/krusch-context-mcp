@@ -11,6 +11,8 @@ import {
 
 import fs from 'fs/promises';
 import path from 'path';
+import { trace } from '@opentelemetry/api';
+import { initTracing } from './telemetry.js';
 
 // Import logic from our required MCP packages
 import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, consolidateMemories, compileProjectState } from './memory-engine.js';
@@ -648,16 +650,42 @@ const TOOL_HANDLERS = new Map([
   ['krusch_context_nugget_list',     (args) => nuggetList(args)],
 ]);
 
+const tracer = trace.getTracer('krusch-context-mcp');
+
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const toolName = request.params.name;
   const args = request.params.arguments || {};
-  try {
-    const handler = TOOL_HANDLERS.get(request.params.name);
-    if (!handler) throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
-    return await handler(args);
-  } catch (err) {
-    if (err instanceof McpError) throw err;
-    return { content: [{ type: "text", text: `[Error] ${err.message}` }], isError: true };
-  }
+  
+  return await tracer.startActiveSpan(`tool_call: ${toolName}`, async (span) => {
+    span.setAttribute('tool.name', toolName);
+    span.setAttribute('tool.arguments', JSON.stringify(args));
+    
+    try {
+      const handler = TOOL_HANDLERS.get(toolName);
+      if (!handler) {
+        throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
+      }
+      
+      const result = await handler(args);
+      
+      if (result && result.content && result.content[0] && result.content[0].text) {
+          const textPreview = result.content[0].text.substring(0, 500);
+          span.setAttribute('tool.result_preview', textPreview);
+          span.setAttribute('tool.is_error', result.isError === true);
+      }
+      
+      span.setStatus({ code: 1 }); // OK
+      return result;
+    } catch (err) {
+      span.setStatus({ code: 2, message: err.message }); // ERROR
+      span.recordException(err);
+      
+      if (err instanceof McpError) throw err;
+      return { content: [{ type: "text", text: `[Error] ${err.message}` }], isError: true };
+    } finally {
+      span.end();
+    }
+  });
 });
 
 async function shutdown() {
@@ -669,6 +697,10 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 async function main() {
+  const tracePath = process.env.KRUSCH_TRACE_PATH || path.resolve(process.cwd(), 'data', 'traces.jsonl');
+  initTracing(tracePath);
+  console.error(`[krusch-context-mcp] Tracing initialized: ${tracePath}`);
+
   await verifyDatabase();
   const transport = new StdioServerTransport();
   await server.connect(transport);

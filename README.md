@@ -265,6 +265,8 @@ node scripts/eval_accuracy.js           # Precision/recall
 
 The evolution from a simple RAG cache to a stateful **Company Brain Substrate** is deeply inspired by the [Sentra "Company Brain" Essay Series](https://sentra.app). We recommend reading their work on why organizational memory is an infrastructure problem.
 
+The automated, continuous optimization of agent tool usage through execution tracing and LLM analysis is powered by the [HALO RLM Engine](https://github.com/context-labs/halo).
+
 ## Contributing
 
 We welcome contributions! Please ensure tests pass and adhere to the project formatting standards.

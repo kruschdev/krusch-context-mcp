@@ -95,12 +95,14 @@ krusch-context-mcp/
 │   ├── v2-engine.js          # Company Brain v2 substrate (write, resolve, lens, graph, link)
 │   ├── nuggets-engine.js     # Holographic Nuggets CRUD
 │   ├── sqlite-engine.js      # Lakebase SQLite layer (pull/push sync)
-│   └── llm-tags.js           # Shared LLM tag generation (Ollama llama3.2)
+│   ├── llm-tags.js           # Shared LLM tag generation (Ollama llama3.2)
+│   └── telemetry.js          # OpenTelemetry JSONL trace exporter
 ├── scripts/
 │   ├── action_memory_pattern_match.js  # Proactive escalation detection
 │   ├── benchmark_latency.js  # Embedding + search latency measurement
 │   ├── clear_sqlite_embeddings.js  # Reset local SQLite embedding columns
 │   ├── eval_accuracy.js      # Retrieval precision/recall evaluation
+│   ├── halo_analysis.js      # Nightly HALO tracing and agent performance analysis
 │   ├── install_git_hook.js   # Post-commit hook installer for Lakebase auto-sync
 │   ├── spectral_calibration.js     # Embedding space quality analysis
 │   └── stress_test_consolidation.js # Synthetic consolidation stress test
@@ -112,7 +114,11 @@ krusch-context-mcp/
 │   ├── test_v2_memory.js     # Company Brain v2 multi-agent write + conflict resolution
 │   ├── test_v2_lens_graph.js  # Lens-based retrieval + graph traversal
 │   └── test_v2_action_memory.js # Action Memory graph + commitment compilation
-├── docs/assets/              # Banner and documentation images
+├── docs/
+│   ├── assets/               # Banner and documentation images
+│   └── TOOL_REFERENCE.md     # Full parameter reference for all 26 tools
+├── data/
+│   └── traces.jsonl          # OpenTelemetry tool execution traces
 ├── spec.md                   # Original project specification
 ├── INFLIGHT.md               # Session state persistence
 └── package.json              # ESM, file: link to pg-git
@@ -130,6 +136,7 @@ krusch-context-mcp/
 | Package | Purpose |
 |---------|---------|
 | `@modelcontextprotocol/sdk` | MCP protocol server + types |
+| `@opentelemetry/api` / `sdk-trace-node` | Tool execution tracing for HALO analysis |
 | `better-sqlite3` | Local project SQLite databases (Lakebase compute cache) |
 | `ml-pca` | PCA for spectral calibration scripts |
 | `pg-git` (file: link) | Shared DB pool, embedding pipeline, blob/tree/repo search |
