@@ -26,7 +26,7 @@ Every time you start a new AI coding session, your agent starts from zero. It do
 
 ## What It Does
 
-Krusch Context MCP is a single [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes 25 tools to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
+Krusch Context MCP is a single [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes 26 tools to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
 
 - **🔍 Semantic Codebase Search** — Your agent can search the *meaning* of your code, not just filenames. "How do we handle auth?" returns the actual implementation across all your repos.
 - **🧠 Episodic Memory** — Bugs found, decisions made, lessons learned, and priorities set are stored as vector-embedded memories that persist across sessions and are retrieved by semantic relevance with temporal decay.
@@ -159,7 +159,7 @@ npm start
 }
 ```
 
-**5. Restart your IDE.** That's it — your agent now has access to all 25 tools.
+**5. Restart your IDE.** That's it — your agent now has access to all 26 tools.
 
 ### Upgrading to Company Brain v2
 
@@ -608,6 +608,27 @@ Rename an ontology tag across all active v2 memories. Use this when standardizin
   "memory_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "direction": "all",
   "depth": 5
+}
+```
+
+---
+
+#### `krusch_context_link_blob`
+
+Link a Company Brain v2 memory state to a codebase file (blob) to build the organizational knowledge graph.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `memory_id` | `string` | ✅ | — | UUID of the memory state |
+| `blob_id` | `string` | ✅ | — | SHA hash of the codebase blob (from PG-Git) |
+| `relationship` | `string` | ✅ | — | Relationship type: `references`, `implements`, `fixes`, `deprecates`, etc. |
+
+**Example call:**
+```json
+{
+  "memory_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "blob_id": "abc123def456...",
+  "relationship": "implements"
 }
 ```
 
@@ -1183,6 +1204,7 @@ The nightly consolidation script that keeps the Context MCP fresh and hallucinat
 | `krusch_context_update_ontology` | Rename ontology tags across all active v2 memories |
 | `krusch_context_search_lens` | Role-filtered semantic retrieval (Lens-Based Retrieval) |
 | `krusch_context_traverse_graph` | Navigate parent/child lineage and linked codebase blobs |
+| `krusch_context_link_blob` | Link a memory state to a codebase file blob for knowledge graph |
 | **Codebase Search** | |
 | `krusch_context_search_code` | Semantic search over all indexed codebase files |
 | `krusch_context_list_repos` | List all repositories indexed in PG-Git |
@@ -1223,9 +1245,7 @@ Krusch Context MCP inherits its configuration from the underlying `pg-git-mcp` p
 | `OLLAMA_URL` | Primary Ollama endpoint for embeddings | `http://localhost:11434` |
 | `OLLAMA_FLEET_URLS` | Comma-separated list of additional Ollama endpoints for GPU fleet load balancing | *(none — single node)* |
 | `EMBED_MODEL` | Ollama embedding model | `bge-large` |
-| `DECAY_RATE` | Exponential decay rate for temporal memory scoring | `0.01` |
-| `AUTO_TAG` | Auto-generate keyword tags on new memories | `true` (hardcoded) |
-| `TAG_MODEL` | Ollama model for tag extraction | `llama3.2` |
+| `TAG_MODEL` | Ollama model for tag extraction (hardcoded in source) | `llama3.2` |
 | `EXTERNAL_DOCS_CONFIG_PATH` | Path to the JSON config listing ingested external manuals | `pg-git/config/external_docs.json` |
 
 ### Troubleshooting
@@ -1240,7 +1260,7 @@ Krusch Context MCP inherits its configuration from the underlying `pg-git-mcp` p
 
 - **FATAL: Cannot reach PostgreSQL**
   *Cause:* `kruschdb` is unreachable or `.env` is misconfigured.
-  *Fix:* Verify `PG_CONNECTION_STRING` in `.env` and ensure `kruschserv:5434` is accessible.
+  *Fix:* Verify `DATABASE_URL` in `.env` and ensure `kruschserv:5434` is accessible.
 
 - **Column "project" does not exist**
   *Cause:* The `ide_agent_memory` table predates the schema migration.
@@ -1254,23 +1274,26 @@ Krusch Context MCP inherits its configuration from the underlying `pg-git-mcp` p
 krusch-context-mcp/
 ├── src/
 │   ├── index.js              # MCP server entry point — tool registration & dispatch table
-│   ├── memory-engine.js      # Episodic memory CRUD + v2 Company Brain substrate
+│   ├── memory-engine.js      # Episodic memory CRUD + consolidation (v1)
+│   ├── v2-engine.js          # Company Brain v2 substrate (write_state, resolve, lens, graph, link)
 │   ├── nuggets-engine.js     # Holographic Nuggets CRUD (remember, nudges, forget, list)
 │   └── sqlite-engine.js      # Lakebase SQLite layer (project DB init, pull/push sync)
 ├── scripts/
+│   ├── action_memory_pattern_match.js  # Proactive escalation detection for /sweetdreams
 │   ├── benchmark_latency.js        # Measure embedding + search latency across the fleet
 │   ├── clear_sqlite_embeddings.js   # Reset local SQLite embedding columns
 │   ├── eval_accuracy.js             # Evaluate retrieval accuracy (precision/recall)
 │   ├── install_git_hook.js          # Post-commit hook installer for Lakebase auto-sync
 │   ├── spectral_calibration.js      # Spectral analysis of embedding space quality
 │   └── stress_test_consolidation.js # Synthetic consolidation stress test
-├── tests/                    # Test suite
+├── tests/                    # Test suite (*.test.js = npm test, test_*.js = manual smoke)
 │   ├── memory-engine.test.js       # Integration tests (pg-git + consolidation + v2 substrate)
-│   ├── test_client.js              # Quick smoke test for all 25 tools via JSON-RPC
-│   ├── test_lakebase.js            # Lakebase pull/push sync verification
-│   ├── test_sqlite_memory.js       # SQLite memory engine unit tests
+│   ├── lakebase.test.js            # Lakebase pull/push sync verification
+│   ├── sqlite-memory.test.js       # SQLite memory engine isolation tests
+│   ├── test_client.js              # Smoke test for all 26 tools via JSON-RPC stdio
 │   ├── test_v2_memory.js           # Company Brain v2 multi-agent write + conflict resolution
-│   └── test_v2_lens_graph.js       # Lens-based retrieval + graph traversal
+│   ├── test_v2_lens_graph.js       # Lens-based retrieval + graph traversal
+│   └── test_v2_action_memory.js    # Action Memory graph traversal + commitment compilation
 ├── docs/
 │   ├── assets/               # Banner and documentation images
 │   └── research/             # Sentra Company Brain research essays
@@ -1282,20 +1305,27 @@ krusch-context-mcp/
 
 ## 🧪 Testing
 
-The project uses the native `node:test` framework for unit and integration tests.
+The project uses two testing tiers:
+
+**Automated (`npm test`)** — uses `node:test`, runs all `*.test.js` files:
 
 ```bash
-# Run the full test suite (Lakebase sync, SQLite isolation, Company Brain v2)
 npm test
 ```
 
-### Smoke Test
+**Manual Smoke (`npm run test:smoke`)** — JSON-RPC stdio tests that spawn the full MCP server:
 
-To verify registration and execution of all 25 tools against a live `kruschdb` instance:
+```bash
+npm run test:smoke
+```
+
+To verify registration and execution of all 26 tools against a live `kruschdb` instance:
 
 ```bash
 node tests/test_client.js
 ```
+
+> **Convention:** `*.test.js` files are automated tests. `test_*.js` files are stdio-based smoke tests that spawn child processes.
 
 ### Benchmarking & Evaluation Scripts
 

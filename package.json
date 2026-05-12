@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test tests/*.test.js",
+    "test:smoke": "node tests/test_client.js && node tests/test_v2_memory.js && node tests/test_v2_lens_graph.js && node tests/test_v2_action_memory.js",
     "install-hook": "node scripts/install_git_hook.js"
   },
   "keywords": [

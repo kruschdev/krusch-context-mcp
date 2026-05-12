@@ -8,6 +8,7 @@
 
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { pool } from 'pg-git-mcp/db/pool.js';
 
 const SERVER = new URL('../src/index.js', import.meta.url).pathname;
 let nextId = 1;
@@ -45,6 +46,8 @@ function send(method, params = {}) {
 }
 
 async function run() {
+    const createdIds = []; // Track all created state IDs for cleanup
+
     console.log('⏳ Initializing server...');
     const initRes = await send('initialize', {
         protocolVersion: '2024-11-05',
@@ -56,6 +59,7 @@ async function run() {
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
     await new Promise(r => setTimeout(r, 500));
 
+    try {
     console.log('\n📝 1. Writing initial state (Parent)...');
     const writeRes1 = await send('tools/call', {
         name: 'krusch_context_write_state',
@@ -69,6 +73,7 @@ async function run() {
     console.log(`   ${text1}`);
     const idMatch1 = text1.match(/New ID: ([a-f0-9\-]+)/);
     const parentId = idMatch1 ? idMatch1[1] : null;
+    if (parentId) createdIds.push(parentId);
 
     if (!parentId) throw new Error("Failed to extract parent ID");
 
@@ -86,6 +91,7 @@ async function run() {
     console.log(`   ${text2}`);
     const idMatch2 = text2.match(/New ID: ([a-f0-9\-]+)/);
     const childId = idMatch2 ? idMatch2[1] : null;
+    if (childId) createdIds.push(childId);
 
     console.log(`\n📝 3. Writing conflicting state (Version 2 sibling)...`);
     // Attempting to write a sibling off the original parent. Note: In reality, since parentId is marked deprecated in step 2,
@@ -118,12 +124,14 @@ async function run() {
         arguments: { content: "Draft A: Use Vector DB", category: "priorities", author_id: "agent:A" }
     });
     const cid1 = c1.result.content[0].text.match(/New ID: ([a-f0-9\-]+)/)[1];
+    if (cid1) createdIds.push(cid1);
     
     const c2 = await send('tools/call', {
         name: 'krusch_context_write_state',
         arguments: { content: "Draft B: Use SQLite vec", category: "priorities", author_id: "agent:B" }
     });
     const cid2 = c2.result.content[0].text.match(/New ID: ([a-f0-9\-]+)/)[1];
+    if (cid2) createdIds.push(cid2);
 
     console.log(`   Draft A ID: ${cid1}`);
     console.log(`   Draft B ID: ${cid2}`);
@@ -141,6 +149,7 @@ async function run() {
     console.log(`   ${resolveText}`);
     const resolvedMatch = resolveText.match(/Unified State ID: ([a-f0-9\-]+)/);
     const resolvedId = resolvedMatch ? resolvedMatch[1] : null;
+    if (resolvedId) createdIds.push(resolvedId);
 
     console.log(`\n📜 6. Checking provenance of child state (${childId})...`);
     const provRes1 = await send('tools/call', {
@@ -159,8 +168,17 @@ async function run() {
     }
 
     console.log('\n✅ All v2 memory tests completed.');
-    child.kill('SIGTERM');
-    setTimeout(() => process.exit(0), 1000);
+    } finally {
+        // Always clean up test data, even on failure
+        if (createdIds.length > 0) {
+            console.log(`\n🧹 Cleaning up ${createdIds.length} test state(s)...`);
+            const placeholders = createdIds.map((_, i) => `$${i + 1}`).join(',');
+            await pool.query(`DELETE FROM homelab_memory_v2 WHERE id IN (${placeholders})`, createdIds);
+        }
+        child.kill('SIGTERM');
+        await pool.end();
+        setTimeout(() => process.exit(0), 1000);
+    }
 }
 
 run().catch(err => {

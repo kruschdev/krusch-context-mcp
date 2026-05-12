@@ -455,6 +455,7 @@ export async function linkBlob({ memory_id, blob_id, relationship }) {
 
         return { content: [{ type: "text", text: `[krusch-context] 🔗 Linked memory ${memory_id} to blob ${blob_id} (Relationship: ${relationship})` }] };
     } catch (err) {
+        if (err instanceof McpError) throw err;
         throw new McpError(ErrorCode.InternalError, `Database error: ${err.message}`);
     } finally {
         client.release();
