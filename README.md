@@ -18,64 +18,88 @@
 
 Every time you start a new AI coding session, your agent starts from zero. It doesn't remember the bug you fixed yesterday, the architectural decision you made last week, or even what files exist in your project. You end up re-explaining context, watching it hallucinate stale assumptions, and losing momentum to the "goldfish memory" problem.
 
-**Krusch Context MCP fixes this.** It gives your AI coding agent persistent, searchable memory across every session — and pairs it with semantic search over your entire codebase — so your agent always knows *what* your code does, *why* you built it that way, and *what went wrong last time*.
-
-## Inspiration & Credits
-
-> The ongoing evolution of this MCP server from a simple "Query-Time RAG Cache" to a fully stateful **"Company Brain Substrate"** (handling concurrency, provenance, permissions, and ontology) is deeply inspired by the [Sentra "Company Brain" Essay Series](https://sentra.com). We strongly recommend reading their work to understand why true organizational memory is an infrastructure problem, not an app problem.
+**Krusch Context MCP fixes this.** It gives your AI coding agent persistent, searchable memory across every session — paired with semantic search over your entire codebase — so your agent always knows *what* your code does, *why* you built it that way, and *what went wrong last time*.
 
 ## What It Does
 
-Krusch Context MCP is a single [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes 26 tools to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
+A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **26 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
 
-- **🔍 Semantic Codebase Search** — Your agent can search the *meaning* of your code, not just filenames. "How do we handle auth?" returns the actual implementation across all your repos.
-- **🧠 Episodic Memory** — Bugs found, decisions made, lessons learned, and priorities set are stored as vector-embedded memories that persist across sessions and are retrieved by semantic relevance with temporal decay.
-- **💎 Steering Nudges** — Lightweight key-value facts (preferences, conventions, corrections) that give the agent behavioral continuity without re-prompting.
-- **📖 Documentation Search** — Ingested external manuals (framework docs, API references) are searchable locally, so your agent references *your* versions, not its training data.
-- **🌍 Zero-Trust Deep Search** — A single tool call that cross-references codebase reality with historical memory, so the agent *verifies* what it knows before acting.
-
-The result: your agent picks up exactly where you left off, every time, without you explaining a thing.
+| Capability | What It Provides |
+|-----------|-----------------|
+| 🔍 **Semantic Codebase Search** | Search the *meaning* of your code, not just filenames. "How do we handle auth?" returns the actual implementation. |
+| 🧠 **Episodic Memory** | Bugs, decisions, and lessons persist across sessions, retrieved by semantic relevance with temporal decay. |
+| 💎 **Steering Nudges** | Lightweight key-value facts (preferences, conventions) give the agent behavioral continuity without re-prompting. |
+| 📖 **Documentation Search** | Ingested external docs are searchable locally — your agent references *your* versions, not its training data. |
+| 🌍 **Zero-Trust Deep Search** | One tool call cross-references codebase reality with historical memory to verify understanding before acting. |
 
 ## Why You'd Want It
 
-### 🛡️ Your Context Lives On Your Metal
+### 🛡️ Everything Stays On Your Hardware
 
-All embeddings are generated locally via [Ollama](https://ollama.com/) (`bge-large` for vectors, `llama3.2` for tagging). All storage is local PostgreSQL + pgvector + SQLite. Nothing leaves your machine.
+All embeddings are generated locally via [Ollama](https://ollama.com/) (`bge-large` for vectors, `llama3.2` for tagging). Storage is local PostgreSQL + pgvector + SQLite. Nothing leaves your machine — zero API costs for context retrieval, full data sovereignty, no provider lock-in.
 
-- **Zero API costs** for context retrieval — you aren't paying per-token to search your own code
-- **Full data sovereignty** — proprietary code, architecture decisions, and bug reports stay on your hardware
-- **No provider lock-in** — your context infrastructure works regardless of which LLM provider you're using today
+### 🔄 Switch Models Without Losing Context
 
-### 🔄 Switch Models Without Losing Your Mind
-
-Because memory and codebase context are decoupled from the reasoning engine, you can swap your IDE agent mid-project and the new model inherits everything:
-
-- Start your morning with **Gemini** for planning
-- Switch to **Claude** for precise refactoring
-- Pivot to **GPT-4o** for exploring a new API
-- Fall back to a **local model** when your internet drops
-
-Every model gets the same memories, the same codebase search, the same nudges. Your project history outlives any individual chat session or provider context window.
+Memory and codebase context are decoupled from the reasoning engine. Swap between Gemini, Claude, GPT-4o, or local models mid-project — every model inherits the same memories, codebase search, and nudges. Your project history outlives any individual chat session.
 
 ### ⚡ One Server, Not Three
 
-This used to require running separate MCP servers for memory, codebase search, and nuggets — each with its own Node.js process and database connections. Krusch Context MCP collapses all of it into a single process with a shared connection pool and embedding pipeline.
-
-### Key Capabilities
-
-- **💾 Shared Connection Pool** — Single `pg.Pool` to `kruschdb`, no duplicate connections
-- **🧠 Fleet-Balanced Embeddings** — Round-robin load balancing across multiple Ollama GPU nodes
-- **📌 Lakebase Architecture** — Inspired by [Neon's decoupled architecture](https://neon.com/docs/introduction/architecture-overview): local SQLite caches for zero-latency reads, async write-behind to durable PostgreSQL storage. The `+0.3` local scoring bias acts as hierarchical routing to mitigate Ebbinghaus forgetting (F6) as the global corpus grows.
-- **🏷️ Hybrid Retrieval & Auto-Tagging** — Memories are automatically tagged via `llama3.2` for keyword discoverability, addressing pure-cosine failure modes (F1 Negation, F2 Numeric, F3 Role-Swap) identified by Sentra.
-- **♻️ Memory Consolidation** — Semantic dedup using L2-normalized centroid averaging without re-embedding. *Derived from [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation).*
-- **🛡️ RAG Resilience** — Architected to explicitly avoid "Hubness" (F4) and "Ebbinghaus Forgetting" (F6) dimensional collapse failure modes. *Guided by [Sentra Technical Report: The Geometry of Failure](https://github.com/niashwin/sentra-rag-failure-modes).*
-- **💎 Holographic Nuggets** — Lightweight steering facts split between project-local SQLite and global PostgreSQL. *Adapted from [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets).*
+This used to require separate MCP servers for memory, codebase search, and nuggets. Krusch Context MCP collapses all of it into a single process with a shared connection pool and embedding pipeline.
 
 ---
 
-## 🧠 Architecture: Hybrid Zero-Trust Context Engine
+## 📦 Quick Start
 
-The server acts as a unified facade over local SQLite databases and PostgreSQL schemas in `kruschdb`:
+**Prerequisites:**
+- [Node.js](https://nodejs.org/) 22+
+- [Ollama](https://ollama.com/) running with `bge-large` and `llama3.2` models pulled
+- PostgreSQL with the [`pgvector`](https://github.com/pgvector/pgvector) extension enabled
+- **PG-Git-MCP** — Krusch Context MCP imports database pooling and embedding logic from the `pg-git-mcp` package. You must provide a `.env` file to configure the PostgreSQL pool. The server **will fail to start** if the database is unreachable.
+
+**1. Install PG-Git-MCP** (codebase ingestion engine):
+```bash
+npm install -g pg-git-mcp
+# Follow pg-git-mcp docs to index your codebase before starting
+```
+
+**2. Install Krusch Context MCP:**
+```bash
+git clone https://github.com/kruschdev/krusch-context-mcp.git
+cd krusch-context-mcp
+npm install
+cp .env.example .env  # Configure your database connection
+```
+
+**3. Start:**
+```bash
+npm start
+```
+
+**4. Add to your IDE MCP settings** (e.g., `claude_desktop_config.json`, `.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "krusch-context-mcp": {
+      "command": "node",
+      "args": ["/path/to/krusch-context-mcp/src/index.js"]
+    }
+  }
+}
+```
+
+**5. Restart your IDE.** Your agent now has access to all 26 tools.
+
+### Upgrading to Company Brain v2
+
+```bash
+git pull origin main && npm install && npm start
+```
+
+The server runs idempotent database migrations on startup. It will create the new `homelab_memory_v2` tables without touching existing data.
+
+---
+
+## 🧠 Architecture
 
 ```mermaid
 graph TD;
@@ -95,857 +119,71 @@ graph TD;
 
 | Component | Details |
 |-----------|---------|
-| **Database** | Hybrid: Local SQLite (Project Memories) + PostgreSQL (Global & Codebase) |
+| **Database** | Hybrid: Local SQLite (project memories) + PostgreSQL (global & codebase) |
 | **Embeddings** | Ollama `bge-large` @ 1024 dims, fleet load-balanced |
 | **Tagging** | Ollama `llama3.2` for automatic keyword extraction |
-| **Tables** | `blobs` (Codebase), `ide_agent_memory` (Episodic), `homelab_memory_v2` (Company Brain Substrate), `ide_agent_nuggets` (Steering facts) |
-| **Protocol** | MCP Stdio transport |
-| **Temporal Decay** | Exponential decay rate of 0.01 — a memory's relevance drops ~26% after 30 days of inactivity |
+| **Tables** | `blobs` (codebase), `ide_agent_memory` (episodic), `homelab_memory_v2` (Company Brain v2), `ide_agent_nuggets` (steering facts) |
+| **Protocol** | MCP stdio transport |
+| **Temporal Decay** | `score = similarity × e^(-0.01 × age_days)` — relevance drops ~26% after 30 days |
+
+### Key Design Decisions
+
+- **📌 Lakebase Architecture** — Inspired by [Neon's decoupled compute/storage](https://neon.com/docs/introduction/architecture-overview): local SQLite for zero-latency reads, async write-behind to durable PostgreSQL. A `+0.3` local scoring bias mitigates Ebbinghaus forgetting as the global corpus grows.
+- **🏷️ Hybrid Retrieval** — Memories are auto-tagged via `llama3.2`, addressing pure-cosine failure modes (negation, numeric, role-swap) identified by [Sentra](https://sentra.app).
+- **♻️ Consolidation** — Semantic dedup uses L2-normalized centroid averaging without re-embedding. *From [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation).*
+- **🛡️ RAG Resilience** — Architected to avoid hubness and dimensional collapse failure modes. *Guided by [Sentra: Geometry of Failure](https://github.com/niashwin/sentra-rag-failure-modes).*
+- **💎 Holographic Nuggets** — Adapted from [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets) for lightweight steering facts.
 
 ### Sentra Memory Substrate Blueprint
 
-This architecture implements the three layers of organizational memory defined in the [Sentra Company Brain research](https://sentra.com):
+This architecture implements the three layers of organizational memory defined in the [Sentra Company Brain research](https://sentra.app):
 
-1. **Factual Memory (Layer 1):** The foundation. Stores raw codebase state (`blobs`) and episodic events (`ide_agent_memory`). It answers "what happened" and "what is the code."
-2. **Interaction Memory / Context Graph (Layer 2):** The reasoning layer. Powered by the v2 Company Brain substrate (`homelab_memory_v2`). This layer tracks the lineage of decisions via parent-child UUID chains, attribution (who decided what), conflict resolution, and ontology tagging. It answers "why did this happen" and "what were the alternatives."
-3. **Action Memory (Layer 3):** The orchestration layer. Enables agents to autonomously compile project state (`krusch_context_compile_state`) and traverse the context graph to determine the next logical action without waiting for human intervention.
-
----
-
-## 📦 Quick Start
-
-**Prerequisites:**
-- [Node.js](https://nodejs.org/) 22+
-- [Ollama](https://ollama.com/) running with `bge-large` and `llama3.2` models pulled
-- PostgreSQL with the [`pgvector`](https://github.com/pgvector/pgvector) extension enabled
-- **PG-Git-MCP (Required Dependency):** Krusch Context MCP directly imports database pooling and embedding logic from the `pg-git-mcp` NPM package. You must provide a valid `.env` file in the root of your `krusch-context-mcp` directory to configure the PostgreSQL pool. The server **will fail to start** if the database is unreachable or the `.env` is unconfigured.
-
-**Expected directory layout:**
-```
-krusch-context-mcp/           # This project
-├── .env                      # Required — DB pool, embeddings, config
-├── package.json              
-└── ...                       
-```
-
-**1. Setup PG-Git-MCP (Database & Codebase Ingestion):**
-Krusch Context MCP relies on the `pg-git-mcp` engine to power its semantic codebase search. 
-- You must install it to index your repositories into PostgreSQL.
-- Install it globally: `npm install -g pg-git-mcp`
-- Follow the `pg-git-mcp` documentation to index your codebase (e.g., using its sync scripts) before starting this MCP server.
-
-**2. Install Krusch Context MCP:**
-```bash
-git clone https://github.com/kruschdev/krusch-context-mcp.git
-cd krusch-context-mcp
-npm install
-cp .env.example .env # Configure your database connection here
-```
-
-**3. Start the server:**
-```bash
-npm start
-```
-
-**4. Add to your IDE MCP settings** (e.g., `claude_desktop_config.json`, `.cursor/mcp.json`, or Antigravity config):
-```json
-{
-  "mcpServers": {
-    "krusch-context-mcp": {
-      "command": "node",
-      "args": ["/path/to/krusch-context-mcp/src/index.js"]
-    }
-  }
-}
-```
-
-**5. Restart your IDE.** That's it — your agent now has access to all 26 tools.
-
-### Upgrading to Company Brain v2
-
-If you are already running Krusch Context MCP and want to update to the new Company Brain v2 substrate:
-
-1. **Pull the latest code:** `git pull origin main`
-2. **Update dependencies:** `npm install` (this will bump `pg-git-mcp` to `^1.0.3`)
-3. **Restart the server:** `npm start`
-
-That's it. The server uses idempotent, auto-executing database migrations on startup. When it boots, it will automatically create the new `homelab_memory_v2` tables and `memory_to_blob_edges` lineage graph without touching your existing `ide_agent_memory` records. Your historical v1 episodic memories and codebase blobs will remain fully intact and searchable alongside the new v2 features.
+1. **Factual Memory (Layer 1):** Raw codebase state (`blobs`) and episodic events (`ide_agent_memory`). Answers "what happened" and "what is the code."
+2. **Interaction Memory (Layer 2):** The v2 Company Brain substrate (`homelab_memory_v2`) with parent-child UUID lineage, attribution, conflict resolution, and ontology tagging. Answers "why did this happen."
+3. **Action Memory (Layer 3):** Agents autonomously compile project state and traverse the context graph to determine next actions without human intervention.
 
 ---
 
-## 🚀 Real-World Usage Examples
-
-To effectively use Krusch Context MCP, instruct your IDE agent to document its findings or query its memory. Here are real-world examples covering every tool category:
-
-### Contextmaxxing & State Hydration
-
-**Compiling project state (Contextmaxxing)**
-> **You:** "Let's start working on the krusch-context-mcp project."
-> **Agent:** *[Calls `krusch_context_compile_state`]* "I've proactively compiled the project state. The top priority is 'Contextmaxxing', recent outcomes show we fixed a DB bug, and there are 3 nudges reminding me to prefer const over let. Let's begin."
+## 🚀 Usage Examples
 
 ### Episodic Memory
 
-**Documenting a bug fix**
-> **You:** "That fixed the port conflict! Save this to memory so we don't forget the fix."
-> **Agent:** *[Calls `krusch_context_add_memory`]* "Saved a memory in the 'bugs' category noting that port 5441 conflicts with the legacy DB and we should use 5442 instead."
+> **You:** "That fixed the port conflict! Save this."  
+> **Agent:** *[`add_memory`]* "Saved to 'bugs': port 5441 conflicts with legacy DB, use 5442."
 
-**Recalling architectural decisions**
-> **You:** "How did we decide to structure the auth system?"
-> **Agent:** *[Calls `krusch_context_search_memory`]* "According to the 'lessons' category, we chose a singleton JWT factory to avoid circular dependencies."
-
-**Browsing recent activity**
-> **You:** "What did we work on yesterday?"
-> **Agent:** *[Calls `krusch_context_list_memories`]* "Here are the 5 most recent activity entries..."
-
-**Correcting stale context**
-> **You:** "That priority is outdated — update it to reflect the new deadline."
-> **Agent:** *[Calls `krusch_context_update_memory`]* "Updated memory ID 42 with new content. The embedding was regenerated to match."
-
-**Cleaning up noise**
-> **You:** "Delete that duplicate bug report."
-> **Agent:** *[Calls `krusch_context_delete_memory`]* "Deleted memory ID 17 from the global store."
-
-### Memory Consolidation
-
-**Deduplicating memories**
-> **You:** "Clean up the repetitive notes about the migration."
-> **Agent:** *[Calls `krusch_context_consolidate` with `dry_run: true`]* "Found 4 overlapping pairs. Here's a preview..." → *[Calls again with `dry_run: false`]* "Consolidated into 2 clean records."
+> **You:** "How did we structure the auth system?"  
+> **Agent:** *[`search_memory`]* "From 'lessons': chose singleton JWT factory to avoid circular dependencies."
 
 ### Codebase Search
 
-**Semantic code lookup**
-> **You:** "How does our auth middleware work?"
-> **Agent:** *[Calls `krusch_context_search_code`]* "Found 3 relevant files — here's the implementation in `lib/auth.js`..."
-
-**Browsing indexed repos**
-> **You:** "What repos are indexed?"
-> **Agent:** *[Calls `krusch_context_list_repos`]* "28 repositories indexed in PG-Git, including krusch-context-mcp, pg-git, pocket-lawyer..."
-
-**Browsing a file tree**
-> **You:** "Show me the file tree for the krusch-context-mcp repo."
-> **Agent:** *[Calls `krusch_context_read_tree`]* "Here's the indexed tree: `src/index.js`, `src/memory-engine.js`, `package.json`..."
-
-**Reading a specific file**
-> **You:** "Show me the contents of that config file."
-> **Agent:** *[Calls `krusch_context_read_blob`]* "Here's the full content of the blob..."
+> **You:** "How does our auth middleware work?"  
+> **Agent:** *[`search_code`]* "Found 3 files — here's the implementation in `lib/auth.js`..."
 
 ### Zero-Trust Verification
 
-**Cross-referencing before acting**
-> **You:** "Before we start, verify what you know about the database schema."
-> **Agent:** *[Calls `krusch_context_deep_search`]* "Cross-referencing codebase search (blobs) with episodic memory — the schema uses pgvector with 1024 dims (bge-large), and our last session noted we added the `tags` column."
+> **You:** "Before we start, verify what you know about the DB schema."  
+> **Agent:** *[`deep_search`]* "Cross-referencing codebase + memory — schema uses pgvector 1024 dims, last session added the `tags` column."
 
-### Company Brain v2 (Stateful Memory)
+### State Hydration (Contextmaxxing)
 
-**Writing a stateful decision**
-> **You:** "Let's standardize on UUIDs for memory IDs."
-> **Agent:** *[Calls `krusch_context_write_state`]* "Wrote decision to 'lessons' under my author ID. Lineage started."
-
-**Resolving a multi-agent conflict**
-> **You:** "The previous agent was wrong about the database port. Resolve the conflict."
-> **Agent:** *[Calls `krusch_context_resolve_conflict`]* "Merged the conflicting states into a new resolution and deprecated the old branches."
-
-**Tracing provenance**
-> **You:** "Who made the decision to use port 5442?"
-> **Agent:** *[Calls `krusch_context_get_provenance`]* "Tracing the lineage... human:krusch made that decision in a conflict resolution yesterday."
+> **You:** "Let's start working on krusch-context-mcp."  
+> **Agent:** *[`compile_state`]* "Compiled project state: top priority is Contextmaxxing, recent outcomes show a DB bug fix, 3 nudges loaded."
 
 ### Steering Nudges
 
-**Saving a preference**
-> **You:** "Always use `const` over `let` in this project."
-> **Agent:** *[Calls `krusch_context_nugget_remember`]* "Saved nugget: `coding-style:const-over-let`."
+> **You:** "Always use `const` over `let` in this project."  
+> **Agent:** *[`nugget_remember`]* "Saved: `coding-style:const-over-let`."
 
-**Getting behavioral hints**
-> **You:** "Remind yourself of our project conventions before coding."
-> **Agent:** *[Calls `krusch_context_nugget_nudges`]* "Retrieved 3 nudges: prefer const, use JSDoc on exports, 40-line function limit."
+> **You:** "Remind yourself of our conventions before coding."  
+> **Agent:** *[`nugget_nudges`]* "3 nudges loaded: prefer const, use JSDoc on exports, 40-line function limit."
 
-**Listing all saved nudges**
-> **You:** "What nudges do we have saved?"
-> **Agent:** *[Calls `krusch_context_nugget_list`]* "12 nuggets across user, project, and agent kinds."
+### Company Brain v2
 
-**Removing an obsolete nudge**
-> **You:** "We don't use that convention anymore — forget it."
-> **Agent:** *[Calls `krusch_context_nugget_forget`]* "Deleted nugget: `old-convention`."
+> **You:** "Let's standardize on UUIDs for memory IDs."  
+> **Agent:** *[`write_state`]* "Wrote decision to 'lessons' with author attribution. Lineage started."
 
-### Documentation Search
-
-**Searching external docs**
-> **You:** "How does Anthropic's tool use work?"
-> **Agent:** *[Calls `krusch_docs_search`]* "Found 3 relevant sections from the `anthropic-docs` manual..."
-
-**Listing available manuals**
-> **You:** "What documentation do we have indexed?"
-> **Agent:** *[Calls `krusch_docs_list`]* "3 manuals available: anthropic-docs, mcp-spec, ollama-api."
-
-### Health Check
-
-**Verifying the system is alive**
-> **You:** "Is the context engine healthy?"
-> **Agent:** *[Calls `krusch_context_health_check`]* "🟢 Server healthy. 247 episodic memories, 34 nuggets, 28 repositories indexed."
-
----
-
-## 📋 Complete Tool Reference
-
-Every tool, every parameter, every default — everything an agent needs to call these tools correctly.
-
-### Contextmaxxing & State Hydration
-
-#### `krusch_context_compile_state`
-
-**Contextmaxxing**: Proactively compile a comprehensive, structured Markdown document of a project's current state. This gathers recent priorities, outcomes, lessons, and behavioral nudges into a single payload, avoiding the need for multiple independent semantic searches.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `project` | `string` | ✅ | — | The target project string to compile state for |
-
-**Example call:**
-```json
-{
-  "project": "pocket-lawyer"
-}
-```
-
----
-
-### Episodic Memory Tools
-
-#### `krusch_context_add_memory`
-
-Store a new episodic memory. Automatically generates a vector embedding and semantic tags via local LLM.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `category` | `string` | ✅ | — | One of: `priorities`, `bugs`, `outcomes`, `lessons`, `activity` |
-| `content` | `string` | ✅ | — | The text content of the memory |
-| `project` | `string` | ❌ | `null` | If provided, saves to local SQLite (`.agent/memory.db`). If omitted, saves to global Postgres. |
-| `tags` | `string[]` | ❌ | *auto-generated* | User-defined tags. If omitted, tags are auto-generated via `llama3.2`. |
-
-**Storage routing:**
-- `project` provided → writes to `<project>/.agent/memory.db` (SQLite), async pushes to Postgres
-- `project` omitted → writes directly to global `kruschdb.ide_agent_memory` (Postgres)
-
-**Example call:**
-```json
-{
-  "category": "bugs",
-  "content": "Port 5441 conflicts with the legacy PocketLawyer DB. Use 5442 for krusch-context-mcp.",
-  "project": "krusch-context-mcp",
-  "tags": ["port-conflict", "database", "config"]
-}
-```
-
----
-
-#### `krusch_context_search_memory`
-
-Semantic search over episodic memories with exponential temporal decay. Recent memories score higher.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `category` | `string` | ✅ | — | One of: `priorities`, `bugs`, `outcomes`, `lessons`, `activity` |
-| `query` | `string` | ✅ | — | Natural language search query |
-| `limit` | `number` | ❌ | `3` | Maximum results to return |
-| `active_project` | `string` | ❌ | `null` | If provided, also searches the project's local SQLite DB and merges results |
-
-**How results are ranked:**
-1. Embedding similarity is computed via cosine distance (Postgres) or cosine similarity (SQLite)
-2. Temporal decay is applied: `score = similarity × e^(-0.01 × age_in_days)`
-3. Project-local results get a `+0.3` bias to prefer local context over global
-4. Results from both stores are merged, re-ranked, and truncated to `limit`
-
-**Example call:**
-```json
-{
-  "category": "lessons",
-  "query": "authentication middleware patterns",
-  "limit": 5,
-  "active_project": "pocket-lawyer"
-}
-```
-
----
-
-#### `krusch_context_list_memories`
-
-Fast chronological listing without embedding generation. Use this when you want to browse recent entries, not search semantically.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `category` | `string` | ✅ | — | One of: `priorities`, `bugs`, `outcomes`, `lessons`, `activity` |
-| `project` | `string` | ❌ | `null` | If provided, lists from the project's SQLite DB. If omitted, lists from global Postgres. |
-| `limit` | `number` | ❌ | `10` | Maximum results to return |
-
-**Example call:**
-```json
-{
-  "category": "activity",
-  "project": "krusch-context-mcp",
-  "limit": 5
-}
-```
-
----
-
-#### `krusch_context_delete_memory`
-
-Delete a specific memory by its numeric ID. Use `list_memories` or `search_memory` first to find the ID.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | `number` | ✅ | — | Numeric ID of the memory to delete |
-| `source_project` | `string` | ❌ | `null` | If provided, deletes from the project's SQLite DB. If omitted, deletes from global Postgres. |
-
-**Example call:**
-```json
-{
-  "id": 42,
-  "source_project": "krusch-context-mcp"
-}
-```
-
----
-
-#### `krusch_context_update_memory`
-
-Update an existing memory's content, tags, or project assignment. Content changes trigger re-embedding.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | `number` | ✅ | — | Numeric ID of the memory to update |
-| `source_project` | `string` | ❌ | `null` | If provided, updates in the project's SQLite DB. If omitted, updates in global Postgres. |
-| `content` | `string` | ❌ | — | New content (triggers re-embedding if changed) |
-| `tags` | `string[]` | ❌ | — | New tags array |
-| `project` | `string` | ❌ | — | New project assignment (Postgres only — reassigns the memory to a different project) |
-
-> ⚠️ At least one of `content`, `tags`, or `project` must be provided.
-
-**Example call:**
-```json
-{
-  "id": 42,
-  "content": "Updated: Port 5442 is now the canonical DB port for all new services.",
-  "tags": ["port-config", "canonical"]
-}
-```
-
----
-
-#### `krusch_context_consolidate`
-
-Find and merge semantically duplicate memories within a category. Uses L2-normalized centroid averaging to merge embeddings without re-embedding.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `category` | `string` | ✅ | — | One of: `priorities`, `bugs`, `outcomes`, `lessons`, `activity` |
-| `project` | `string` | ❌ | `null` | If provided, consolidates in the project's SQLite DB. If omitted, consolidates global Postgres. |
-| `threshold` | `number` | ❌ | `0.15` | Cosine distance threshold — pairs closer than this are considered duplicates. Lower = stricter. |
-| `dry_run` | `boolean` | ❌ | `false` | If `true`, only previews matches without merging |
-
-> 💡 **Best practice:** Always call with `dry_run: true` first to preview which pairs would be merged.
-
-> ⚠️ SQLite consolidation has a 500-row scaling guard. If exceeded, filter by project.
-
-**Example call (preview):**
-```json
-{
-  "category": "bugs",
-  "project": "pocket-lawyer",
-  "threshold": 0.12,
-  "dry_run": true
-}
-```
-
----
-
-### Company Brain v2 Substrate Tools
-
-> These tools power the stateful organizational memory layer inspired by [Sentra's "Company Brain" research](https://sentra.com). They provide multi-agent state management with optimistic concurrency control, provenance tracking, role-based retrieval, and graph traversal. While v1 memory tools are sufficient for single-agent workflows, v2 tools are designed for environments where multiple agents (or human-agent pairs) write to the same knowledge substrate.
-
-#### `krusch_context_write_state`
-
-Write a memory state with optimistic concurrency control. Unlike `add_memory`, this tool supports versioned writes, author attribution, and parent-child state lineage. Use this when building multi-agent workflows where state integrity matters.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `content` | `string` | ✅ | — | The memory content |
-| `category` | `string` | ✅ | — | One of: `priorities`, `bugs`, `outcomes`, `lessons`, `activity` |
-| `author_id` | `string` | ✅ | — | Identifier of the writing agent or human (e.g., `agent:antigravity`, `human:krusch`) |
-| `parent_id` | `string` | ❌ | `null` | UUID of the parent state. Enables optimistic concurrency — if the parent has been superseded, the write will still succeed but can be detected via `get_provenance`. |
-| `source_ref` | `string` | ❌ | `null` | Optional URI, commit SHA, or document hash that generated this memory |
-| `ontology_tags` | `string[]` | ❌ | `null` | Semantic ontology tags for structured retrieval (e.g., `['architecture', 'database', 'migration']`) |
-
-**How it works:**
-1. Generates an embedding for the content via Ollama
-2. Inserts into `homelab_memory_v2` with a UUID, version tracking, and author attribution
-3. If `parent_id` is provided, creates a parent→child lineage edge for provenance tracing
-
-**Example call:**
-```json
-{
-  "content": "Decided to use UUID v4 for all v2 memory IDs to support distributed writes without coordination.",
-  "category": "lessons",
-  "author_id": "agent:antigravity",
-  "parent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "source_ref": "commit:abc123",
-  "ontology_tags": ["architecture", "identity", "distributed-systems"]
-}
-```
-
----
-
-#### `krusch_context_resolve_conflict`
-
-Merge branching states when multiple agents write conflicting updates to the same lineage. Deprecates the conflicting siblings and creates a unified resolution head.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `conflict_ids` | `string[]` | ✅ | — | UUIDs of the conflicting sibling states to merge |
-| `resolution_content` | `string` | ✅ | — | The combined, correct truth that supersedes the conflicting states |
-| `author_id` | `string` | ✅ | — | Identifier of the resolving agent or human |
-
-**How it works:**
-1. Marks all `conflict_ids` as `status: 'deprecated'`
-2. Creates a new resolution state with `status: 'active'`
-3. Links the resolution to all deprecated states for full audit trail
-
-**Example call:**
-```json
-{
-  "conflict_ids": [
-    "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "b2c3d4e5-f6a7-8901-bcde-f12345678901"
-  ],
-  "resolution_content": "Final decision: Use port 5442 for kruschdb (not 5441 or 5443). Both previous entries were partially correct.",
-  "author_id": "human:krusch"
-}
-```
-
----
-
-#### `krusch_context_get_provenance`
-
-Trace the complete version history of a memory state — who wrote it, when, what it replaced, and what replaced it. Uses recursive CTEs to walk the full parent→child chain.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `memory_id` | `string` | ✅ | — | UUID of the memory to trace |
-
-**What it returns:**
-- The target memory's full metadata (author, status, timestamps, ontology tags)
-- All ancestor states (parents, grandparents, etc.)
-- All descendant states (children, grandchildren, etc.)
-- Status of each state in the chain (`active`, `deprecated`)
-
-**Example call:**
-```json
-{
-  "memory_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-}
-```
-
----
-
-#### `krusch_context_update_ontology`
-
-Rename an ontology tag across all active v2 memories. Use this when standardizing vocabulary (e.g., renaming `db` to `database` across the knowledge base).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `old_tag` | `string` | ✅ | — | The tag to replace |
-| `new_tag` | `string` | ✅ | — | The replacement tag |
-
-**Example call:**
-```json
-{
-  "old_tag": "db",
-  "new_tag": "database"
-}
-```
-
----
-
-#### `krusch_context_search_lens`
-
-**Lens-Based Retrieval.** Performs semantic search filtered by the reader's role permissions. Only memories whose `read_roles` intersect with the provided `roles` array are returned.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `query` | `string` | ✅ | — | Semantic search query |
-| `roles` | `string[]` | ✅ | — | Roles to filter by (e.g., `['system', 'admin']`). Only memories readable by at least one of these roles are returned. |
-| `limit` | `number` | ❌ | `5` | Maximum results |
-| `status` | `string` | ❌ | `active` | Memory status filter (`active`, `deprecated`, or omit for `active`) |
-
-**Example call:**
-```json
-{
-  "query": "database migration patterns",
-  "roles": ["system", "admin"],
-  "limit": 3
-}
-```
-
----
-
-#### `krusch_context_traverse_graph`
-
-**Graph Traversal.** Navigate the memory lineage tree and linked codebase blobs from any memory node. Supports directional traversal with configurable depth.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `memory_id` | `string` | ✅ | — | UUID of the starting memory node |
-| `direction` | `string` | ❌ | `all` | One of: `parents` (ancestors), `children` (descendants), `blobs` (linked codebase files), `all` (everything) |
-| `depth` | `number` | ❌ | `3` | Maximum traversal depth |
-
-**What it returns:**
-- **Parents:** Ancestor states in the version lineage
-- **Children:** Descendant states (forks, updates, resolutions)
-- **Blobs:** Linked codebase files from the `memory_to_blob_edges` table (relationship types: `references`, `implements`, `fixes`, etc.)
-
-**Example call:**
-```json
-{
-  "memory_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "direction": "all",
-  "depth": 5
-}
-```
-
----
-
-#### `krusch_context_link_blob`
-
-Link a Company Brain v2 memory state to a codebase file (blob) to build the organizational knowledge graph.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `memory_id` | `string` | ✅ | — | UUID of the memory state |
-| `blob_id` | `string` | ✅ | — | SHA hash of the codebase blob (from PG-Git) |
-| `relationship` | `string` | ✅ | — | Relationship type: `references`, `implements`, `fixes`, `deprecates`, etc. |
-
-**Example call:**
-```json
-{
-  "memory_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "blob_id": "abc123def456...",
-  "relationship": "implements"
-}
-```
-
----
-
-### Codebase Search Tools
-
-#### `krusch_context_search_code`
-
-Semantic search over all files indexed in PG-Git (`kruschdb.blobs`). Results are ranked by embedding similarity.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `query` | `string` | ✅ | — | Natural language search query (e.g., "how does the scheduler work") |
-| `limit` | `number` | ❌ | `5` | Maximum results to return |
-| `project` | `string` | ❌ | `null` | Filter results to a specific project/repository name. If provided, it must exactly match a known repository name, or the tool will throw an error to prevent cross-project hallucination. |
-| `repository_id` | `number` | ❌ | `null` | Filter by exact repository ID (overrides `project` name lookup) |
-
-**Example call:**
-```json
-{
-  "query": "express middleware authentication JWT",
-  "limit": 3,
-  "project": "pocket-lawyer"
-}
-```
-
----
-
-#### `krusch_context_list_repos`
-
-List all repositories indexed in PG-Git. No parameters required.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| *(none)* | — | — | — | Returns all repos with ID, name, description, and creation date |
-
-**Example call:**
-```json
-{}
-```
-
----
-
-#### `krusch_context_read_tree`
-
-Browse the file tree of an indexed repository. Use `krusch_context_list_repos` first to get a repository ID.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `repository_id` | `number` | ✅ | — | Repository ID (from `krusch_context_list_repos`) |
-| `tree_id` | `string` | ❌ | *root* | SHA hash of the tree to browse. Omit to get the root tree. Use a child tree's `object_id` to drill down. |
-
-**Workflow pattern (drill into a repo):**
-```
-1. krusch_context_list_repos → get repo ID (e.g., 5)
-2. krusch_context_read_tree({ repository_id: 5 }) → root tree entries
-3. krusch_context_read_tree({ repository_id: 5, tree_id: "abc123" }) → subdirectory entries
-4. krusch_context_read_blob({ blob_id: "def456" }) → file content
-```
-
-**Example call:**
-```json
-{
-  "repository_id": 5,
-  "tree_id": "a1b2c3d4e5f6"
-}
-```
-
----
-
-#### `krusch_context_read_blob`
-
-Read the full content of a file by its blob SHA hash. Get blob IDs from `krusch_context_read_tree`.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `blob_id` | `string` | ✅ | — | The SHA hash of the blob to read |
-
-**Example call:**
-```json
-{
-  "blob_id": "a1b2c3d4e5f6789012345678901234567890abcd"
-}
-```
-
----
-
-### Composite Search
-
-#### `krusch_context_deep_search`
-
-**Zero-Trust composite search.** Generates a single embedding and queries both the codebase (PG-Git blobs) and all 5 episodic memory categories simultaneously. Use this to establish a holistic baseline before starting work.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `query` | `string` | ✅ | — | Natural language search query |
-| `project` | `string` | ❌ | `null` | Optional project name to boost/filter results. If provided, it must strictly match a PG-Git repository name to prevent cross-project context bleeding. |
-
-**What it searches (in parallel):**
-1. `kruschdb.blobs` — codebase files (top 3)
-2. `ide_agent_memory` — all 5 categories (`lessons`, `bugs`, `priorities`, `outcomes`, `activity`) (top 2 per category)
-
-**Performance:** One embedding call shared across all 6 queries. This is the most efficient way to get comprehensive context.
-
-**Example call:**
-```json
-{
-  "query": "database migration schema changes",
-  "project": "krusch-context-mcp"
-}
-```
-
----
-
-### Nugget (Steering Facts) Tools
-
-#### `krusch_context_nugget_remember`
-
-Store a short, durable fact for behavioral steering. UPSERTs by key — calling with an existing key updates the value.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `key` | `string` | ✅ | — | Unique identifier (e.g., `coding-style:const-preference`) |
-| `value` | `string` | ✅ | — | The fact content |
-| `kind` | `string` | ❌ | `project` | One of: `project` (project-specific), `user` (global user pref), `agent` (agent-level behavior) |
-| `active_project` | `string` | ❌ | `null` | **Required for `project` kind.** The active project context — routes storage to SQLite. |
-
-**Storage routing:**
-- `kind: 'project'` + `active_project` provided → SQLite (`.agent/memory.db`), async pushes to Postgres
-- `kind: 'user'` or `kind: 'agent'` → always global Postgres
-- `kind: 'project'` + no `active_project` → falls back to global Postgres
-
-**Example call:**
-```json
-{
-  "key": "krusch-context-mcp:embedding-model",
-  "value": "bge-large at 1024 dims. Do NOT use nomic-embed or other models.",
-  "kind": "project",
-  "active_project": "krusch-context-mcp"
-}
-```
-
----
-
-#### `krusch_context_nugget_nudges`
-
-Return short, relevant nugget facts ranked by semantic similarity. Use this at session start to load behavioral context.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `query` | `string` | ✅ | — | Semantic search query (e.g., "coding conventions" or "deployment patterns") |
-| `kinds` | `string[]` | ❌ | *all kinds* | Filter by kind: `['project']`, `['user', 'agent']`, etc. |
-| `limit` | `number` | ❌ | `3` | Maximum nudges to return |
-| `active_project` | `string` | ❌ | `null` | **Required to retrieve `project` kind nuggets** from the project's SQLite DB. |
-
-**Example call:**
-```json
-{
-  "query": "code style and formatting preferences",
-  "kinds": ["project", "user"],
-  "limit": 5,
-  "active_project": "krusch-context-mcp"
-}
-```
-
----
-
-#### `krusch_context_nugget_forget`
-
-Delete a specific nugget by key.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `key` | `string` | ✅ | — | The nugget key to delete |
-| `active_project` | `string` | ❌ | `null` | If provided, deletes from the project's SQLite DB first. Falls back to global Postgres. |
-
-**Example call:**
-```json
-{
-  "key": "old-convention:semicolons",
-  "active_project": "krusch-context-mcp"
-}
-```
-
----
-
-#### `krusch_context_nugget_list`
-
-List all saved nuggets chronologically (most recently updated first).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `kinds` | `string[]` | ❌ | *all kinds* | Filter by kind |
-| `active_project` | `string` | ❌ | `null` | **Required to list `project` kind nuggets** from the project's SQLite DB. |
-
-**Example call:**
-```json
-{
-  "kinds": ["project"],
-  "active_project": "krusch-context-mcp"
-}
-```
-
----
-
-### Documentation Tools
-
-#### `krusch_docs_list`
-
-List all external manuals ingested into the semantic database. No parameters required.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| *(none)* | — | — | — | Returns all available manual names and source URLs |
-
----
-
-#### `krusch_docs_search`
-
-Semantically search a specific external manual by name.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `manual_name` | `string` | ✅ | — | Exact name of the manual (from `krusch_docs_list`, e.g., `anthropic-docs`) |
-| `query` | `string` | ✅ | — | Natural language search query |
-| `limit` | `number` | ❌ | `5` | Maximum results |
-
-**Example call:**
-```json
-{
-  "manual_name": "anthropic-docs",
-  "query": "how to use tool_use with streaming responses",
-  "limit": 3
-}
-```
-
----
-
-### System Tools
-
-#### `krusch_context_health_check`
-
-Verify that the server is alive, connected to the database, and functioning. No parameters required.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| *(none)* | — | — | — | Returns memory count, nugget count, repo count, DB status, and version |
-
----
-
-## 🧭 Storage Routing Guide
-
-Understanding where data lives is critical for querying correctly.
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        WRITE PATH                                │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  add_memory(project: "my-app")                                   │
-│    └─→ SQLite: my-app/.agent/memory.db                           │
-│         └─→ async push → Postgres (ide_agent_memory)             │
-│                                                                  │
-│  add_memory(project: null)                                       │
-│    └─→ Postgres: ide_agent_memory (project IS NULL)              │
-│                                                                  │
-│  nugget_remember(kind: 'project', active_project: "my-app")      │
-│    └─→ SQLite: my-app/.agent/memory.db                           │
-│         └─→ async push → Postgres (ide_agent_nuggets)            │
-│                                                                  │
-│  nugget_remember(kind: 'user')                                   │
-│    └─→ Postgres: ide_agent_nuggets                               │
-│                                                                  │
-├──────────────────────────────────────────────────────────────────┤
-│                        READ PATH                                 │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  search_memory(active_project: "my-app")                         │
-│    └─→ MERGE: SQLite(my-app) + Postgres(global)                  │
-│         └─→ SQLite results get +0.3 bias                         │
-│                                                                  │
-│  search_memory(active_project: null)                             │
-│    └─→ Postgres only (global memories)                           │
-│                                                                  │
-│  deep_search(project: "my-app")                                  │
-│    └─→ ALL: 5 memory categories + codebase blobs                 │
-│         └─→ Single shared embedding across all queries           │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### Key Rules
-
-1. **`project` on writes** routes to SQLite; omitting it routes to Postgres
-2. **`active_project` on reads** merges SQLite + Postgres; omitting it reads Postgres only
-3. **`source_project` on deletes/updates** targets SQLite; omitting it targets Postgres
-4. **Nuggets with `kind: 'project'`** need `active_project` to resolve the SQLite DB
-5. **Nuggets with `kind: 'user'` or `'agent'`** always go to global Postgres
-
-### Memory Categories
-
-| Category | When to Use |
-|----------|-------------|
-| `priorities` | Current goals, roadmap items, and task alignment for `/open` workflows |
-| `bugs` | Bug reports, root causes, workarounds, and fixes |
-| `outcomes` | Session summaries, deployment results, and `/close` wrap-ups |
-| `lessons` | Architectural decisions, "never do this again" rules, and pattern discoveries |
-| `activity` | Session-level work logs (what was done today) |
-
-### Nugget Kinds
-
-| Kind | Scope | Storage | When to Use |
-|------|-------|---------|-------------|
-| `project` | Per-project | SQLite (with async PG push) | Project conventions, local patterns, repo-specific rules |
-| `user` | Global | Postgres | Personal preferences, coding style, communication preferences |
-| `agent` | Global | Postgres | Agent behavioral tuning, self-corrections, operational parameters |
+> **You:** "The previous agent was wrong about the database port."  
+> **Agent:** *[`resolve_conflict`]* "Merged conflicting states. Deprecated old branches, created unified resolution."
 
 ---
 
@@ -953,128 +191,156 @@ Understanding where data lives is critical for querying correctly.
 
 ### Pattern 1: Zero-Trust Session Start
 
-Before writing any code in a new session, verify your understanding:
-
 ```
-1. krusch_context_deep_search({ query: "<current topic>", project: "<project>" })
-   → Cross-references codebase + all memory categories in one call
-   
-2. krusch_context_nugget_nudges({ query: "<current task>", active_project: "<project>" })
-   → Loads behavioral hints and project conventions
+1. deep_search({ query: "<topic>", project: "<project>" })
+   → Verify codebase + memory in one call
+
+2. nugget_nudges({ query: "<task>", active_project: "<project>" })
+   → Load conventions and preferences
 ```
 
 ### Pattern 2: Bug Investigation
 
 ```
-1. krusch_context_search_memory({ category: "bugs", query: "<symptoms>", active_project: "<project>" })
-   → Check if this bug has been seen before
-
-2. krusch_context_search_code({ query: "<error message or pattern>", project: "<project>" })
-   → Find the actual implementation
-
+1. search_memory({ category: "bugs", query: "<symptoms>" })     → Check history
+2. search_code({ query: "<error>", project: "<project>" })      → Find implementation
 3. [Fix the bug]
-
-4. krusch_context_add_memory({ category: "bugs", content: "<root cause + fix>", project: "<project>" })
-   → Document for future sessions
+4. add_memory({ category: "bugs", content: "<root cause + fix>" }) → Document
 ```
 
-### Pattern 3: Architecture Decision
+### Pattern 3: Session Close
 
 ```
-1. krusch_context_search_memory({ category: "lessons", query: "<design question>" })
-   → Check if a prior decision exists
-
-2. [Make the decision]
-
-3. krusch_context_add_memory({ category: "lessons", content: "<decision + rationale>", project: "<project>" })
-   → Persist for future reference
-
-4. krusch_context_nugget_remember({ key: "<project>:architecture:<topic>", value: "<one-liner>", kind: "project", active_project: "<project>" })
-   → Quick-reference nudge
+1. add_memory({ category: "activity", content: "<summary>", project: "<project>" })
+2. add_memory({ category: "outcomes", content: "<decisions and results>" })
+3. nugget_remember({ key: "<project>:last-session", value: "<in-progress work>" })
+4. consolidate({ category: "activity", project: "<project>", dry_run: true })
+   → Preview and optionally merge duplicate logs
 ```
 
-### Pattern 4: Session Close
+### Pattern 4: Multi-Agent State Resolution
 
 ```
-1. krusch_context_add_memory({ category: "activity", content: "<session summary>", project: "<project>" })
-
-2. krusch_context_add_memory({ category: "outcomes", content: "<key decisions and results>" })
-
-3. krusch_context_nugget_remember({ key: "<project>:last-session", value: "<what was in progress>", kind: "project", active_project: "<project>" })
-
-4. krusch_context_consolidate({ category: "activity", project: "<project>", dry_run: true })
-   → Preview and optionally merge duplicate activity logs
+1. write_state({ content: "<decision>", category: "lessons", author_id: "agent:a" })
+2. write_state({ content: "<conflicting decision>", author_id: "agent:b" })
+3. search_lens({ query: "<topic>", roles: ["system"] })         → Detect conflicts
+4. resolve_conflict({ conflict_ids: ["<uuid-a>", "<uuid-b>"], resolution_content: "<truth>" })
+5. get_provenance({ memory_id: "<resolution-uuid>" })           → Audit trail
 ```
 
-### Pattern 5: File Exploration (When You Can't Access the Filesystem)
+---
 
-```
-1. krusch_context_list_repos() → find the repo ID
-2. krusch_context_read_tree({ repository_id: <id> }) → browse root
-3. krusch_context_read_tree({ repository_id: <id>, tree_id: "<subdir hash>" }) → drill down
-4. krusch_context_read_blob({ blob_id: "<file hash>" }) → read file content
-```
+## 🗂️ Tool Quick-Reference
 
-### Pattern 6: Documentation Lookup
+> For full parameter details, defaults, and examples, see the [Complete Tool Reference](docs/TOOL_REFERENCE.md).
 
-```
-1. krusch_docs_list() → see what manuals are available
-2. krusch_docs_search({ manual_name: "<name>", query: "<question>" }) → semantic search
-```
+| Tool | Description |
+|------|-------------|
+| **Episodic Memory** | |
+| `krusch_context_add_memory` | Store an episodic memory (bug, lesson, priority, outcome, activity) |
+| `krusch_context_search_memory` | Semantic search with temporal decay |
+| `krusch_context_list_memories` | List recent memories by category (no embedding, fast) |
+| `krusch_context_delete_memory` | Delete a memory by ID |
+| `krusch_context_update_memory` | Update content/tags/project (re-embeds on content change) |
+| `krusch_context_consolidate` | Find and merge semantically duplicate memories |
+| `krusch_context_compile_state` | Contextmaxxing — compile full project state into Markdown |
+| **Company Brain v2** | |
+| `krusch_context_write_state` | Stateful write with concurrency control and author attribution |
+| `krusch_context_resolve_conflict` | Merge conflicting sibling states into a unified resolution |
+| `krusch_context_get_provenance` | Trace version history and state lineage |
+| `krusch_context_update_ontology` | Rename ontology tags across all active v2 memories |
+| `krusch_context_search_lens` | Role-filtered semantic retrieval |
+| `krusch_context_traverse_graph` | Navigate parent/child lineage and linked codebase blobs |
+| `krusch_context_link_blob` | Link a memory state to a codebase file blob |
+| **Codebase Search** | |
+| `krusch_context_search_code` | Semantic search over all indexed codebase files |
+| `krusch_context_list_repos` | List all repositories indexed in PG-Git |
+| `krusch_context_read_tree` | Browse the file tree of an indexed repository |
+| `krusch_context_read_blob` | Read full content of a file by blob ID |
+| `krusch_context_deep_search` | Composite zero-trust search across memory and codebase |
+| **Nuggets (Steering Facts)** | |
+| `krusch_context_nugget_remember` | Store a short, durable steering fact |
+| `krusch_context_nugget_nudges` | Return relevant nudges to steer agent behavior |
+| `krusch_context_nugget_forget` | Delete a nugget by key |
+| `krusch_context_nugget_list` | List all saved nuggets |
+| **Documentation & System** | |
+| `krusch_docs_list` | List available external manuals |
+| `krusch_docs_search` | Semantically search an external manual |
+| `krusch_context_health_check` | Verify server connectivity and status |
 
-### Pattern 7: Multi-Agent State Resolution
+---
 
-```
-1. krusch_context_write_state({ content: "<decision>", category: "lessons", author_id: "agent:antigravity" })
-   → Agent A writes a new state
+## 🧭 Storage Routing
 
-2. krusch_context_write_state({ content: "<conflicting decision>", category: "lessons", author_id: "agent:claude" })
-   → Agent B writes a different state on the same topic
+Understanding where data lives is critical for querying correctly.
 
-3. krusch_context_search_lens({ query: "<topic>", roles: ["system"] })
-   → Detect multiple active states with overlapping content
+### Write Path
 
-4. krusch_context_resolve_conflict({ conflict_ids: ["<uuid-a>", "<uuid-b>"], resolution_content: "<merged truth>", author_id: "human:krusch" })
-   → Human resolves the conflict, deprecating both agent states
+| Operation | `project` provided | `project` omitted |
+|-----------|-------------------|-------------------|
+| `add_memory` | SQLite → async push to Postgres | Postgres directly |
+| `nugget_remember` (`kind: 'project'`) | SQLite → async push to Postgres | Postgres fallback |
+| `nugget_remember` (`kind: 'user'`/`'agent'`) | Always Postgres | Always Postgres |
 
-5. krusch_context_get_provenance({ memory_id: "<resolution-uuid>" })
-   → Verify the full lineage chain for audit purposes
-```
+### Read Path
+
+| Operation | `active_project` provided | `active_project` omitted |
+|-----------|--------------------------|--------------------------|
+| `search_memory` | Merge: SQLite + Postgres (SQLite gets +0.3 bias) | Postgres only |
+| `deep_search` | All 5 categories + codebase blobs | All 5 categories + codebase blobs |
+
+### Key Rules
+
+1. **`project` on writes** → routes to SQLite; omitting → routes to Postgres
+2. **`active_project` on reads** → merges SQLite + Postgres; omitting → Postgres only
+3. **`source_project` on deletes/updates** → targets SQLite; omitting → targets Postgres
+4. **Nuggets `kind: 'project'`** → need `active_project` to resolve the SQLite DB
+5. **Nuggets `kind: 'user'`/`'agent'`** → always global Postgres
+
+### Memory Categories
+
+| Category | When to Use |
+|----------|-------------|
+| `priorities` | Current goals, roadmap items, task alignment |
+| `bugs` | Bug reports, root causes, workarounds, fixes |
+| `outcomes` | Session summaries, deployment results |
+| `lessons` | Architectural decisions, pattern discoveries, "never do this" rules |
+| `activity` | Session-level work logs |
+
+### Nugget Kinds
+
+| Kind | Scope | Storage | When to Use |
+|------|-------|---------|-------------|
+| `project` | Per-project | SQLite + async PG push | Project conventions, local patterns |
+| `user` | Global | Postgres | Personal preferences, coding style |
+| `agent` | Global | Postgres | Agent behavioral tuning, self-corrections |
 
 ---
 
 ## 🤖 The Autonomous Agent Lifecycle
 
-Krusch Context MCP is designed for **infinite session continuity** — your agent never starts from zero. Four workflows form a complete daily lifecycle:
+Krusch Context MCP enables **infinite session continuity** through four lifecycle workflows:
 
-### 1. `/open` — Start the Day
-At the beginning of a work session, type `/open`. The agent will:
-1. **Load Priorities:** Call `krusch_context_search_memory` with `category: 'priorities'` to align on today's goals.
-2. **Load Outcomes:** Call `krusch_context_search_memory` with `category: 'outcomes'` to review what happened yesterday.
-3. **Retrieve Nudges:** Call `krusch_context_nugget_nudges` to load lightweight project hints and preferences.
-4. **Scan for Drift:** Call `krusch_context_search_code` to verify its understanding of the codebase hasn't drifted.
+### `/open` — Start the Day
+1. Load priorities and yesterday's outcomes via `search_memory`
+2. Retrieve behavioral nudges via `nugget_nudges`
+3. Verify codebase understanding via `search_code`
 
-### 2. `/close` — Pause Work
-When stepping away, tell your agent `/close`. It will:
-1. **Self-Sync:** Take a semantic snapshot of the project codebase into `kruschdb.blobs`.
-2. **Save Local State:** Write active files, fragile components, and next steps to `INFLIGHT.md`.
-3. **Commit to Long-Term Memory:** Call `krusch_context_add_memory` to embed the session's decisions and outcomes into the vector database.
-4. **Save Steering Facts:** Call `krusch_context_nugget_remember` to persist lightweight behavioral patterns for future sessions.
+### `/close` — Pause Work
+1. Snapshot the codebase into `kruschdb.blobs`
+2. Save session state to `INFLIGHT.md`
+3. Commit decisions to long-term memory via `add_memory`
+4. Persist behavioral patterns via `nugget_remember`
 
-### 3. `/continue` — Resume Work
-When returning to an existing task, type `/continue`. The agent will:
-1. **Read Local State:** Load `INFLIGHT.md` for the active task list.
-2. **Retrieve Semantic Context:** Call `krusch_context_search_memory` to dynamically load relevant historical context.
-3. **Retrieve Nudges:** Call `krusch_context_nugget_nudges` to load lightweight project hints.
-4. **Verify Codebase State:** Call `krusch_context_search_code` to confirm its understanding of the current implementation matches reality.
+### `/continue` — Resume Work
+1. Load `INFLIGHT.md` for active task state
+2. Retrieve relevant memories via `search_memory`
+3. Load nudges and verify codebase state hasn't drifted
 
-### 4. `/sweetdreams` — Nightly Consolidation
-While you sleep, `/sweetdreams` runs a fleet-wide maintenance pass:
-1. **Batch Sync:** Re-indexes all project codebases into the `blobs` table via `sync_all_projects.js`.
-2. **Memory Optimization:** Runs `optimize_ide_agent_memory.js` to ensure B-Tree and HNSW indexes are in place for fast retrieval.
-3. **Swarm Dispatch:** Queues overnight analysis tasks for the Chrysalis execution swarm (fleet health sweep, memory synthesis).
-
-**The Result:** The agent dynamically pulls the exact context it needs, giving it infinite continuity across sessions without hallucinating stale state.
+### `/sweetdreams` — Nightly Consolidation
+1. Re-index all project codebases into `blobs`
+2. Optimize B-Tree and HNSW indexes
+3. Queue overnight analysis for the execution swarm
 
 ### `INFLIGHT.md` Template
 
@@ -1095,176 +361,29 @@ While you sleep, `/sweetdreams` runs a fleet-wide maintenance pass:
 - [ ] Next task 2
 ```
 
-This keeps the context engine lean and accurate without manual intervention.
-
-### Workflow Example: `/close`
-
-Here is a real example of a project-level `.agent/workflows/close.md` that leverages both the deep episodic memory and the lightweight holographic nuggets:
-
-```markdown
-# /close
-
-1. **Self-Sync**: Take a semantic snapshot of this project.
-   \`\`\`bash
-   node /home/kruschdev/homelab/projects/pg-git/scripts/sync_to_pg.js .
-   \`\`\`
-
-2. **Update INFLIGHT.md**:
-   - Overwrite \`INFLIGHT.md\` in this project root.
-   - Document any **Fragile** files and transient state.
-
-3. **Log Activity**:
-   - Execute \`krusch_context_add_memory\` with \`category: 'activity'\`, \`project: 'my-project'\` and content summarizing this session's work.
-
-4. **Save Steering Facts**:
-   - Store any new patterns via \`krusch_context_nugget_remember\` with \`kind: 'project'\`, key prefixed \`my-project:\`.
-
-5. **Summarize**:
-   > "State saved. See you next session."
-```
-
-### Workflow Example: `/open`
-
-This global workflow sets the tone for the entire day, grabbing cross-project context:
-
-```markdown
-# /open
-
-1. **Context Load & Alignment**: Immediately run parallel tool calls to construct the context for the day:
-   - **Priorities**: Query \`krusch_context_search_memory(category: 'priorities')\` to load current global goals.
-   - **Outcomes**: Query \`krusch_context_search_memory(category: 'outcomes')\` to review what happened yesterday.
-   - **Nuggets**: Query \`krusch_context_nugget_nudges\` to grab any lightweight project hints or preferences.
-   - **Zero-Trust Codebase**: Execute \`krusch_context_search_code\` to query codebase state natively.
-
-2. **Summarize**: 
-   - State what is currently mid-flight and ask for confirmation to resume the active \`INFLIGHT.md\` task.
-```
-
-### Workflow Example: `/continue`
-
-A project-scoped workflow to resume work exactly where you left off:
-
-```markdown
-# /continue
-
-1. **Context Load** (parallel):
-   - Read \`INFLIGHT.md\` from this project root.
-   - Query \`krusch_context_search_memory\` with \`category: 'activity'\` for the active project.
-   - Query \`krusch_context_nugget_nudges\` with \`kinds: ['project', 'user']\`.
-   - Execute \`krusch_context_search_code\` to verify codebase state hasn't drifted.
-
-2. **Task Generation**: Generate or update the \`task.md\` artifact from the inflight next steps.
-
-3. **Execution**: Autonomously execute the next logical step.
-```
-
-### Workflow Example: `/sweetdreams`
-
-The nightly consolidation script that keeps the Context MCP fresh and hallucination-free:
-
-```markdown
-# /sweetdreams
-
-1. **Full Fleet Semantic Sync**: Sync all active projects into pg-git's kruschdb.blobs.
-   \`\`\`bash
-   node /home/kruschdev/homelab/projects/pg-git/scripts/sync_all_projects.js
-   \`\`\`
-
-2. **Memory Optimization**: Ensure B-Tree and HNSW indexes are current.
-   \`\`\`bash
-   nohup node /home/kruschdev/homelab/scripts/optimize_ide_agent_memory.js > memory_optimizer.log &
-   \`\`\`
-
-3. **Swarm Dispatch**: Queue overnight fleet analysis and memory synthesis.
-   \`\`\`bash
-   node /home/kruschdev/homelab/scripts/dispatch_mcp_jobs.js
-   \`\`\`
-```
-
----
-
-## 🗂️ Tool Quick-Reference
-
-> For full parameter details, defaults, and examples, see the [Complete Tool Reference](#-complete-tool-reference) above.
-
-| Tool | Description |
-|------|-------------|
-| **Episodic Memory (v1)** | |
-| `krusch_context_add_memory` | Store an episodic memory (bug, lesson, priority, outcome, activity) |
-| `krusch_context_search_memory` | Semantic search over episodic memories with temporal decay |
-| `krusch_context_list_memories` | List recent memories by category (no embedding, fast) |
-| `krusch_context_delete_memory` | Delete a memory by ID |
-| `krusch_context_update_memory` | Update content/tags/project (re-embeds on content change) |
-| `krusch_context_consolidate` | Find and merge semantically duplicate memories |
-| `krusch_context_compile_state` | Contextmaxxing — compile full project state into structured Markdown |
-| **Company Brain v2** | |
-| `krusch_context_write_state` | Stateful write with concurrency control and author attribution |
-| `krusch_context_resolve_conflict` | Merge conflicting sibling states into a unified resolution |
-| `krusch_context_get_provenance` | Trace version history and state lineage via recursive CTEs |
-| `krusch_context_update_ontology` | Rename ontology tags across all active v2 memories |
-| `krusch_context_search_lens` | Role-filtered semantic retrieval (Lens-Based Retrieval) |
-| `krusch_context_traverse_graph` | Navigate parent/child lineage and linked codebase blobs |
-| `krusch_context_link_blob` | Link a memory state to a codebase file blob for knowledge graph |
-| **Codebase Search** | |
-| `krusch_context_search_code` | Semantic search over all indexed codebase files |
-| `krusch_context_list_repos` | List all repositories indexed in PG-Git |
-| `krusch_context_read_tree` | Browse the file tree of an indexed repository |
-| `krusch_context_read_blob` | Read full content of a specific file by blob ID |
-| `krusch_context_deep_search` | Composite zero-trust search across both memory and codebase |
-| **Nuggets (Steering Facts)** | |
-| `krusch_context_nugget_remember` | Store a short, durable Nuggets memory fact |
-| `krusch_context_nugget_nudges` | Return short, relevant Nuggets facts to gently steer the agent |
-| `krusch_context_nugget_forget` | Delete a specific nugget by key |
-| `krusch_context_nugget_list` | List all saved nuggets chronologically |
-| **Documentation & System** | |
-| `krusch_docs_list` | List all available external manuals and documentation |
-| `krusch_docs_search` | Semantically search a specific external manual |
-| `krusch_context_health_check` | Verify server connectivity, database status, and memory/repo counts |
-
----
-
-## 🤝 The Agentic Brain (Synergy with PG-Git)
-
-Krusch Context MCP unifies two complementary halves of the **Agentic Brain**:
-
-- **Episodic Memory (The "Why")**: The `ide_agent_memory` system stores *intent* — architectural decisions, bugs encountered, and project goals. Project-specific memories are isolated in local SQLite (`memory.db`), while global patterns are centralized in Postgres. Powered by exponential temporal decay so the agent always prefers fresh context.
-- **Holographic Nuggets (The "How to Behave")**: The `ide_agent_nuggets` system stores lightweight steering facts — user preferences, project conventions, and behavioral corrections. Like episodic memory, nuggets are split between local SQLite for isolated project facts and global Postgres for overarching preferences. These are retrieved via semantic similarity for fast, targeted nudges without the overhead of full episodic retrieval.
-- **Codebase Memory (The "What" & "How")**: The `blobs` table stores *implementation* — semantically embedded source files across your entire codebase. The index scales horizontally: batch ingestion scripts (`sync_to_pg.js`, `sync_all_projects.js`) distribute embedding generation across multiple GPU nodes via fleet-aware Ollama load balancing, allowing you to index thousands of files without bottlenecking a single machine.
-
-By querying both simultaneously via `krusch_context_deep_search`, the agent can cross-reference *why* you chose a specific architecture with *how* it's currently implemented.
-
 ---
 
 ## ⚙️ Configuration
 
-Krusch Context MCP inherits its configuration from the underlying `pg-git-mcp` package, but requires its own `.env` file in the project root to supply the database credentials.
+Krusch Context MCP inherits configuration from `pg-git-mcp` but requires its own `.env` file for database credentials.
 
 | Variable | Description | Default |
-|----------|-------------|---------| 
-| `DATABASE_URL` | PostgreSQL connection string for `kruschdb` (e.g., `postgresql://krusch:password@localhost:5442/kruschdb`) | *(required)* |
-| `OLLAMA_URL` | Primary Ollama endpoint for embeddings | `http://localhost:11434` |
-| `OLLAMA_FLEET_URLS` | Comma-separated list of additional Ollama endpoints for GPU fleet load balancing | *(none — single node)* |
+|----------|-------------|---------|
+| `DATABASE_URL` | PostgreSQL connection string (e.g., `postgresql://user:pass@host:port/kruschdb`) | *(required)* |
+| `OLLAMA_URL` | Primary Ollama endpoint | `http://localhost:11434` |
+| `OLLAMA_FLEET_URLS` | Comma-separated additional Ollama endpoints for GPU fleet load balancing | *(none)* |
 | `EMBED_MODEL` | Ollama embedding model | `bge-large` |
-| `TAG_MODEL` | Ollama model for tag extraction (hardcoded in source) | `llama3.2` |
-| `EXTERNAL_DOCS_CONFIG_PATH` | Path to the JSON config listing ingested external manuals | `pg-git/config/external_docs.json` |
+| `TAG_MODEL` | Ollama model for tag extraction | `llama3.2` |
+| `EXTERNAL_DOCS_CONFIG_PATH` | Path to JSON config for ingested manuals | `pg-git/config/external_docs.json` |
 
 ### Troubleshooting
 
-- **Ollama API returned 404**
-  *Cause:* Embedding model not pulled.
-  *Fix:* Run `ollama pull bge-large` and `ollama pull llama3.2`.
-
-- **ECONNREFUSED on Ollama URL**
-  *Cause:* Ollama is not running.
-  *Fix:* Start Ollama with `ollama serve`, or verify fleet node availability.
-
-- **FATAL: Cannot reach PostgreSQL**
-  *Cause:* `kruschdb` is unreachable or `.env` is misconfigured.
-  *Fix:* Verify `DATABASE_URL` in `.env` and ensure `kruschserv:5434` is accessible.
-
-- **Column "project" does not exist**
-  *Cause:* The `ide_agent_memory` table predates the schema migration.
-  *Fix:* The server runs idempotent `ALTER TABLE` migrations on startup. Simply restart.
+| Error | Cause | Fix |
+|-------|-------|-----|
+| Ollama API returned 404 | Embedding model not pulled | `ollama pull bge-large && ollama pull llama3.2` |
+| ECONNREFUSED on Ollama URL | Ollama not running | `ollama serve` or verify fleet node availability |
+| Cannot reach PostgreSQL | `kruschdb` unreachable or `.env` misconfigured | Verify `DATABASE_URL` in `.env` |
+| Column "project" does not exist | Table predates schema migration | Restart the server (idempotent migrations run on boot) |
 
 ---
 
@@ -1273,30 +392,32 @@ Krusch Context MCP inherits its configuration from the underlying `pg-git-mcp` p
 ```
 krusch-context-mcp/
 ├── src/
-│   ├── index.js              # MCP server entry point — tool registration & dispatch table
+│   ├── index.js              # MCP server entry point — tool registration & dispatch
 │   ├── memory-engine.js      # Episodic memory CRUD + consolidation (v1)
-│   ├── v2-engine.js          # Company Brain v2 substrate (write_state, resolve, lens, graph, link)
+│   ├── v2-engine.js          # Company Brain v2 substrate (write, resolve, lens, graph, link)
 │   ├── nuggets-engine.js     # Holographic Nuggets CRUD (remember, nudges, forget, list)
-│   └── sqlite-engine.js      # Lakebase SQLite layer (project DB init, pull/push sync)
+│   ├── sqlite-engine.js      # Lakebase SQLite layer (project DB init, pull/push sync)
+│   └── llm-tags.js           # Shared LLM tag generation (Ollama llama3.2)
 ├── scripts/
-│   ├── action_memory_pattern_match.js  # Proactive escalation detection for /sweetdreams
-│   ├── benchmark_latency.js        # Measure embedding + search latency across the fleet
-│   ├── clear_sqlite_embeddings.js   # Reset local SQLite embedding columns
-│   ├── eval_accuracy.js             # Evaluate retrieval accuracy (precision/recall)
-│   ├── install_git_hook.js          # Post-commit hook installer for Lakebase auto-sync
-│   ├── spectral_calibration.js      # Spectral analysis of embedding space quality
-│   └── stress_test_consolidation.js # Synthetic consolidation stress test
-├── tests/                    # Test suite (*.test.js = npm test, test_*.js = manual smoke)
-│   ├── memory-engine.test.js       # Integration tests (pg-git + consolidation + v2 substrate)
-│   ├── lakebase.test.js            # Lakebase pull/push sync verification
-│   ├── sqlite-memory.test.js       # SQLite memory engine isolation tests
-│   ├── test_client.js              # Smoke test for all 26 tools via JSON-RPC stdio
-│   ├── test_v2_memory.js           # Company Brain v2 multi-agent write + conflict resolution
-│   ├── test_v2_lens_graph.js       # Lens-based retrieval + graph traversal
-│   └── test_v2_action_memory.js    # Action Memory graph traversal + commitment compilation
+│   ├── action_memory_pattern_match.js  # Proactive escalation detection
+│   ├── benchmark_latency.js            # Embedding + search latency measurement
+│   ├── clear_sqlite_embeddings.js      # Reset local SQLite embedding columns
+│   ├── eval_accuracy.js                # Retrieval precision/recall evaluation
+│   ├── install_git_hook.js             # Post-commit hook for Lakebase auto-sync
+│   ├── spectral_calibration.js         # Embedding space quality analysis
+│   └── stress_test_consolidation.js    # Synthetic consolidation stress test
+├── tests/                    # *.test.js = npm test, test_*.js = manual smoke
+│   ├── memory-engine.test.js       # Integration tests
+│   ├── lakebase.test.js            # Pull/push sync verification
+│   ├── sqlite-memory.test.js       # SQLite isolation tests
+│   ├── test_client.js              # Smoke test for all 26 tools
+│   ├── test_v2_memory.js           # v2 write + conflict resolution
+│   ├── test_v2_lens_graph.js       # Lens retrieval + graph traversal
+│   └── test_v2_action_memory.js    # Action Memory + commitment compilation
 ├── docs/
 │   ├── assets/               # Banner and documentation images
-│   └── research/             # Sentra Company Brain research essays
+│   ├── research/             # Sentra Company Brain research essays
+│   └── TOOL_REFERENCE.md     # Full parameter reference for all 26 tools
 ├── spec.md                   # Original project specification
 └── package.json              # ESM configuration
 ```
@@ -1305,40 +426,29 @@ krusch-context-mcp/
 
 ## 🧪 Testing
 
-The project uses two testing tiers:
-
-**Automated (`npm test`)** — uses `node:test`, runs all `*.test.js` files:
-
+**Automated** (`npm test`) — uses `node:test`, runs all `*.test.js` files:
 ```bash
 npm test
 ```
 
-**Manual Smoke (`npm run test:smoke`)** — JSON-RPC stdio tests that spawn the full MCP server:
-
+**Manual Smoke** (`npm run test:smoke`) — JSON-RPC stdio tests that spawn the full MCP server:
 ```bash
 npm run test:smoke
 ```
 
-To verify registration and execution of all 26 tools against a live `kruschdb` instance:
-
+**All 26 tools against live DB:**
 ```bash
 node tests/test_client.js
 ```
 
-> **Convention:** `*.test.js` files are automated tests. `test_*.js` files are stdio-based smoke tests that spawn child processes.
-
-### Benchmarking & Evaluation Scripts
-
+**Benchmarking & Evaluation:**
 ```bash
-# Measure end-to-end embedding + search latency
-node scripts/benchmark_latency.js
-
-# Evaluate retrieval precision/recall against known queries
-node scripts/eval_accuracy.js
-
-# Spectral analysis of embedding space health
-node scripts/spectral_calibration.js
+node scripts/benchmark_latency.js       # End-to-end latency
+node scripts/eval_accuracy.js           # Precision/recall
+node scripts/spectral_calibration.js    # Embedding space health
 ```
+
+> **Convention:** `*.test.js` = automated tests. `test_*.js` = stdio smoke tests.
 
 ---
 
@@ -1346,14 +456,18 @@ node scripts/spectral_calibration.js
 
 | Project | Role |
 |---------|------|
-| PG-Git | Semantic codebase search engine (sibling dependency, same monorepo) |
+| PG-Git | Semantic codebase search engine (sibling dependency) |
 | [Krusch Memory MCP](https://github.com/kruschdev/krusch-memory-mcp) | Legacy standalone episodic memory (superseded by this project) |
 | [Krusch Sequential MCP](https://github.com/kruschdev/krusch-sequential-mcp) | Sequential thinking with PG persistence |
 | [Krusch Cascade Router](https://github.com/kruschdev/krusch-cascade-router) | Automated LLM inference routing and gateway |
-| [NeoVertex Nuggets](https://github.com/NeoVertex1/nuggets) | Original Holographic Nuggets MCP architecture adapted for this project |
-| [Context Labs HALO](https://github.com/context-labs/halo) | RLM-based tracing engine used to synthesize nudges from agent execution logs |
+| [NeoVertex Nuggets](https://github.com/NeoVertex1/nuggets) | Original Holographic Nuggets architecture |
+| [Context Labs HALO](https://github.com/context-labs/halo) | RLM-based tracing engine |
 
 ---
+
+## 🙏 Acknowledgments
+
+The evolution from a simple RAG cache to a stateful **Company Brain Substrate** is deeply inspired by the [Sentra "Company Brain" Essay Series](https://sentra.app). We recommend reading their work on why organizational memory is an infrastructure problem.
 
 ## 🤝 Contributing
 
