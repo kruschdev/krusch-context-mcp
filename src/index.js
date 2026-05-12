@@ -14,7 +14,7 @@ import path from 'path';
 
 // Import logic from our required MCP packages
 import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, consolidateMemories, compileProjectState } from './memory-engine.js';
-import { writeState, resolveConflict, getProvenance, updateOntology, searchLens, traverseGraph } from './v2-engine.js';
+import { writeState, resolveConflict, getProvenance, updateOntology, searchLens, traverseGraph, linkBlob } from './v2-engine.js';
 import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
 import { getEmbedding } from 'pg-git-mcp/lib/embedding.js';
 import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
@@ -189,7 +189,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             author_id: { type: "string", description: "Identifier of the agent/human (e.g., 'agent:antigravity')." },
             parent_id: { type: "string", description: "If updating an existing state, provide the UUID to ensure optimistic concurrency control." },
             source_ref: { type: "string", description: "Optional URI or document hash that generated this memory." },
-            ontology_tags: { type: "array", items: { type: "string" } }
+            ontology_tags: { type: "array", items: { type: "string" } },
+            action_trace: { type: "array", items: { type: "object" }, description: "Optional trace of agent actions that led to this state." }
           },
           required: ["content", "category", "author_id"]
         }
@@ -251,10 +252,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             memory_id: { type: "string", description: "The UUID of the memory to traverse from." },
-            direction: { type: "string", enum: ['parents', 'children', 'blobs', 'all'], default: 'all' },
+            direction: { type: "string", enum: ['parents', 'children', 'blobs', 'actionable', 'all'], default: 'all' },
             depth: { type: "number", default: 3 }
           },
           required: ["memory_id"]
+        }
+      },
+      {
+        name: "krusch_context_link_blob",
+        description: "Company Brain Substrate (v2): Link a memory state to a codebase file (blob) to build the organizational graph.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            memory_id: { type: "string", description: "The UUID of the memory state." },
+            blob_id: { type: "string", description: "The SHA hash of the codebase blob (from PG-Git)." },
+            relationship: { type: "string", description: "The relationship type (e.g., 'references', 'fixes', 'implements', 'deprecates')." }
+          },
+          required: ["memory_id", "blob_id", "relationship"]
         }
       },
       {
@@ -604,6 +618,7 @@ const TOOL_HANDLERS = new Map([
   ['krusch_context_update_ontology',  (args) => updateOntology(args)],
   ['krusch_context_search_lens',      (args) => searchLens(args)],
   ['krusch_context_traverse_graph',   (args) => traverseGraph(args)],
+  ['krusch_context_link_blob',        (args) => linkBlob(args)],
   // PG-Git codebase
   ['krusch_context_list_repos',  () => handleListRepos()],
   ['krusch_context_search_code', (args) => handleSearchCode(args)],

@@ -314,6 +314,22 @@ export async function compileProjectState({ project }) {
         } catch (e) {
             console.warn(`[krusch-context] Warning: Global nudges fetch failed (${e.message})`);
         }
+
+        state.actionable = [];
+        try {
+            // Fetch actionable states for this project from v2 memory
+            const res = await client.query(`
+                SELECT id, category, content, created_at, ontology_tags 
+                FROM homelab_memory_v2 
+                WHERE status = 'active' 
+                AND $1 = ANY(ontology_tags)
+                AND ontology_tags && ARRAY['commitment', 'escalation', 'decision']::text[]
+                ORDER BY created_at DESC LIMIT 5
+            `, [project]);
+            state.actionable = res.rows;
+        } catch (e) {
+            console.warn(`[krusch-context] Warning: Actionable states fetch failed (${e.message})`);
+        }
     } finally {
         client.release();
     }
@@ -353,6 +369,14 @@ export async function compileProjectState({ project }) {
     output += `## 💎 Nudges (Conventions)\n`;
     if (uniqueNudges.length === 0) output += `- No nudges found.\n`;
     for (const n of uniqueNudges) output += `- [${n.kind}] **${n.key}**: ${n.value}\n`;
+    output += `\n`;
+
+    output += `## ⚡ Actionable Commitments & Conflicts\n`;
+    if (state.actionable.length === 0) output += `- No active commitments or escalations found.\n`;
+    for (const a of state.actionable) {
+        const tags = a.ontology_tags ? `[${a.ontology_tags.join(', ')}] ` : '';
+        output += `- ${tags}${a.content}\n`;
+    }
 
     return { content: [{ type: "text", text: output }] };
 }

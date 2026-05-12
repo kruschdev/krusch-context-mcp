@@ -8,6 +8,7 @@
 
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { pool } from 'pg-git-mcp/db/pool.js';
 
 const SERVER = new URL('../src/index.js', import.meta.url).pathname;
 let nextId = 1;
@@ -241,6 +242,22 @@ async function run() {
         console.log(`   ⚠️ ${e.message}`);
     }
 
+    // 12.5 Test krusch_context_link_blob
+    console.log('\n🔗 Testing krusch_context_link_blob...');
+    try {
+        const targetId = v2StateId || '00000000-0000-0000-0000-000000000000';
+        // We test with a dummy blob ID. Since the blob doesn't exist, we expect an error!
+        const linkRes = await send('tools/call', {
+            name: 'krusch_context_link_blob',
+            arguments: { memory_id: targetId, blob_id: 'fake_blob_sha123', relationship: 'references' }
+        });
+        const text = linkRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text.substring(0, 300)}`);
+    } catch (e) {
+        // Expected "Blob ID fake_blob_sha123 not found in PG-Git database."
+        console.log(`   ✅ Expected error (fake blob): ${e.message}`);
+    }
+
     // 13. Test krusch_context_update_ontology (rename a tag that won't collide)
     console.log('\n🏷️ Testing krusch_context_update_ontology...');
     try {
@@ -273,8 +290,19 @@ async function run() {
         console.log(`   ✅ Expected error: ${e.message}`);
     }
 
+    if (v2StateId) {
+        console.log('\n🧹 Cleaning up v2 test state directly via SQL...');
+        try {
+            await pool.query('DELETE FROM homelab_memory_v2 WHERE id = $1', [v2StateId]);
+            console.log(`   ✅ Deleted test state ${v2StateId}`);
+        } catch (e) {
+            console.log(`   ⚠️ Failed to delete test state: ${e.message}`);
+        }
+    }
+
     console.log('\n✅ All tests completed (v1 + v2).');
     child.kill('SIGTERM');
+    await pool.end();
     setTimeout(() => process.exit(0), 1000);
 }
 

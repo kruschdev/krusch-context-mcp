@@ -56,7 +56,7 @@ async function generateOntologyTags(text) {
  * @param {string[]} [params.ontology_tags] - Optional pre-defined tags
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function writeState({ content, category, author_id, parent_id, source_ref, ontology_tags }) {
+export async function writeState({ content, category, author_id, parent_id, source_ref, ontology_tags, action_trace }) {
     if (!content || !category || !author_id) throw new McpError(ErrorCode.InvalidParams, "Missing required params");
 
     const embeddingArray = await getEmbedding(content);
@@ -68,6 +68,7 @@ export async function writeState({ content, category, author_id, parent_id, sour
         finalOntologyTags = await generateOntologyTags(content);
     }
     const tagsStr = finalOntologyTags && finalOntologyTags.length > 0 ? `{${finalOntologyTags.map(t => `"${t}"`).join(',')}}` : null;
+    const actionTraceStr = action_trace ? JSON.stringify(action_trace) : null;
 
     const client = await pool.connect();
     try {
@@ -92,12 +93,12 @@ export async function writeState({ content, category, author_id, parent_id, sour
         
         const insertQuery = `
             INSERT INTO homelab_memory_v2 
-            (category, content, embedding, author_id, source_ref, parent_id, version_id, status, ontology_tags)
-            VALUES ($1, $2, $3::vector, $4, $5, $6, $7, 'active', $8)
+            (category, content, embedding, author_id, source_ref, parent_id, version_id, status, ontology_tags, action_trace)
+            VALUES ($1, $2, $3::vector, $4, $5, $6, $7, 'active', $8, $9::jsonb)
             RETURNING id
         `;
         const res = await client.query(insertQuery, [
-            category, content, embeddingStr, author_id, source_ref || null, parent_id || null, version_id, tagsStr
+            category, content, embeddingStr, author_id, source_ref || null, parent_id || null, version_id, tagsStr, actionTraceStr
         ]);
         
         await client.query('COMMIT');
@@ -302,7 +303,7 @@ export async function searchLens({ query, roles, limit = 5, status = 'active' })
 export async function traverseGraph({ memory_id, direction = 'all', depth = 3 }) {
     if (!memory_id) throw new McpError(ErrorCode.InvalidParams, "Missing memory_id");
     
-    const validDirections = ['parents', 'children', 'blobs', 'all'];
+    const validDirections = ['parents', 'children', 'blobs', 'actionable', 'all'];
     if (!validDirections.includes(direction)) {
         throw new McpError(ErrorCode.InvalidParams, `Invalid direction. Must be one of: ${validDirections.join(', ')}`);
     }
@@ -363,6 +364,39 @@ export async function traverseGraph({ memory_id, direction = 'all', depth = 3 })
             output += `\n`;
         }
 
+        if (direction === 'actionable' || direction === 'all') {
+            const res = await client.query(`
+                WITH RECURSIVE lineage AS (
+                    SELECT id, parent_id, version_id, author_id, status, ontology_tags, action_trace, 1 as level
+                    FROM homelab_memory_v2 WHERE id = $1
+                    UNION ALL
+                    SELECT m.id, m.parent_id, m.version_id, m.author_id, m.status, m.ontology_tags, m.action_trace, l.level + 1
+                    FROM homelab_memory_v2 m
+                    INNER JOIN lineage l ON m.id = l.parent_id
+                    WHERE l.level < $2
+                )
+                SELECT * FROM lineage 
+                WHERE level > 1 AND (ontology_tags && ARRAY['commitment', 'escalation', 'decision']::text[] OR action_trace IS NOT NULL)
+                ORDER BY level ASC;
+            `, [memory_id, depth + 1]);
+            
+            output += `--- ⚡ Actionable States & Traces (Depth ${depth}) ---\n`;
+            if (res.rows.length === 0) output += `No actionable states found.\n`;
+            res.rows.forEach(r => {
+                const tagsStr = r.ontology_tags ? ` [Ontology: ${r.ontology_tags.join(', ')}]` : '';
+                output += `${'  '.repeat(r.level - 1)}└─ ID: ${r.id} (Ver ${r.version_id}) [Status: ${r.status}]${tagsStr}\n`;
+                if (r.action_trace) {
+                    try {
+                        const trace = typeof r.action_trace === 'string' ? JSON.parse(r.action_trace) : r.action_trace;
+                        output += `${'  '.repeat(r.level - 1)}     Trace: ${JSON.stringify(trace)}\n`;
+                    } catch (e) {
+                        output += `${'  '.repeat(r.level - 1)}     Trace: ${r.action_trace}\n`;
+                    }
+                }
+            });
+            output += `\n`;
+        }
+
         if (direction === 'blobs' || direction === 'all') {
             const res = await client.query(`
                 SELECT blob_id, relationship, created_at 
@@ -380,6 +414,46 @@ export async function traverseGraph({ memory_id, direction = 'all', depth = 3 })
         }
 
         return { content: [{ type: "text", text: output.trim() }] };
+    } catch (err) {
+        throw new McpError(ErrorCode.InternalError, `Database error: ${err.message}`);
+    } finally {
+        client.release();
+    }
+}
+
+/**
+ * Company Brain v2: Link a memory state to a codebase file (blob) to build the organizational graph.
+ * @param {object} params
+ * @param {string} params.memory_id - The UUID of the memory state
+ * @param {string} params.blob_id - The SHA hash of the codebase blob (from PG-Git)
+ * @param {string} params.relationship - The relationship type (e.g., 'references', 'fixes', 'implements', 'deprecates')
+ * @returns {Promise<{content: Array}>} MCP tool response
+ */
+export async function linkBlob({ memory_id, blob_id, relationship }) {
+    if (!memory_id || !blob_id || !relationship) {
+        throw new McpError(ErrorCode.InvalidParams, "Missing memory_id, blob_id, or relationship");
+    }
+
+    const client = await pool.connect();
+    try {
+        // Validate memory_id exists
+        const memRes = await client.query('SELECT id FROM homelab_memory_v2 WHERE id = $1', [memory_id]);
+        if (memRes.rows.length === 0) {
+            throw new McpError(ErrorCode.InvalidParams, `Memory ID ${memory_id} not found.`);
+        }
+
+        // Validate blob_id exists in PG-Git
+        const blobRes = await client.query('SELECT hash FROM blobs WHERE hash = $1', [blob_id]);
+        if (blobRes.rows.length === 0) {
+            throw new McpError(ErrorCode.InvalidParams, `Blob ID ${blob_id} not found in PG-Git database.`);
+        }
+
+        await client.query(`
+            INSERT INTO memory_to_blob_edges (memory_id, blob_id, relationship)
+            VALUES ($1, $2, $3)
+        `, [memory_id, blob_id, relationship]);
+
+        return { content: [{ type: "text", text: `[krusch-context] 🔗 Linked memory ${memory_id} to blob ${blob_id} (Relationship: ${relationship})` }] };
     } catch (err) {
         throw new McpError(ErrorCode.InternalError, `Database error: ${err.message}`);
     } finally {

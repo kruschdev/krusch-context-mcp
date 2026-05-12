@@ -98,9 +98,17 @@ graph TD;
 | **Database** | Hybrid: Local SQLite (Project Memories) + PostgreSQL (Global & Codebase) |
 | **Embeddings** | Ollama `bge-large` @ 1024 dims, fleet load-balanced |
 | **Tagging** | Ollama `llama3.2` for automatic keyword extraction |
-| **Tables** | `blobs` (Codebase), `ide_agent_memory` (Episodic), `ide_agent_nuggets` (Steering facts) |
+| **Tables** | `blobs` (Codebase), `ide_agent_memory` (Episodic), `homelab_memory_v2` (Company Brain Substrate), `ide_agent_nuggets` (Steering facts) |
 | **Protocol** | MCP Stdio transport |
 | **Temporal Decay** | Exponential decay rate of 0.01 — a memory's relevance drops ~26% after 30 days of inactivity |
+
+### Sentra Memory Substrate Blueprint
+
+This architecture implements the three layers of organizational memory defined in the [Sentra Company Brain research](https://sentra.com):
+
+1. **Factual Memory (Layer 1):** The foundation. Stores raw codebase state (`blobs`) and episodic events (`ide_agent_memory`). It answers "what happened" and "what is the code."
+2. **Interaction Memory / Context Graph (Layer 2):** The reasoning layer. Powered by the v2 Company Brain substrate (`homelab_memory_v2`). This layer tracks the lineage of decisions via parent-child UUID chains, attribution (who decided what), conflict resolution, and ontology tagging. It answers "why did this happen" and "what were the alternatives."
+3. **Action Memory (Layer 3):** The orchestration layer. Enables agents to autonomously compile project state (`krusch_context_compile_state`) and traverse the context graph to determine the next logical action without waiting for human intervention.
 
 ---
 
@@ -152,6 +160,16 @@ npm start
 ```
 
 **5. Restart your IDE.** That's it — your agent now has access to all 25 tools.
+
+### Upgrading to Company Brain v2
+
+If you are already running Krusch Context MCP and want to update to the new Company Brain v2 substrate:
+
+1. **Pull the latest code:** `git pull origin main`
+2. **Update dependencies:** `npm install` (this will bump `pg-git-mcp` to `^1.0.3`)
+3. **Restart the server:** `npm start`
+
+That's it. The server uses idempotent, auto-executing database migrations on startup. When it boots, it will automatically create the new `homelab_memory_v2` tables and `memory_to_blob_edges` lineage graph without touching your existing `ide_agent_memory` records. Your historical v1 episodic memories and codebase blobs will remain fully intact and searchable alongside the new v2 features.
 
 ---
 
@@ -216,6 +234,20 @@ To effectively use Krusch Context MCP, instruct your IDE agent to document its f
 **Cross-referencing before acting**
 > **You:** "Before we start, verify what you know about the database schema."
 > **Agent:** *[Calls `krusch_context_deep_search`]* "Cross-referencing codebase search (blobs) with episodic memory — the schema uses pgvector with 1024 dims (bge-large), and our last session noted we added the `tags` column."
+
+### Company Brain v2 (Stateful Memory)
+
+**Writing a stateful decision**
+> **You:** "Let's standardize on UUIDs for memory IDs."
+> **Agent:** *[Calls `krusch_context_write_state`]* "Wrote decision to 'lessons' under my author ID. Lineage started."
+
+**Resolving a multi-agent conflict**
+> **You:** "The previous agent was wrong about the database port. Resolve the conflict."
+> **Agent:** *[Calls `krusch_context_resolve_conflict`]* "Merged the conflicting states into a new resolution and deprecated the old branches."
+
+**Tracing provenance**
+> **You:** "Who made the decision to use port 5442?"
+> **Agent:** *[Calls `krusch_context_get_provenance`]* "Tracing the lineage... human:krusch made that decision in a conflict resolution yesterday."
 
 ### Steering Nudges
 
@@ -1250,32 +1282,19 @@ krusch-context-mcp/
 
 ## 🧪 Testing
 
+The project uses the native `node:test` framework for unit and integration tests.
+
+```bash
+# Run the full test suite (Lakebase sync, SQLite isolation, Company Brain v2)
+npm test
+```
+
+### Smoke Test
+
+To verify registration and execution of all 25 tools against a live `kruschdb` instance:
+
 ```bash
 node tests/test_client.js
-```
-
-This script connects to the live `kruschdb` instance and verifies registration and execution of all 25 tools.
-
-Additional test scripts:
-
-```bash
-# Verify Lakebase pull/push sync between SQLite and Postgres
-node tests/test_lakebase.js
-
-# Test SQLite-based memory operations in isolation
-node tests/test_sqlite_memory.js
-```
-
-### Company Brain v2 Tests
-
-These standalone scripts validate the v2 substrate independently of the main test suite:
-
-```bash
-# Test multi-agent writes, concurrency control, and conflict resolution
-node tests/test_v2_memory.js
-
-# Test lens-based role-filtered retrieval and graph traversal
-node tests/test_v2_lens_graph.js
 ```
 
 ### Benchmarking & Evaluation Scripts
