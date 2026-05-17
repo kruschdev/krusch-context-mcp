@@ -26,22 +26,40 @@ export async function generateTagsFromLLM(text, options = {}) {
     try {
         return await ollamaQueue.enqueue(async (endpoint) => {
             const url = `${endpoint.replace(/\/$/, '')}/api/generate`;
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: "llama3.2",
-                    prompt,
-                    stream: false
-                })
-            });
+            
+            let attempt = 0;
+            const maxRetries = 2;
+            while (attempt <= maxRetries) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+                
+                try {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: "llama3.2:1b",
+                            prompt,
+                            stream: false
+                        }),
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
 
-            if (!res.ok) throw new Error(`Status ${res.status}`);
+                    if (!res.ok) throw new Error(`Status ${res.status}`);
 
-            const data = await res.json();
-            let tags = data.response.split(',').map(t => t.trim()).filter(t => t.length > 0);
-            if (lowercase) tags = tags.map(t => t.toLowerCase());
-            return asJson ? JSON.stringify(tags) : tags;
+                    const data = await res.json();
+                    let tags = data.response.split(',').map(t => t.trim()).filter(t => t.length > 0);
+                    if (lowercase) tags = tags.map(t => t.toLowerCase());
+                    return asJson ? JSON.stringify(tags) : tags;
+                } catch (e) {
+                    clearTimeout(timeoutId);
+                    attempt++;
+                    if (attempt > maxRetries) throw e;
+                    console.warn(`[krusch-context] Tag generation timeout/error, retrying (${attempt}/${maxRetries}): ${e.message}`);
+                    await new Promise(r => setTimeout(r, 2000 * attempt));
+                }
+            }
         }, PRIORITY.MEDIUM);
     } catch (err) {
         console.error(`[krusch-context] Warning: Tag generation failed: ${err.message}`);
