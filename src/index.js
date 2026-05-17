@@ -18,6 +18,7 @@ import { initTracing } from './telemetry.js';
 import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, consolidateMemories, compileProjectState } from './memory-engine.js';
 import { writeState, resolveConflict, getProvenance, updateOntology, searchLens, traverseGraph, linkBlob } from './v2-engine.js';
 import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
+import { writeSessionHandoff, readSessionReview } from './session-engine.js';
 import { getEmbedding } from 'pg-git-mcp/lib/embedding.js';
 import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
@@ -436,6 +437,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             active_project: { type: "string", description: "The active project context. Required to list 'project' kind nuggets." }
           }
         }
+      },
+      {
+        name: "krusch_context_write_session_handoff",
+        description: "Session Bridge (IDE ↔ Jean): Write the IDE session summary, calculate modified files, insert the DB record, and autonomously spawn the Jean SRE companion for review. Call this when executing /close.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project: { type: "string" },
+            summary: { type: "string" }
+          },
+          required: ["project", "summary"]
+        }
+      },
+      {
+        name: "krusch_context_read_session_review",
+        description: "Session Bridge (Jean ↔ IDE): Fetch the latest session review from the Jean SRE companion. This is guaranteed to be idempotent (it atomically marks the review as consumed). Call this when executing /continue.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project: { type: "string" }
+          },
+          required: ["project"]
+        }
       }
     ]
   };
@@ -479,7 +503,7 @@ async function handleSearchCode(args) {
       const dateStr = r.last_seen_at ? new Date(r.last_seen_at).toISOString().split('T')[0] : 'unknown';
       const projectTag = r.project ? `[${r.project}]` : '';
       const pathStr = r.file_path ? ` | Path: ${r.file_path}` : '';
-      output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | ${projectTag} ${r.file_name}${pathStr} | Seen: ${dateStr} ---\n`;
+      output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | ${projectTag} ${r.file_name}${pathStr} | Blob: ${r.id} | Seen: ${dateStr} ---\n`;
       output += (r.summary || '(no preview)') + '\n';
   }
   return { content: [{ type: "text", text: output }] };
@@ -648,6 +672,9 @@ const TOOL_HANDLERS = new Map([
   ['krusch_context_nugget_nudges',   (args) => nuggetNudges(args)],
   ['krusch_context_nugget_forget',   (args) => nuggetForget(args)],
   ['krusch_context_nugget_list',     (args) => nuggetList(args)],
+  // Session Bridge
+  ['krusch_context_write_session_handoff', (args) => writeSessionHandoff(args)],
+  ['krusch_context_read_session_review',   (args) => readSessionReview(args)],
 ]);
 
 const tracer = trace.getTracer('krusch-context-mcp');

@@ -271,6 +271,26 @@ async function run() {
         console.log(`   ⚠️ ${e.message}`);
     }
 
+    // 13.5 Test krusch_context_write_session_handoff and read_session_review
+    console.log('\n🔄 Testing session relay logic...');
+    try {
+        const handoffRes = await send('tools/call', {
+            name: 'krusch_context_write_session_handoff',
+            arguments: { project: 'test-project-smoke', summary: 'Smoke test summary' }
+        });
+        const textHandoff = handoffRes.result?.content?.[0]?.text || '';
+        console.log(`   ${textHandoff}`);
+
+        const readRes = await send('tools/call', {
+            name: 'krusch_context_read_session_review',
+            arguments: { project: 'test-project-smoke' }
+        });
+        const textRead = readRes.result?.content?.[0]?.text || '';
+        console.log(`   ${textRead.substring(0, 100)}`);
+    } catch (e) {
+        console.log(`   ⚠️ Session relay test failed: ${e.message}`);
+    }
+
     // 14. Cleanup: delete the v2 test state directly via SQL (not a tool, just best-effort)
     // Note: resolve_conflict needs 2+ active states, so we just validate it returns the right error
     console.log('\n🔗 Testing krusch_context_resolve_conflict (expected error: need 2+ states)...');
