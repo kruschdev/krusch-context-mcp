@@ -104,7 +104,7 @@ graph TD;
 ### Key Design Decisions
 
 - **Lakebase Architecture** — Local SQLite for zero-latency reads, async write-behind to durable PostgreSQL. A `+0.3` local scoring bias mitigates Ebbinghaus forgetting as the global corpus grows. *Inspired by [Neon](https://neon.com/docs/introduction/architecture-overview).*
-- **Hybrid Retrieval** — Auto-tagged via `llama3.2` to address pure-cosine failure modes (negation, numeric, role-swap). *Per [Sentra](https://sentra.app).*
+- **Hybrid Retrieval** — Auto-tagged via **SpectralQuant KV Cache Compression** to address pure-cosine failure modes (negation, numeric, role-swap) while maintaining massive context windows without OOM. *Per [Sentra](https://sentra.app).*
 - **Consolidation** — Semantic dedup via L2-normalized centroid averaging without re-embedding. *From [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation).*
 - **Holographic Nuggets** — Lightweight steering facts adapted from [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets).
 
