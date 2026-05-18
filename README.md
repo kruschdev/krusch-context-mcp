@@ -98,7 +98,7 @@ graph TD;
 |-----------|---------|
 | **Storage** | Hybrid: Local SQLite (per-project) + PostgreSQL (global & codebase) |
 | **Embeddings** | Ollama `bge-large` @ 1024 dims, fleet load-balanced |
-| **Tagging** | Ollama `llama3.2` for automatic keyword extraction |
+| **Tagging** | SpectralQuant KV Compression for automatic keyword extraction |
 | **Temporal Decay** | `score = similarity × e^(-0.01 × age_days)` — relevance drops ~26% after 30 days |
 
 ### Key Design Decisions
@@ -266,6 +266,8 @@ node scripts/eval_accuracy.js           # Precision/recall
 The evolution from a simple RAG cache to a stateful **Company Brain Substrate** is deeply inspired by the [Sentra "Company Brain" Essay Series](https://sentra.app). We recommend reading their work on why organizational memory is an infrastructure problem.
 
 The automated, continuous optimization of agent tool usage through execution tracing and LLM analysis is powered by the [HALO RLM Engine](https://github.com/context-labs/halo).
+
+Tag generation relies on the massive context extensions enabled by **SpectralQuant KV Cache Compression**, authored by Ashwin Gopinath. Our production proxy bridge is open-source and available at the [SpectralQuant Ollama Bridge standalone repository](https://github.com/kruschdev/SpectralQuant-Ollama-Bridge).
 
 ## Contributing
 
