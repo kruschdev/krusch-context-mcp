@@ -267,7 +267,7 @@ The evolution from a simple RAG cache to a stateful **Company Brain Substrate** 
 
 The automated, continuous optimization of agent tool usage through execution tracing and LLM analysis is powered by the [HALO RLM Engine](https://github.com/context-labs/halo).
 
-Tag generation relies on the massive context extensions enabled by **SpectralQuant KV Cache Compression**, authored by Ashwin Gopinath. Our production proxy bridge is open-source and available at the [SpectralQuant Ollama Bridge standalone repository](https://github.com/kruschdev/SpectralQuant-Ollama-Bridge).
+Tag generation and context analysis rely on the massive context extensions enabled by **SpectralQuant KV Cache Compression**, authored by Ashwin Gopinath. Our production proxy bridge seamlessly handles both agentic reasoning tasks and native `/api/embeddings` pass-through for RAG, and is open-source at the [SpectralQuant Ollama Bridge standalone repository](https://github.com/kruschdev/SpectralQuant-Ollama-Bridge).
 
 ## Contributing
 
