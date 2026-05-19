@@ -46,4 +46,4 @@ That is what we have been building at Sentra through the Company Brain work. MCP
 
 MCP is the wire through which memory flows. The next enterprise AI stack will not be “Claude plus every connector.” It will be models connected to tools through protocols, grounded by a semantic memory layer that is maintained as work happens. MCP lets agents reach the company. Memory lets them understand it.
 
-At Sentra, where we are building what can be only described as a "company brain", a shared intelligence/memory layer that sits on all communication channels, knowledge bases, action and agent traces to understand how everyone in an organization actually works as well as how work actually gets done, constructing a living world model of the entire company in near real time.
+At Sentra, we are building what can only be described as a "company brain"—a shared intelligence and memory layer that sits across all communication channels, knowledge bases, and action traces. It is designed to understand how everyone in an organization actually works and how work gets done, constructing a living world model of the entire company in near real time.
