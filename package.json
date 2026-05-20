@@ -1,6 +1,6 @@
 {
   "name": "krusch-context-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "Unified MCP server merging PG-Git codebase search with episodic homelab memory",
   "main": "src/index.js",

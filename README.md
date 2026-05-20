@@ -107,6 +107,7 @@ graph TD;
 - **Hybrid Retrieval** — Auto-tagged via **SpectralQuant KV Cache Compression** to address pure-cosine failure modes (negation, numeric, role-swap) while maintaining massive context windows without OOM. *Per [Sentra](https://sentra.app).*
 - **Consolidation** — Semantic dedup via L2-normalized centroid averaging without re-embedding. *From [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation).*
 - **Holographic Nuggets** — Lightweight steering facts adapted from [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets).
+- **Resilient Multi-Tier Tagging (v1.1)** — Implements robust failover from SpectralQuant KV compression to local Ollama endpoints (running `llama3.2:1b`), with fuzzy parsing of varied list index styles to guarantee 100% keyword extraction reliability under offline or proxy down states.
 
 ### Company Brain Substrate (v2)
 

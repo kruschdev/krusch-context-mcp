@@ -2,7 +2,7 @@
 
 > Unified MCP server: PG-Git codebase search + Homelab episodic memory + Holographic Nuggets + External docs search.
 
-> **Last audit**: 2026-05-12 | **Version**: 1.0.0 | **Tools**: 26
+> **Last audit**: 2026-05-19 | **Version**: 1.1.0 | **Tools**: 26
 
 ## Architecture Overview
 
