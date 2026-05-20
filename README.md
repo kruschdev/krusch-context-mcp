@@ -155,11 +155,21 @@ Implements the three-layer organizational memory model from the [Sentra "Company
 
 ### Pattern 1: Zero-Trust Session Start
 
+> **🛑 ZERO-TRUST CONTEXT VERIFICATION (MANDATORY FIRST STEP)**  
+> **Root Cause Vulnerability**: An agent operating in a new session suffers from "goldfish memory" and will confidently hallucinate an understanding of decoupled architectures if it hasn't anchored itself in recent memory.  
+> **Rule**: Before executing a research task, writing code, or answering architectural questions in a new session, the agent **MUST** independently execute a Vector Database query to pull the latest codebase realities.   
+> **Execution**: You are forbidden from guessing context. You must physically execute the Context MCP tool:  
+> `search_memory(category: 'lessons', query: "<current_topic_or_project>")`  
+> If you proceed without querying this database first, you are violating the core partnership agreement.
+
 ```
-1. deep_search({ query: "<topic>", project: "<project>" })
+1. search_memory({ category: "lessons", query: "<topic>" })
+   → Pull the latest codebase realities and historical context
+
+2. deep_search({ query: "<topic>", project: "<project>" })
    → Verify codebase + memory in one call
 
-2. nugget_nudges({ query: "<task>", active_project: "<project>" })
+3. nugget_nudges({ query: "<task>", active_project: "<project>" })
    → Load conventions and preferences
 ```
 
