@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.png" alt="Krusch Context MCP" width="800" />
+  <img src="docs/assets/banner.png?v=2" alt="Krusch Context MCP" width="800" />
 </p>
 
 <p align="center">
