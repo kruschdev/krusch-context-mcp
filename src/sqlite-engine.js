@@ -51,8 +51,8 @@ export async function getProjectDb(projectName) {
  * @returns {Promise<Database|null>}
  */
 async function _initProjectDb(projectName) {
-    // Homelab projects are in the sibling directories of this MCP server
-    const projectsRoot = path.resolve(__dirname, '../../');
+    // Homelab projects root — check environment variable first for flexibility
+    const projectsRoot = process.env.PROJECTS_ROOT || path.resolve(__dirname, '../../');
     const repoPath = path.join(projectsRoot, projectName);
     
     if (!fs.existsSync(repoPath)) {

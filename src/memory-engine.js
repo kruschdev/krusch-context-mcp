@@ -67,7 +67,7 @@ async function _addGlobalMemory(category, content, finalTags, embeddingStr) {
 export async function addMemory({ category, content, tags, project, _embedding }) {
     if (!category || !content) throw new McpError(ErrorCode.InvalidParams, "Missing params");
     
-    const embeddingArray = _embedding || await getEmbedding(content);
+    const embeddingArray = _embedding || await getEmbedding(content, PRIORITY.HIGH);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
 
     let finalTags = tags ? JSON.stringify(tags) : null;
@@ -165,7 +165,7 @@ async function _searchProjectMemory(active_project, category, embeddingArray, li
 export async function searchMemory({ category, query, limit = 3, active_project, _embedding }) {
     if (!category || !query) throw new McpError(ErrorCode.InvalidParams, "Missing params");
 
-    const embeddingArray = _embedding || await getEmbedding(query, PRIORITY.HIGH);
+    const embeddingArray = _embedding || await getEmbedding(query, PRIORITY.CRITICAL);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
 
     const pgResults = await _searchGlobalMemory(category, embeddingArray, limit);
@@ -417,7 +417,7 @@ async function _updateProjectMemory(id, content, tags, source_project) {
     const params = [];
     
     if (content) {
-        const embeddingArray = await getEmbedding(content);
+        const embeddingArray = await getEmbedding(content, PRIORITY.HIGH);
         if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
         setClauses.push(`content = ?`);
         params.push(content);
@@ -453,7 +453,7 @@ async function _updateGlobalMemory(id, content, tags, project) {
         let idx = 1;
 
         if (content) {
-            const embeddingArray = await getEmbedding(content);
+            const embeddingArray = await getEmbedding(content, PRIORITY.HIGH);
             if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
             setClauses.push(`content = $${idx++}`);
             params.push(content);

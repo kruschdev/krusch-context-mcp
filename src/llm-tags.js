@@ -16,6 +16,24 @@ import { chat } from '../../../lib/llm.js';
  * @param {boolean} [options.asJson=false] - Return JSON.stringify(tags) instead of a raw array.
  * @returns {Promise<string[]|string|null>} Array of tags (or JSON string if asJson), or null on failure.
  */
+/**
+ * Parses and cleans tags from LLM response, supporting comma-separated, numbered, or bulleted lists.
+ * @param {string} responseText
+ * @returns {string[]} Array of cleaned tags
+ */
+function parseTags(responseText) {
+    if (!responseText) return [];
+    let tags = [];
+    if (responseText.includes(',')) {
+        tags = responseText.split(',').map(t => t.trim());
+    } else {
+        tags = responseText.split('\n').map(t => t.trim());
+    }
+    return tags
+        .map(t => t.replace(/^(?:\d+[\.)]\s*|[-\*]\s*)/, '').trim())
+        .filter(t => t.length > 0 && !t.toLowerCase().startsWith('here are') && !t.toLowerCase().startsWith('keywords:'));
+}
+
 export async function generateTagsFromLLM(text, options = {}) {
     const {
         prompt = `Extract 3 to 5 concise keywords or tags from the following text. Respond ONLY with a comma-separated list of tags, nothing else.\n\nText: "${text}"`,
@@ -40,7 +58,7 @@ export async function generateTagsFromLLM(text, options = {}) {
                     { timeout: 60000 }
                 );
 
-                let tags = responseText.split(',').map(t => t.trim()).filter(t => t.length > 0);
+                let tags = parseTags(responseText);
                 if (lowercase) tags = tags.map(t => t.toLowerCase());
                 return asJson ? JSON.stringify(tags) : tags;
             } catch (e) {
@@ -51,7 +69,34 @@ export async function generateTagsFromLLM(text, options = {}) {
             }
         }
     } catch (err) {
-        console.error(`[krusch-context] Warning: Tag generation failed: ${err.message}`);
-        return null;
+        console.warn(`[krusch-context] Warning: SpectralQuant tag generation failed: ${err.message}. Trying local Ollama fallback...`);
+        try {
+            const ollamaUrlEnv = process.env.OLLAMA_URL || 'http://127.0.0.1:11435';
+            const ollamaUrlArray = ollamaUrlEnv.split(',').map(u => u.trim());
+            const ollamaBaseUrl = ollamaUrlArray[Math.floor(Math.random() * ollamaUrlArray.length)];
+            const ollamaUrl = ollamaBaseUrl.endsWith('/') 
+                ? `${ollamaBaseUrl}v1/chat/completions` 
+                : `${ollamaBaseUrl}/v1/chat/completions`;
+
+            const responseText = await chat(
+                "You are a highly efficient assistant specializing in keyword extraction.",
+                prompt,
+                {
+                    provider: 'ollama',
+                    model: 'llama3.2:1b', // Fast fallback model
+                    apiUrl: ollamaUrl,
+                    temperature: 0.1,
+                    maxTokens: 50
+                },
+                { timeout: 30000 }
+            );
+
+            let tags = parseTags(responseText);
+            if (lowercase) tags = tags.map(t => t.toLowerCase());
+            return asJson ? JSON.stringify(tags) : tags;
+        } catch (fallbackErr) {
+            console.error(`[krusch-context] Error: Tag generation fallback failed: ${fallbackErr.message}`);
+            return null;
+        }
     }
 }
