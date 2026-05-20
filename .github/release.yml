@@ -1,0 +1,26 @@
+name: Release Notes Template
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+    authors:
+      - dependabot
+  categories:
+    - title: Breaking Changes 🛠
+      labels:
+        - breaking-change
+    - title: New Features 🎉
+      labels:
+        - enhancement
+        - feature
+    - title: Bug Fixes 🐛
+      labels:
+        - bug
+        - fix
+    - title: Maintenance 🏗
+      labels:
+        - chore
+        - refactor
+    - title: Documentation 📝
+      labels:
+        - documentation

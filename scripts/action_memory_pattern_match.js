@@ -1,5 +1,5 @@
 import { pool } from 'pg-git-mcp/db/pool.js';
-import { getEmbedding } from 'pg-git-mcp/lib/embedding.js';
+import { getChunkedCentroidEmbedding } from 'pg-git-mcp/lib/embedding.js';
 
 async function runPatternMatch() {
     console.log("🔍 Running Action Memory Pattern Matching...");
@@ -20,7 +20,7 @@ async function runPatternMatch() {
             const summary = `System generated priority: Detected multiple escalations (${res.rows.length}). Review required. ` + 
                             res.rows.map(r => `[ID ${r.id}]: ${r.content}`).join(' | ');
             
-            const embeddingArray = await getEmbedding(summary);
+            const embeddingArray = await getChunkedCentroidEmbedding(summary);
             const embeddingStr = embeddingArray ? `[${embeddingArray.join(',')}]` : null;
 
             if (embeddingStr) {
