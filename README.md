@@ -92,6 +92,14 @@ graph TD;
     B -- Deep Search --> C;
     B -- Deep Search --> D;
     B -- Deep Search --> E;
+    
+    %% Proactive Auditor & Direct-OPD Alignment Loop
+    B -- Trajectory Audit --> G[Proactive Auditor];
+    G -- Warning Nudge --> A;
+    A -- Feedback / Corrected Diff --> H[nudge_feedback];
+    H -- write_state --> I[(homelab_memory_v2)];
+    I -- Reusable Guidance --> G;
+    
     F[Ollama Fleet] -. embeddings .-> B;
 ```
 
