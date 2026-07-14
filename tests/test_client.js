@@ -293,7 +293,7 @@ async function run() {
     if (v2StateId) {
         console.log('\n🧹 Cleaning up v2 test state directly via SQL...');
         try {
-            await pool.query('DELETE FROM homelab_memory_v2 WHERE id = $1', [v2StateId]);
+            await pool.query('DELETE FROM memory_v2 WHERE id = $1', [v2StateId]);
             console.log(`   ✅ Deleted test state ${v2StateId}`);
         } catch (e) {
             console.log(`   ⚠️ Failed to delete test state: ${e.message}`);

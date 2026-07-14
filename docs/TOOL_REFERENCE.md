@@ -244,7 +244,7 @@ Write a memory state with optimistic concurrency control. Unlike `add_memory`, t
 
 **How it works:**
 1. Generates an embedding for the content via Ollama
-2. Inserts into `homelab_memory_v2` with a UUID, version tracking, and author attribution
+2. Inserts into `memory_v2` with a UUID, version tracking, and author attribution
 3. If `parent_id` is provided, creates a parent→child lineage edge for provenance tracing
 
 **Example call:**

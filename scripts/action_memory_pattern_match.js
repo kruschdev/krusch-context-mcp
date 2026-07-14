@@ -8,7 +8,7 @@ async function runPatternMatch() {
         // Detect multiple escalations in the past 24 hours
         const res = await client.query(`
             SELECT id, content, author_id, created_at, ontology_tags 
-            FROM homelab_memory_v2 
+            FROM memory_v2 
             WHERE status = 'active' 
             AND 'escalation' = ANY(ontology_tags)
             AND created_at >= NOW() - INTERVAL '24 HOURS'
@@ -25,7 +25,7 @@ async function runPatternMatch() {
 
             if (embeddingStr) {
                 await client.query(`
-                    INSERT INTO homelab_memory_v2 (category, content, embedding, author_id, status, ontology_tags)
+                    INSERT INTO memory_v2 (category, content, embedding, author_id, status, ontology_tags)
                     VALUES ('priorities', $1, $2::vector, 'agent:system', 'active', ARRAY['escalation', 'summary'])
                 `, [summary, embeddingStr]);
                 console.log("✅ Synthesis created.");

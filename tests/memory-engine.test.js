@@ -88,7 +88,7 @@ test('Integration Test Suite for krusch-context-mcp tools', async (t) => {
         const unifiedId = resResolve.content[0].text.match(/Unified State ID: ([0-9a-fA-F-]+)/)[1];
         
         // Verify old states are deprecated
-        const checkRes = await pool.query('SELECT id, status FROM homelab_memory_v2 WHERE id IN ($1, $2, $3)', [idA, idB, unifiedId]);
+        const checkRes = await pool.query('SELECT id, status FROM memory_v2 WHERE id IN ($1, $2, $3)', [idA, idB, unifiedId]);
         
         const stateA = checkRes.rows.find(r => r.id === idA);
         const stateB = checkRes.rows.find(r => r.id === idB);
@@ -100,7 +100,7 @@ test('Integration Test Suite for krusch-context-mcp tools', async (t) => {
 
         // Cleanup
         await pool.query('DELETE FROM memory_to_blob_edges WHERE memory_id IN ($1, $2, $3)', [idA, idB, unifiedId]);
-        await pool.query('DELETE FROM homelab_memory_v2 WHERE id IN ($1, $2, $3)', [idA, idB, unifiedId]);
+        await pool.query('DELETE FROM memory_v2 WHERE id IN ($1, $2, $3)', [idA, idB, unifiedId]);
     });
     
     // Cleanup pool

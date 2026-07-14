@@ -62,11 +62,17 @@ async function verifyDatabase() {
             if (e.code !== '42701') throw e; // 42701 is duplicate column
         }
 
-        // Add homelab_memory_v2 table
+        // Add memory_v2 table (renamed from memory_v2 if it exists)
+        try {
+            await pool.query('ALTER TABLE IF EXISTS memory_v2 RENAME TO memory_v2');
+        } catch (e) {
+            console.error('[krusch-context-mcp] Rename migration error:', e.message);
+        }
+
         await pool.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
         
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS homelab_memory_v2 (
+            CREATE TABLE IF NOT EXISTS memory_v2 (
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
                 category VARCHAR(50) NOT NULL,
                 content TEXT NOT NULL,
@@ -75,7 +81,7 @@ async function verifyDatabase() {
                 source_ref VARCHAR(255),
                 confidence FLOAT DEFAULT 1.0,
                 action_trace JSONB,
-                parent_id UUID REFERENCES homelab_memory_v2(id),
+                parent_id UUID REFERENCES memory_v2(id),
                 version_id INT DEFAULT 1,
                 status VARCHAR(20) DEFAULT 'active',
                 ontology_tags TEXT[],
@@ -87,20 +93,20 @@ async function verifyDatabase() {
         `);
 
         try {
-            await pool.query('ALTER TABLE homelab_memory_v2 ADD COLUMN project VARCHAR(255)');
+            await pool.query('ALTER TABLE memory_v2 ADD COLUMN project VARCHAR(255)');
         } catch (e) {
             if (e.code !== '42701') throw e; // 42701 is duplicate column
         }
 
         // Add indexes
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_ontology_tags ON homelab_memory_v2 USING GIN (ontology_tags)');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_embedding ON homelab_memory_v2 USING hnsw (embedding vector_cosine_ops)');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_ontology_tags ON memory_v2 USING GIN (ontology_tags)');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_embedding ON memory_v2 USING hnsw (embedding vector_cosine_ops)');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_v1_embedding ON ide_agent_memory USING hnsw (embedding vector_cosine_ops)');
 
         // Add memory_to_blob_edges table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS memory_to_blob_edges (
-                memory_id UUID REFERENCES homelab_memory_v2(id),
+                memory_id UUID REFERENCES memory_v2(id),
                 blob_id VARCHAR(255),
                 relationship VARCHAR(50),
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -718,12 +724,12 @@ async function handleHealthCheck() {
   const dbCheck = await pool.query('SELECT COUNT(*) as count FROM ide_agent_memory');
   const repoCheck = await pool.query('SELECT COUNT(*) as count FROM repositories');
   const nuggetCheck = await pool.query('SELECT COUNT(*) as count FROM ide_agent_nuggets');
-  const v2Check = await pool.query("SELECT COUNT(*) as count FROM homelab_memory_v2 WHERE status = 'active'");
+  const v2Check = await pool.query("SELECT COUNT(*) as count FROM memory_v2 WHERE status = 'active'");
   const memoryCount = dbCheck.rows[0].count;
   const repoCount = repoCheck.rows[0].count;
   const nuggetCount = nuggetCheck.rows[0].count;
   const v2Count = v2Check.rows[0].count;
-  return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Company Brain states (v2): ${v2Count}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Database: kruschdb (pgvector)\n- Version: 1.0.0` }] };
+  return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Company Brain states (v2): ${v2Count}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Database: kruschdb (pgvector)\n- Version: 1.2.0` }] };
 }
 
 async function handleDocsList() {

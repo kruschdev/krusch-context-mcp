@@ -298,7 +298,7 @@ export async function compileProjectState({ project }) {
             // Fetch actionable states for this project from v2 memory
             const res = await client.query(`
                 SELECT id, category, content, created_at, ontology_tags 
-                FROM homelab_memory_v2 
+                FROM memory_v2 
                 WHERE status = 'active' 
                 AND (project = $1 OR $1 = ANY(ontology_tags))
                 AND ontology_tags && ARRAY['commitment', 'escalation', 'decision']::text[]

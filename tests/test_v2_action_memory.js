@@ -78,7 +78,7 @@ async function run() {
     
     // In order for compileProjectState to find it, the memory must have the project name in ontology_tags (as per line 325 of memory-engine.js: AND $1 = ANY(ontology_tags))
     console.log('\n📝 2. Updating tags to include project name via DB...');
-    await pool.query(`UPDATE homelab_memory_v2 SET ontology_tags = array_append(ontology_tags, 'test_project') WHERE id = $1`, [parentId]);
+    await pool.query(`UPDATE memory_v2 SET ontology_tags = array_append(ontology_tags, 'test_project') WHERE id = $1`, [parentId]);
     console.log(`   Updated ontology_tags to include 'test_project'`);
 
     console.log(`\n📝 3. Writing child state...`);
@@ -127,7 +127,7 @@ async function run() {
     }
 
     console.log('\n🧹 6. Cleanup...');
-    await pool.query(`DELETE FROM homelab_memory_v2 WHERE id IN ($1, $2)`, [parentId, childId]);
+    await pool.query(`DELETE FROM memory_v2 WHERE id IN ($1, $2)`, [parentId, childId]);
     
     console.log('\n✅ All Action Memory tests completed.');
     child.kill('SIGTERM');
