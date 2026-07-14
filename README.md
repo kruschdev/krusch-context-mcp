@@ -288,6 +288,10 @@ The evolution from a simple RAG cache to a stateful **Company Brain Substrate** 
 
 The automated, continuous optimization of agent tool usage through execution tracing and LLM analysis is powered by the [HALO RLM Engine](https://github.com/context-labs/halo).
 
+The proactive context auditor alignment feedback loops are powered by paradigms introduced in:
+- **Proxy Exploration and Reusable Guidance (PUST)**: Fu et al., [Proxy Exploration and Reusable Guidance: A Modular LLM Post-Training Paradigm via Proxy-Guided Update Signals](https://huggingface.co/papers/2607.11505) (ArXiv: [2607.11505](https://arxiv.org/abs/2607.11505)).
+- **Direct On-Policy Distillation (Direct-OPD)**: Feng et al., [Weak-to-Strong Generalization via Direct On-Policy Distillation](https://huggingface.co/papers/2607.05394) (ArXiv: [2607.05394](https://arxiv.org/abs/2607.05394)).
+
 ## Contributing
 
 We welcome contributions! Please ensure tests pass and adhere to the project formatting standards.
