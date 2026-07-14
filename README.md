@@ -291,6 +291,7 @@ The automated, continuous optimization of agent tool usage through execution tra
 The proactive context auditor alignment feedback loops are powered by paradigms introduced in:
 - **Proxy Exploration and Reusable Guidance (PUST)**: Fu et al., [Proxy Exploration and Reusable Guidance: A Modular LLM Post-Training Paradigm via Proxy-Guided Update Signals](https://huggingface.co/papers/2607.11505) (ArXiv: [2607.11505](https://arxiv.org/abs/2607.11505)).
 - **Direct On-Policy Distillation (Direct-OPD)**: Feng et al., [Weak-to-Strong Generalization via Direct On-Policy Distillation](https://huggingface.co/papers/2607.05394) (ArXiv: [2607.05394](https://arxiv.org/abs/2607.05394)).
+- **Proactive Memory Agent**: Wu et al., [Remember When It Matters: Proactive Memory Agent for Long-Horizon Agents](https://huggingface.co/papers/2607.08716) (ArXiv: [2607.08716](https://arxiv.org/abs/2607.08716)).
 
 ## Contributing
 
