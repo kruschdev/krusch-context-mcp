@@ -97,7 +97,7 @@ graph TD;
     B -- Trajectory Audit --> G[Proactive Auditor];
     G -- Warning Nudge --> A;
     A -- Feedback / Corrected Diff --> H[nudge_feedback];
-    H -- write_state --> I[(memory_v2)];
+    H -- write_state --> I[(interaction_memory)];
     I -- Reusable Guidance --> G;
     
     F[Ollama Fleet] -. embeddings .-> B;

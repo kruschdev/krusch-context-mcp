@@ -64,7 +64,7 @@ export async function writeState({ content, category, author_id, parent_id, sour
         
         if (parent_id) {
             // Check if parent_id exists and is active
-            const parentRes = await client.query('SELECT version_id, status FROM memory_v2 WHERE id = $1', [parent_id]);
+            const parentRes = await client.query('SELECT version_id, status FROM interaction_memory WHERE id = $1', [parent_id]);
             if (parentRes.rows.length === 0) {
                 throw new McpError(ErrorCode.InvalidParams, `Parent ID ${parent_id} not found.`);
             }
@@ -74,11 +74,11 @@ export async function writeState({ content, category, author_id, parent_id, sour
             version_id = parentRes.rows[0].version_id + 1;
             
             // Mark parent as deprecated
-            await client.query("UPDATE memory_v2 SET status = 'deprecated', updated_at = NOW() WHERE id = $1", [parent_id]);
+            await client.query("UPDATE interaction_memory SET status = 'deprecated', updated_at = NOW() WHERE id = $1", [parent_id]);
         }
         
         const insertQuery = `
-            INSERT INTO memory_v2 
+            INSERT INTO interaction_memory 
             (category, content, embedding, author_id, source_ref, parent_id, version_id, status, ontology_tags, action_trace, project)
             VALUES ($1, $2, $3::vector, $4, $5, $6, $7, 'active', $8, $9::jsonb, $10)
             RETURNING id
@@ -120,7 +120,7 @@ export async function resolveConflict({ conflict_ids, resolution_content, author
         
         // Verify all conflict IDs exist and are active
         const placeholders = conflict_ids.map((_, i) => `$${i + 1}`).join(',');
-        const checkRes = await client.query(`SELECT id, status, category FROM memory_v2 WHERE id IN (${placeholders})`, conflict_ids);
+        const checkRes = await client.query(`SELECT id, status, category FROM interaction_memory WHERE id IN (${placeholders})`, conflict_ids);
         
         if (checkRes.rows.length !== conflict_ids.length) {
             throw new McpError(ErrorCode.InvalidParams, "One or more conflict_ids not found.");
@@ -133,7 +133,7 @@ export async function resolveConflict({ conflict_ids, resolution_content, author
         }
         
         // Mark conflicts as deprecated
-        await client.query(`UPDATE memory_v2 SET status = 'deprecated', updated_at = NOW() WHERE id IN (${placeholders})`, conflict_ids);
+        await client.query(`UPDATE interaction_memory SET status = 'deprecated', updated_at = NOW() WHERE id IN (${placeholders})`, conflict_ids);
         
         // Add action trace documenting the merge
         const actionTrace = JSON.stringify([{ action: "resolved_conflict", conflict_ids, timestamp: new Date().toISOString() }]);
@@ -141,7 +141,7 @@ export async function resolveConflict({ conflict_ids, resolution_content, author
         const category = checkRes.rows[0].category;
 
         const res = await client.query(`
-            INSERT INTO memory_v2 
+            INSERT INTO interaction_memory 
             (category, content, embedding, author_id, action_trace, status)
             VALUES ($1, $2, $3::vector, $4, $5, 'active')
             RETURNING id
@@ -171,11 +171,11 @@ export async function getProvenance({ memory_id }) {
         const query = `
             WITH RECURSIVE provenance_tree AS (
                 SELECT id, parent_id, version_id, author_id, source_ref, created_at, content, status
-                FROM memory_v2
+                FROM interaction_memory
                 WHERE id = $1
                 UNION ALL
                 SELECT m.id, m.parent_id, m.version_id, m.author_id, m.source_ref, m.created_at, m.content, m.status
-                FROM memory_v2 m
+                FROM interaction_memory m
                 INNER JOIN provenance_tree pt ON pt.parent_id = m.id
             )
             SELECT * FROM provenance_tree ORDER BY version_id DESC;
@@ -215,7 +215,7 @@ export async function updateOntology({ old_tag, new_tag }) {
     const client = await pool.connect();
     try {
         const res = await client.query(`
-            UPDATE memory_v2 
+            UPDATE interaction_memory 
             SET ontology_tags = array_replace(ontology_tags, $1, $2), updated_at = NOW()
             WHERE $1 = ANY(ontology_tags) AND status = 'active'
         `, [old_tag, new_tag]);
@@ -229,7 +229,7 @@ export async function updateOntology({ old_tag, new_tag }) {
 }
 
 /**
- * Company Brain v2: Lens-Based Retrieval. Search memory_v2 filtered by read_roles.
+ * Company Brain v2: Lens-Based Retrieval. Search interaction_memory filtered by read_roles.
  * @param {object} params
  * @param {string} params.query - Semantic search query
  * @param {string[]} params.roles - Roles to filter by
@@ -251,7 +251,7 @@ export async function searchLens({ query, roles, limit = 5, status = 'active' })
         const res = await client.query(`
             SELECT id, category, content, author_id, source_ref, version_id, created_at, ontology_tags,
                    (1 - (embedding <=> $1::vector)) as similarity
-            FROM memory_v2
+            FROM interaction_memory
             WHERE status = $2
               AND read_roles && $3::text[]
             ORDER BY embedding <=> $1::vector
@@ -299,7 +299,7 @@ export async function traverseGraph({ memory_id, direction = 'all', depth = 3 })
         let output = `=== 🕸️ Graph Traversal for ID: ${memory_id} (Direction: ${direction}) ===\n\n`;
         
         // Base node fetch
-        const baseRes = await client.query(`SELECT id, category, version_id, author_id, status FROM memory_v2 WHERE id = $1`, [memory_id]);
+        const baseRes = await client.query(`SELECT id, category, version_id, author_id, status FROM interaction_memory WHERE id = $1`, [memory_id]);
         if (baseRes.rows.length === 0) {
             return { content: [{ type: "text", text: `Memory ID ${memory_id} not found.` }] };
         }
@@ -310,10 +310,10 @@ export async function traverseGraph({ memory_id, direction = 'all', depth = 3 })
             const res = await client.query(`
                 WITH RECURSIVE parents AS (
                     SELECT id, parent_id, version_id, author_id, status, 1 as level
-                    FROM memory_v2 WHERE id = $1
+                    FROM interaction_memory WHERE id = $1
                     UNION ALL
                     SELECT m.id, m.parent_id, m.version_id, m.author_id, m.status, p.level + 1
-                    FROM memory_v2 m
+                    FROM interaction_memory m
                     INNER JOIN parents p ON m.id = p.parent_id
                     WHERE p.level < $2
                 )
@@ -332,10 +332,10 @@ export async function traverseGraph({ memory_id, direction = 'all', depth = 3 })
             const res = await client.query(`
                 WITH RECURSIVE children AS (
                     SELECT id, parent_id, version_id, author_id, status, 1 as level
-                    FROM memory_v2 WHERE id = $1
+                    FROM interaction_memory WHERE id = $1
                     UNION ALL
                     SELECT m.id, m.parent_id, m.version_id, m.author_id, m.status, c.level + 1
-                    FROM memory_v2 m
+                    FROM interaction_memory m
                     INNER JOIN children c ON c.id = m.parent_id
                     WHERE c.level < $2
                 )
@@ -354,10 +354,10 @@ export async function traverseGraph({ memory_id, direction = 'all', depth = 3 })
             const res = await client.query(`
                 WITH RECURSIVE lineage AS (
                     SELECT id, parent_id, version_id, author_id, status, ontology_tags, action_trace, 1 as level
-                    FROM memory_v2 WHERE id = $1
+                    FROM interaction_memory WHERE id = $1
                     UNION ALL
                     SELECT m.id, m.parent_id, m.version_id, m.author_id, m.status, m.ontology_tags, m.action_trace, l.level + 1
-                    FROM memory_v2 m
+                    FROM interaction_memory m
                     INNER JOIN lineage l ON m.id = l.parent_id
                     WHERE l.level < $2
                 )
@@ -423,7 +423,7 @@ export async function linkBlob({ memory_id, blob_id, relationship }) {
     const client = await pool.connect();
     try {
         // Validate memory_id exists
-        const memRes = await client.query('SELECT id FROM memory_v2 WHERE id = $1', [memory_id]);
+        const memRes = await client.query('SELECT id FROM interaction_memory WHERE id = $1', [memory_id]);
         if (memRes.rows.length === 0) {
             throw new McpError(ErrorCode.InvalidParams, `Memory ID ${memory_id} not found.`);
         }

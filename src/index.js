@@ -62,9 +62,37 @@ async function verifyDatabase() {
             if (e.code !== '42701') throw e; // 42701 is duplicate column
         }
 
-        // Add memory_v2 table (renamed from memory_v2 if it exists)
+        // Rename legacy tables to interaction_memory if they exist
         try {
-            await pool.query('ALTER TABLE IF EXISTS memory_v2 RENAME TO memory_v2');
+            const homelabCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'homelab_memory_v2'
+                )
+            `);
+            const v2Check = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'memory_v2'
+                )
+            `);
+            const targetCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'interaction_memory'
+                )
+            `);
+
+            if (homelabCheck.rows[0].exists && !targetCheck.rows[0].exists) {
+                await pool.query('ALTER TABLE homelab_memory_v2 RENAME TO interaction_memory');
+                console.error('[krusch-context-mcp] Successfully renamed homelab_memory_v2 to interaction_memory');
+            } else if (v2Check.rows[0].exists && !targetCheck.rows[0].exists) {
+                await pool.query('ALTER TABLE memory_v2 RENAME TO interaction_memory');
+                console.error('[krusch-context-mcp] Successfully renamed memory_v2 to interaction_memory');
+            }
         } catch (e) {
             console.error('[krusch-context-mcp] Rename migration error:', e.message);
         }
@@ -72,7 +100,7 @@ async function verifyDatabase() {
         await pool.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
         
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS memory_v2 (
+            CREATE TABLE IF NOT EXISTS interaction_memory (
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
                 category VARCHAR(50) NOT NULL,
                 content TEXT NOT NULL,
@@ -81,7 +109,7 @@ async function verifyDatabase() {
                 source_ref VARCHAR(255),
                 confidence FLOAT DEFAULT 1.0,
                 action_trace JSONB,
-                parent_id UUID REFERENCES memory_v2(id),
+                parent_id UUID REFERENCES interaction_memory(id),
                 version_id INT DEFAULT 1,
                 status VARCHAR(20) DEFAULT 'active',
                 ontology_tags TEXT[],
@@ -93,20 +121,20 @@ async function verifyDatabase() {
         `);
 
         try {
-            await pool.query('ALTER TABLE memory_v2 ADD COLUMN project VARCHAR(255)');
+            await pool.query('ALTER TABLE interaction_memory ADD COLUMN project VARCHAR(255)');
         } catch (e) {
             if (e.code !== '42701') throw e; // 42701 is duplicate column
         }
 
         // Add indexes
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_ontology_tags ON memory_v2 USING GIN (ontology_tags)');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_embedding ON memory_v2 USING hnsw (embedding vector_cosine_ops)');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_ontology_tags ON interaction_memory USING GIN (ontology_tags)');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_embedding ON interaction_memory USING hnsw (embedding vector_cosine_ops)');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_v1_embedding ON ide_agent_memory USING hnsw (embedding vector_cosine_ops)');
 
         // Add memory_to_blob_edges table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS memory_to_blob_edges (
-                memory_id UUID REFERENCES memory_v2(id),
+                memory_id UUID REFERENCES interaction_memory(id),
                 blob_id VARCHAR(255),
                 relationship VARCHAR(50),
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -724,7 +752,7 @@ async function handleHealthCheck() {
   const dbCheck = await pool.query('SELECT COUNT(*) as count FROM ide_agent_memory');
   const repoCheck = await pool.query('SELECT COUNT(*) as count FROM repositories');
   const nuggetCheck = await pool.query('SELECT COUNT(*) as count FROM ide_agent_nuggets');
-  const v2Check = await pool.query("SELECT COUNT(*) as count FROM memory_v2 WHERE status = 'active'");
+  const v2Check = await pool.query("SELECT COUNT(*) as count FROM interaction_memory WHERE status = 'active'");
   const memoryCount = dbCheck.rows[0].count;
   const repoCount = repoCheck.rows[0].count;
   const nuggetCount = nuggetCheck.rows[0].count;

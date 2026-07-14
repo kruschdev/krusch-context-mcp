@@ -73,7 +73,7 @@ async function run() {
     console.log(`   Base Memory ID: ${parentId}`);
 
     console.log('\n📝 2. Updating read_roles directly via DB...');
-    await pool.query(`UPDATE memory_v2 SET read_roles = '{executive, engineer}' WHERE id = $1`, [parentId]);
+    await pool.query(`UPDATE interaction_memory SET read_roles = '{executive, engineer}' WHERE id = $1`, [parentId]);
     console.log(`   Updated read_roles to {executive, engineer}`);
 
     console.log('\n🔍 3. Testing Lens-Based Search (Match)...');
@@ -133,7 +133,7 @@ async function run() {
 
     console.log('\n🧹 9. Cleanup...');
     await pool.query(`DELETE FROM memory_to_blob_edges WHERE memory_id = $1`, [childId]);
-    await pool.query(`DELETE FROM memory_v2 WHERE id IN ($1, $2)`, [parentId, childId]);
+    await pool.query(`DELETE FROM interaction_memory WHERE id IN ($1, $2)`, [parentId, childId]);
     
     console.log('\n✅ All Lens/Graph memory tests completed.');
     child.kill('SIGTERM');

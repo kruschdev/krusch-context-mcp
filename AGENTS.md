@@ -19,7 +19,7 @@ All four share a single `pg.Pool` connection to `kruschdb` and a single fleet-ba
 
 Project-scoped data follows a two-tier model:
 - **Compute Cache**: Per-project SQLite databases at `<project>/.agent/memory.db` — zero-latency reads
-- **Object Storage**: Durable Postgres tables (`ide_agent_memory`, `ide_agent_nuggets`, `memory_v2`) — fleet-wide persistence
+- **Object Storage**: Durable Postgres tables (`ide_agent_memory`, `ide_agent_nuggets`, `interaction_memory`) — fleet-wide persistence
 - **Sync**: Async write-behind (SQLite → Postgres) on every write; read-ahead pull (Postgres → SQLite) on first project access
 
 ### Storage Routing Rules

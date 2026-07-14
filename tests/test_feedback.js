@@ -106,7 +106,7 @@ async function run() {
         try {
             const dbRes = await pgClient.query(`
                 SELECT id, category, author_id, action_trace, project 
-                FROM memory_v2 
+                FROM interaction_memory 
                 WHERE project = 'feedback-smoke-test' 
                 AND category = 'alignment_signal'
             `);
@@ -115,7 +115,7 @@ async function run() {
                 console.log('✅ Verified in database:', JSON.stringify(row));
                 
                 // Cleanup: delete the smoke test record
-                await pgClient.query('DELETE FROM memory_v2 WHERE id = $1', [row.id]);
+                await pgClient.query('DELETE FROM interaction_memory WHERE id = $1', [row.id]);
                 console.log('🧹 Cleaned up smoke test record from database.');
             } else {
                 throw new Error('Verification failed: Record not found in Postgres!');

@@ -173,7 +173,7 @@ async function run() {
         if (createdIds.length > 0) {
             console.log(`\n🧹 Cleaning up ${createdIds.length} test state(s)...`);
             const placeholders = createdIds.map((_, i) => `$${i + 1}`).join(',');
-            await pool.query(`DELETE FROM memory_v2 WHERE id IN (${placeholders})`, createdIds);
+            await pool.query(`DELETE FROM interaction_memory WHERE id IN (${placeholders})`, createdIds);
         }
         child.kill('SIGTERM');
         await pool.end();

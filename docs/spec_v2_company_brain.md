@@ -14,7 +14,7 @@ To support this transition, the underlying `kruschdb` schema for `homelab_memory
 ### Extended `homelab_memory` Schema
 
 ```sql
-CREATE TABLE memory_v2 (
+CREATE TABLE interaction_memory (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     category VARCHAR(50) NOT NULL,          -- 'priorities', 'bugs', 'outcomes', 'lessons', etc.
     content TEXT NOT NULL,
@@ -27,7 +27,7 @@ CREATE TABLE memory_v2 (
     action_trace JSONB,                     -- Array of actions taken based on this state
     
     -- [NEW] Concurrency & Versioning
-    parent_id UUID REFERENCES memory_v2(id), -- Null if root
+    parent_id UUID REFERENCES interaction_memory(id), -- Null if root
     version_id INT DEFAULT 1,               -- Incremented on update
     status VARCHAR(20) DEFAULT 'active',    -- 'active', 'stale', 'deprecated', 'resolved'
     
@@ -47,7 +47,7 @@ CREATE TABLE memory_v2 (
 A new associative table to map memories to specific codebase blobs natively.
 ```sql
 CREATE TABLE memory_to_blob_edges (
-    memory_id UUID REFERENCES memory_v2(id),
+    memory_id UUID REFERENCES interaction_memory(id),
     blob_id UUID REFERENCES blobs(id),
     relationship VARCHAR(50),               -- e.g., 'fixes_bug_in', 'documents_feature_of'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

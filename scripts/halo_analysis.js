@@ -86,7 +86,7 @@ async function runHaloAnalysis() {
 
             if (embeddingStr) {
                 await client.query(`
-                    INSERT INTO memory_v2 (category, content, embedding, author_id, status, ontology_tags)
+                    INSERT INTO interaction_memory (category, content, embedding, author_id, status, ontology_tags)
                     VALUES ('lessons', $1, $2::vector, 'agent:halo', 'active', ARRAY['optimization', 'tool-usage'])
                 `, [summary, embeddingStr]);
                 console.log("✅ Lesson successfully written.");
