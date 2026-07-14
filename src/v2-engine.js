@@ -45,7 +45,7 @@ async function generateOntologyTags(text) {
 export async function writeState({ content, category, author_id, parent_id, source_ref, ontology_tags, action_trace, project }) {
     if (!content || !category || !author_id) throw new McpError(ErrorCode.InvalidParams, "Missing required params");
 
-    const embeddingArray = await getEmbedding(content, PRIORITY.HIGH);
+    const embeddingArray = await getEmbedding(content);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 
@@ -110,7 +110,7 @@ export async function resolveConflict({ conflict_ids, resolution_content, author
         throw new McpError(ErrorCode.InvalidParams, "Missing required params. Need at least 2 conflict_ids.");
     }
     
-    const embeddingArray = await getEmbedding(resolution_content, PRIORITY.HIGH);
+    const embeddingArray = await getEmbedding(resolution_content);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 
@@ -242,7 +242,7 @@ export async function searchLens({ query, roles, limit = 5, status = 'active' })
         throw new McpError(ErrorCode.InvalidParams, "Missing query or roles array");
     }
 
-    const embeddingArray = await getEmbedding(query, PRIORITY.CRITICAL);
+    const embeddingArray = await getEmbedding(query, PRIORITY.HIGH);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 

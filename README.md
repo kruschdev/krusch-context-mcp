@@ -22,7 +22,7 @@ Every time you start a new AI coding session, your agent starts from zero. It do
 
 ## What It Does
 
-A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **26 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
+A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **31 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
 
 | Capability | What It Provides |
 |-----------|-----------------|
@@ -30,6 +30,7 @@ A single [Model Context Protocol](https://modelcontextprotocol.io/) server expos
 | 🧠 **Episodic Memory** | Bugs, decisions, and lessons persist across sessions, retrieved by semantic relevance with temporal decay. |
 | 💎 **Steering Nudges** | Lightweight key-value facts (preferences, conventions) give the agent behavioral continuity without re-prompting. |
 | 📖 **Documentation Search** | Ingested external docs are searchable locally — your agent references *your* versions, not its training data. |
+| 🛡️ **Proactive Auditor (Memory Agent)** | Trajectory auditing that learns from feedback (Direct-OPD) to verify trajectories and log alignment signals. |
 | 🌍 **Zero-Trust Deep Search** | One tool call cross-references codebase reality with historical memory to verify understanding before acting. |
 
 ## Why You'd Want It
@@ -73,7 +74,7 @@ Add to your IDE MCP settings (e.g., `.cursor/mcp.json`, `claude_desktop_config.j
 }
 ```
 
-Restart your IDE — your agent now has access to all 26 tools.
+Restart your IDE — your agent now has access to all 31 tools.
 
 > **Upgrading?** `git pull origin main && npm install && npm start` — idempotent migrations run on startup.
 
@@ -98,16 +99,16 @@ graph TD;
 |-----------|---------|
 | **Storage** | Hybrid: Local SQLite (per-project) + PostgreSQL (global & codebase) |
 | **Embeddings** | Ollama `bge-large` @ 1024 dims, fleet load-balanced |
-| **Tagging** | SpectralQuant KV Compression for automatic keyword extraction |
+| **Tagging** | Ollama `llama3.2` for automatic keyword extraction |
 | **Temporal Decay** | `score = similarity × e^(-0.01 × age_days)` — relevance drops ~26% after 30 days |
 
 ### Key Design Decisions
 
 - **Lakebase Architecture** — Local SQLite for zero-latency reads, async write-behind to durable PostgreSQL. A `+0.3` local scoring bias mitigates Ebbinghaus forgetting as the global corpus grows. *Inspired by [Neon](https://neon.com/docs/introduction/architecture-overview).*
-- **Hybrid Retrieval** — Auto-tagged via **SpectralQuant KV Cache Compression** to address pure-cosine failure modes (negation, numeric, role-swap) while maintaining massive context windows without OOM. *Per [Sentra](https://sentra.app).*
+- **Hybrid Retrieval** — Auto-tagged via `llama3.2` to address pure-cosine failure modes (negation, numeric, role-swap). *Per [Sentra](https://sentra.app).*
 - **Consolidation** — Semantic dedup via L2-normalized centroid averaging without re-embedding. *From [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation).*
 - **Holographic Nuggets** — Lightweight steering facts adapted from [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets).
-- **Resilient Multi-Tier Tagging (v1.1)** — Implements robust failover from SpectralQuant KV compression to local Ollama endpoints (running `llama3.2:1b`), with fuzzy parsing of varied list index styles to guarantee 100% keyword extraction reliability under offline or proxy down states.
+- **Proactive Context Agent** — Trajectory auditor (OPD/PUST) that checks active logs against rules, records feedback alignment traces, and improves over time.
 
 ### Company Brain Substrate (v2)
 
@@ -149,27 +150,24 @@ Implements the three-layer organizational memory model from the [Sentra "Company
 > **You:** "The previous agent was wrong about the database port."  
 > **Agent:** *[`resolve_conflict`]* Merged conflicting states. Deprecated old branches, created unified resolution.
 
+### Proactive Context Auditing & Alignment Loop
+
+> **You:** "Let's index the daily research papers using qwen2.5-coder:1.5b embeddings."  
+> **Agent:** *[`proactive_nudge`]* Warning: The postgres `ide_agent_memory` table embedding column is constrained to 1024 dimensions. `qwen2.5-coder:1.5b` embeddings have 1536 dimensions and will fail. Always use `bge-large` embeddings.
+>
+> **Agent:** *[`nudge_feedback`]* Logs feedback indicating the warning was accepted and the trajectory was corrected. This alignment signal (Direct-OPD) is retrieved in future sessions as reusable guidance.
+
 ---
 
 ## Agent Integration Patterns
 
 ### Pattern 1: Zero-Trust Session Start
 
-> **🛑 ZERO-TRUST CONTEXT VERIFICATION (MANDATORY FIRST STEP)**  
-> **Root Cause Vulnerability**: An agent operating in a new session suffers from "goldfish memory" and will confidently hallucinate an understanding of decoupled architectures if it hasn't anchored itself in recent memory.  
-> **Rule**: Before executing a research task, writing code, or answering architectural questions in a new session, the agent **MUST** independently execute a Vector Database query to pull the latest codebase realities.   
-> **Execution**: You are forbidden from guessing context. You must physically execute the Context MCP tool:  
-> `search_memory(category: 'lessons', query: "<current_topic_or_project>")`  
-> If you proceed without querying this database first, you are violating the core partnership agreement.
-
 ```
-1. search_memory({ category: "lessons", query: "<topic>" })
-   → Pull the latest codebase realities and historical context
-
-2. deep_search({ query: "<topic>", project: "<project>" })
+1. deep_search({ query: "<topic>", project: "<project>" })
    → Verify codebase + memory in one call
 
-3. nugget_nudges({ query: "<task>", active_project: "<project>" })
+2. nugget_nudges({ query: "<task>", active_project: "<project>" })
    → Load conventions and preferences
 ```
 
@@ -188,6 +186,13 @@ Implements the three-layer organizational memory model from the [Sentra "Company
 1. add_memory({ category: "outcomes", content: "<decisions and results>" })
 2. nugget_remember({ key: "<project>:last-session", value: "<in-progress work>" })
 3. consolidate({ category: "activity", project: "<project>", dry_run: true })
+```
+
+### Pattern 4: Proactive Trajectory Auditing
+
+```
+1. proactive_nudge({ history: "<conversation history window>", project: "<project>" })
+   → Background threat-audit of agent trajectory against historical lessons, bugs, and rules before executing code changes
 ```
 
 ---
@@ -218,7 +223,11 @@ Implements the three-layer organizational memory model from the [Sentra "Company
 | `list_repos` / `read_tree` / `read_blob` | Browse indexed repositories |
 | **Nuggets** | |
 | `nugget_remember` / `nugget_nudges` / `nugget_forget` / `nugget_list` | Steering fact CRUD |
-| **System** | |
+| **System, Auditing, & Skills** | |
+| `proactive_nudge` | Trajectory auditing — warn on rule/lesson violations |
+| `nudge_feedback` | Log developer/agent feedback to record alignment signals |
+| `think` | Perform context synthesis, conflict detection, and gap analysis |
+| `list_skills` / `get_skill` | Browse and read specialized agent skills Registry |
 | `docs_list` / `docs_search` | External documentation search |
 | `health_check` | Server status verification |
 
@@ -234,11 +243,12 @@ krusch-context-mcp/
 │   ├── v2-engine.js          # Company Brain v2 substrate
 │   ├── nuggets-engine.js     # Holographic Nuggets CRUD
 │   ├── sqlite-engine.js      # Lakebase SQLite layer (pull/push sync)
+│   ├── proactive-engine.js   # Proactive trajectory auditor
 │   └── llm-tags.js           # Shared LLM tag generation
 ├── scripts/                  # Benchmarking, evaluation, and maintenance
 ├── tests/                    # *.test.js = automated, test_*.js = smoke
 ├── docs/
-│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 26 tools
+│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 27 tools
 │   ├── SETUP.md              # Configuration, storage routing, troubleshooting
 │   └── research/             # Sentra Company Brain research essays
 └── package.json
@@ -277,8 +287,6 @@ node scripts/eval_accuracy.js           # Precision/recall
 The evolution from a simple RAG cache to a stateful **Company Brain Substrate** is deeply inspired by the [Sentra "Company Brain" Essay Series](https://sentra.app). We recommend reading their work on why organizational memory is an infrastructure problem.
 
 The automated, continuous optimization of agent tool usage through execution tracing and LLM analysis is powered by the [HALO RLM Engine](https://github.com/context-labs/halo).
-
-Tag generation and context analysis rely on the massive context extensions enabled by **SpectralQuant KV Cache Compression**, authored by Ashwin Gopinath. Our production proxy bridge seamlessly handles both agentic reasoning tasks and native `/api/embeddings` pass-through for RAG, and is open-source at the [SpectralQuant Ollama Bridge standalone repository](https://github.com/kruschdev/SpectralQuant-Ollama-Bridge).
 
 ## Contributing
 

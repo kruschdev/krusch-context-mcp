@@ -36,6 +36,14 @@ async function runHaloAnalysis() {
         const traceContent = await fs.readFile(tracePath, 'utf8');
         const fullPrompt = prompt + traceContent;
         
+        let targetModel = 'qwen2.5-coder:3b';
+        try {
+            const resolvedPath = path.resolve(__dirname, '../../../configs/resolved_models.json');
+            const resolvedStr = await fs.readFile(resolvedPath, 'utf8');
+            const resolved = JSON.parse(resolvedStr);
+            targetModel = resolved.mappings?.plausibility_screener || resolved.mappings?.fast_coding_model || targetModel;
+        } catch (err) {}
+
         stdout = await ollamaQueue.enqueue(async (endpoint) => {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 300000);
@@ -44,7 +52,7 @@ async function runHaloAnalysis() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'qwen2.5-coder:3b', // standard homelab fast model
+                        model: targetModel,
                         prompt: fullPrompt,
                         stream: false,
                         options: { temperature: 0.1 }

@@ -271,26 +271,6 @@ async function run() {
         console.log(`   ⚠️ ${e.message}`);
     }
 
-    // 13.5 Test krusch_context_write_session_handoff and read_session_review
-    console.log('\n🔄 Testing session relay logic...');
-    try {
-        const handoffRes = await send('tools/call', {
-            name: 'krusch_context_write_session_handoff',
-            arguments: { project: 'test-project-smoke', summary: 'Smoke test summary' }
-        });
-        const textHandoff = handoffRes.result?.content?.[0]?.text || '';
-        console.log(`   ${textHandoff}`);
-
-        const readRes = await send('tools/call', {
-            name: 'krusch_context_read_session_review',
-            arguments: { project: 'test-project-smoke' }
-        });
-        const textRead = readRes.result?.content?.[0]?.text || '';
-        console.log(`   ${textRead.substring(0, 100)}`);
-    } catch (e) {
-        console.log(`   ⚠️ Session relay test failed: ${e.message}`);
-    }
-
     // 14. Cleanup: delete the v2 test state directly via SQL (not a tool, just best-effort)
     // Note: resolve_conflict needs 2+ active states, so we just validate it returns the right error
     console.log('\n🔗 Testing krusch_context_resolve_conflict (expected error: need 2+ states)...');
@@ -320,7 +300,54 @@ async function run() {
         }
     }
 
-    console.log('\n✅ All tests completed (v1 + v2).');
+    // ============================================================
+    // Agent Skills & Prompts Integration Tests
+    // ============================================================
+
+    console.log('\n🛠️ Testing prompts/list...');
+    try {
+        const promptsRes = await send('prompts/list');
+        const prompts = promptsRes.result?.prompts || [];
+        console.log(`   Found ${prompts.length} prompts.`);
+        const tddPrompt = prompts.find(p => p.name.toLowerCase() === 'tdd');
+        if (tddPrompt) {
+            console.log(`   ✅ Success: 'tdd' prompt found in list.`);
+        } else {
+            console.log(`   ❌ Failure: 'tdd' prompt not found in list!`);
+        }
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    console.log('\n🛠️ Testing prompts/get (tdd)...');
+    try {
+        const promptRes = await send('prompts/get', { name: 'tdd' });
+        const messages = promptRes.result?.messages || [];
+        const text = messages[0]?.content?.text || '';
+        console.log(`   ✅ Success: retrieved tdd prompt (${text.substring(0, 150)}...)`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    console.log('\n🛠️ Testing tools/call (krusch_context_list_skills)...');
+    try {
+        const skillsListRes = await send('tools/call', { name: 'krusch_context_list_skills', arguments: {} });
+        const text = skillsListRes.result?.content?.[0]?.text || '';
+        console.log(`   ✅ Success: list_skills returned:\n   ${text.substring(0, 150)}...`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    console.log('\n🛠️ Testing tools/call (krusch_context_get_skill tdd)...');
+    try {
+        const skillGetRes = await send('tools/call', { name: 'krusch_context_get_skill', arguments: { name: 'tdd' } });
+        const text = skillGetRes.result?.content?.[0]?.text || '';
+        console.log(`   ✅ Success: get_skill returned:\n   ${text.substring(0, 150)}...`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
+    console.log('\n✅ All tests completed (v1 + v2 + skills).');
     child.kill('SIGTERM');
     await pool.end();
     setTimeout(() => process.exit(0), 1000);

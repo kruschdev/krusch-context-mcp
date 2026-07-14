@@ -67,7 +67,7 @@ async function _addGlobalMemory(category, content, finalTags, embeddingStr) {
 export async function addMemory({ category, content, tags, project, _embedding }) {
     if (!category || !content) throw new McpError(ErrorCode.InvalidParams, "Missing params");
     
-    const embeddingArray = _embedding || await getEmbedding(content, PRIORITY.HIGH);
+    const embeddingArray = _embedding || await getEmbedding(content);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
 
     let finalTags = tags ? JSON.stringify(tags) : null;
@@ -90,15 +90,21 @@ export async function addMemory({ category, content, tags, project, _embedding }
  * @param {number} limit - Result count limit.
  * @returns {Promise<Array>} Ranked and decayed memory objects.
  */
-async function _searchGlobalMemory(category, embeddingArray, limit) {
+async function _searchGlobalMemory(category, embeddingArray, limit, active_project) {
     const client = await pool.connect();
     try {
         const embeddingStr = `[${embeddingArray.join(',')}]`;
+        const queryParams = [embeddingStr, category, limit, DECAY_RATE];
+        let projectFilter = 'AND project IS NULL';
+        if (active_project) {
+            projectFilter = 'AND (project = $5 OR project IS NULL)';
+            queryParams.push(active_project);
+        }
         const res = await client.query(`
             WITH semantic_matches AS (
                 SELECT id, project, content, tags, created_at, embedding <=> $1::vector as distance
                 FROM ide_agent_memory
-                WHERE category = $2 AND project IS NULL
+                WHERE category = $2 ${projectFilter}
                 ORDER BY embedding <=> $1::vector
                 LIMIT 100
             )
@@ -108,7 +114,7 @@ async function _searchGlobalMemory(category, embeddingArray, limit) {
             FROM semantic_matches
             ORDER BY similarity DESC
             LIMIT $3
-        `, [embeddingStr, category, limit, DECAY_RATE]);
+        `, queryParams);
         return res.rows.map(r => ({ ...r, source: 'global' }));
     } finally {
         client.release();
@@ -165,10 +171,10 @@ async function _searchProjectMemory(active_project, category, embeddingArray, li
 export async function searchMemory({ category, query, limit = 3, active_project, _embedding }) {
     if (!category || !query) throw new McpError(ErrorCode.InvalidParams, "Missing params");
 
-    const embeddingArray = _embedding || await getEmbedding(query, PRIORITY.CRITICAL);
+    const embeddingArray = _embedding || await getEmbedding(query, PRIORITY.HIGH);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
 
-    const pgResults = await _searchGlobalMemory(category, embeddingArray, limit);
+    const pgResults = await _searchGlobalMemory(category, embeddingArray, limit, active_project);
     const sqliteResults = await _searchProjectMemory(active_project, category, embeddingArray, limit);
 
     const results = [...pgResults, ...sqliteResults]
@@ -417,7 +423,7 @@ async function _updateProjectMemory(id, content, tags, source_project) {
     const params = [];
     
     if (content) {
-        const embeddingArray = await getEmbedding(content, PRIORITY.HIGH);
+        const embeddingArray = await getEmbedding(content);
         if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
         setClauses.push(`content = ?`);
         params.push(content);
@@ -453,7 +459,7 @@ async function _updateGlobalMemory(id, content, tags, project) {
         let idx = 1;
 
         if (content) {
-            const embeddingArray = await getEmbedding(content, PRIORITY.HIGH);
+            const embeddingArray = await getEmbedding(content);
             if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
             setClauses.push(`content = $${idx++}`);
             params.push(content);

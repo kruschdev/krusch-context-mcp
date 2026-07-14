@@ -1,5 +1,5 @@
 import { pool } from 'pg-git-mcp/db/pool.js';
-import { getEmbedding, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
+import { getEmbedding } from 'pg-git-mcp/lib/embedding.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 
 import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
@@ -19,7 +19,7 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
     if (!key || !value) throw new McpError(ErrorCode.InvalidParams, "Missing key or value");
     if (!VALID_KINDS.has(kind)) throw new McpError(ErrorCode.InvalidParams, `Invalid kind: ${kind}. Must be one of: ${[...VALID_KINDS].join(', ')}`);
 
-    const embeddingArray = await getEmbedding(value, PRIORITY.HIGH);
+    const embeddingArray = await getEmbedding(value);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 
@@ -67,10 +67,10 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
  * @param {string} [params.active_project] - Project context for SQLite isolation
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function nuggetNudges({ query, kinds, limit = 3, active_project }) {
-    if (!query) throw new McpError(ErrorCode.InvalidParams, "Missing query");
+export async function nuggetNudges({ query, kinds, limit = 3, active_project, _embedding }) {
+    if (!query && !_embedding) throw new McpError(ErrorCode.InvalidParams, "Missing query or embedding");
 
-    const embeddingArray = await getEmbedding(query, PRIORITY.CRITICAL);
+    const embeddingArray = _embedding || await getEmbedding(query);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
 
     let combinedResults = [];

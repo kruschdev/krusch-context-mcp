@@ -25,6 +25,56 @@
 
 ---
 
+### `krusch_context_proactive_nudge`
+
+**Trajectory Auditing**: Proactively audits current agent trajectory or user prompt against historical lessons, bugs, priorities, and nuggets. It returns a warning nudge alert if any constraints or custom rules are violated, otherwise it returns `NO_NUDGES_REQUIRED`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `history` | `string` \| `object[]` | ✅ | — | Conversational history string or message list (array of `{ role: string, content: string }` objects). |
+| `project` | `string` | ❌ | `null` | Optional active project scope to filter SQLite isolated nuggets and memories. |
+
+**Expected Returns:**
+*   `NO_NUDGES_REQUIRED` — If the trajectory is safe, aligned, or has no matches.
+*   `### 🧠 Proactive Context Nudge ...` — A markdown block with warning details and suggested corrective actions if any rule/lesson matches are violated.
+
+**Example call:**
+```json
+{
+  "history": "Let's index the daily research papers using qwen2.5-coder:1.5b embeddings.",
+  "project": "ai-watch"
+}
+```
+
+---
+
+### `krusch_context_nudge_feedback`
+
+**Alignment Feedback Logging**: Logs developer or agent feedback for proactive auditor warnings to capture alignment signals for offline fine-tuning/post-training (Direct-OPD/PUST).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query_text` | `string` | ✅ | — | The task context or user query that was audited. |
+| `nudge_text` | `string` | ✅ | — | The proactive warning nudge text returned by the auditor. |
+| `user_approved` | `boolean` | ✅ | — | Whether the warning was approved or deemed helpful by the user. |
+| `agent_corrected` | `boolean` | ✅ | — | Whether the agent corrected its trajectory based on the warning. |
+| `correction_diff` | `string` | ❌ | `null` | Optional code diff showing the applied trajectory correction. |
+| `project` | `string` | ❌ | `null` | Optional project name to associate with the feedback signal. |
+
+**Example call:**
+```json
+{
+  "query_text": "Deploying a new Postgres container to production host drive /dev/sda.",
+  "nudge_text": "Warning: OS drive /dev/sda is protected on production node. Target /mnt/media1 instead.",
+  "user_approved": true,
+  "agent_corrected": true,
+  "correction_diff": "- Target drive: /dev/sda\\n+ Target drive: /mnt/media1/postgres",
+  "project": "krusch-nexus"
+}
+```
+
+---
+
 ## Episodic Memory Tools
 
 ### `krusch_context_add_memory`

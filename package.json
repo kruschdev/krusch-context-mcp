@@ -1,13 +1,13 @@
 {
   "name": "krusch-context-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "description": "Unified MCP server merging PG-Git codebase search with episodic homelab memory",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test tests/*.test.js",
-    "test:smoke": "node tests/test_client.js && node tests/test_v2_memory.js && node tests/test_v2_lens_graph.js && node tests/test_v2_action_memory.js",
+    "test:smoke": "node tests/test_client.js && node tests/test_v2_memory.js && node tests/test_v2_lens_graph.js && node tests/test_v2_action_memory.js && node tests/test_proactive.js",
     "install-hook": "node scripts/install_git_hook.js"
   },
   "keywords": [
@@ -25,6 +25,7 @@
     "@opentelemetry/sdk-trace-base": "^2.7.1",
     "@opentelemetry/sdk-trace-node": "^2.7.1",
     "better-sqlite3": "^11.0.0",
+    "dotenv": "^16.4.7",
     "ml-pca": "^4.1.1",
     "pg-git-mcp": "^1.0.3"
   }

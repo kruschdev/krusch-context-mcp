@@ -61,6 +61,7 @@ Understanding where data lives is critical for querying correctly.
 | `outcomes` | Session summaries, deployment results |
 | `lessons` | Architectural decisions, pattern discoveries, "never do this" rules |
 | `activity` | Session-level work logs |
+| `alignment_signal` | Logs developer/agent feedback for proactive nudges to capture alignment signals |
 
 ### Nugget Kinds
 

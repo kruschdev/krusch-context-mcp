@@ -5,9 +5,13 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
   ErrorCode,
   McpError
 } from "@modelcontextprotocol/sdk/types.js";
+
+import { loadSkills, listSkills, getSkill } from './skills-engine.js';
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -18,8 +22,9 @@ import { initTracing } from './telemetry.js';
 import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, consolidateMemories, compileProjectState } from './memory-engine.js';
 import { writeState, resolveConflict, getProvenance, updateOntology, searchLens, traverseGraph, linkBlob } from './v2-engine.js';
 import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
-import { writeSessionHandoff, readSessionReview } from './session-engine.js';
-import { getEmbedding, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
+import { handleThink } from './think-engine.js';
+import { handleProactiveNudge, handleNudgeFeedback } from './proactive-engine.js';
+import { getEmbedding } from 'pg-git-mcp/lib/embedding.js';
 import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
 
@@ -109,7 +114,7 @@ async function verifyDatabase() {
     }
 }
 
-const server = new Server({ name: "krusch-context-mcp", version: "1.1.0" }, { capabilities: { tools: {} } });
+const server = new Server({ name: "krusch-context-mcp", version: "1.0.0" }, { capabilities: { tools: {}, prompts: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
@@ -439,26 +444,122 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "krusch_context_write_session_handoff",
-        description: "Session Bridge (IDE ↔ Jean): Write the IDE session summary, calculate modified files, insert the DB record, and autonomously spawn the Jean SRE companion for review. Call this when executing /close.",
+        name: "krusch_context_think",
+        description: "Perform cited context synthesis, conflict detection, and gap analysis across memory and codebase.",
         inputSchema: {
           type: "object",
           properties: {
-            project: { type: "string" },
-            summary: { type: "string" }
+            query: { type: "string", description: "The query or question to think about." },
+            project: { type: "string", description: "Optional project name/filter to restrict search scope." }
           },
-          required: ["project", "summary"]
+          required: ["query"]
         }
       },
       {
-        name: "krusch_context_read_session_review",
-        description: "Session Bridge (Jean ↔ IDE): Fetch the latest session review from the Jean SRE companion. This is guaranteed to be idempotent (it atomically marks the review as consumed). Call this when executing /continue.",
+        name: "krusch_context_list_skills",
+        description: "List all available AI agent skills (TDD, Diagnose, Handoff, Caveman, etc.) loaded from the homelab registry.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "krusch_context_get_skill",
+        description: "Retrieve a specific AI agent skill's markdown prompt instructions by name.",
         inputSchema: {
           type: "object",
           properties: {
-            project: { type: "string" }
+            name: { type: "string", description: "The name of the skill to retrieve (e.g. 'tdd', 'diagnose', 'caveman', 'grill-with-docs')" }
           },
-          required: ["project"]
+          required: ["name"]
+        }
+      },
+      {
+        name: "krusch_context_proactive_nudge",
+        description: "Proactively audits current agent trajectory against historical lessons, bugs, priorities, and nuggets. Returns a warning nudge if any constraints or custom rules are violated, otherwise returns 'NO_NUDGES_REQUIRED'.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            history: {
+              oneOf: [
+                { type: "string", description: "The last user query or current task context." },
+                {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      role: { type: "string", enum: ["user", "assistant", "system"] },
+                      content: { type: "string" }
+                    },
+                    required: ["role", "content"]
+                  },
+                  description: "Full sliding window of the conversation history."
+                }
+              ]
+            },
+            project: { type: "string", description: "Optional active project scope to filter and load SQLite isolated nuggets." }
+          },
+          required: ["history"]
+        }
+      },
+      {
+        name: "krusch_context_nudge_feedback",
+        description: "Logs developer or agent feedback for proactive auditor nudges to collect alignment signals for offline post-training/fine-tuning.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query_text: { type: "string", description: "The task context or query audited." },
+            nudge_text: { type: "string", description: "The proactive warning nudge text returned." },
+            user_approved: { type: "boolean", description: "Whether the nudge was approved or helpful." },
+            agent_corrected: { type: "boolean", description: "Whether the agent trajectory was corrected." },
+            correction_diff: { type: "string", description: "Optional diff showing the correction." },
+            project: { type: "string", description: "Optional project name." }
+          },
+          required: ["query_text", "nudge_text", "user_approved", "agent_corrected"]
+        }
+      }
+    ]
+  };
+});
+
+server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  const skills = listSkills();
+  return {
+    prompts: skills.map(s => ({
+      name: s.name,
+      description: s.description,
+      arguments: s.argumentHint ? [
+        {
+          name: "argument",
+          description: s.argumentHint,
+          required: false
+        }
+      ] : []
+    }))
+  };
+});
+
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const name = request.params.name;
+  const skill = getSkill(name);
+  if (!skill) {
+    throw new McpError(ErrorCode.InvalidParams, `Skill '${name}' not found.`);
+  }
+  
+  const argumentValue = request.params.arguments?.argument || "";
+  let text = skill.body;
+  if (argumentValue) {
+    text = `Argument provided by user: "${argumentValue}"\n\n${text}`;
+  }
+
+  return {
+    description: skill.description,
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text: text
         }
       }
     ]
@@ -466,6 +567,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 // --- Inline tool handlers (tools with logic living in index.js rather than engines) ---
+
+async function handleListSkills() {
+  const skills = listSkills();
+  let output = `=== 🛠️ Agent Skills Registry (${skills.length}) ===\n`;
+  for (const s of skills) {
+    output += `\n- Name: ${s.name}\n  Category: ${s.category}\n  Description: ${s.description}\n`;
+    if (s.argumentHint) {
+      output += `  Argument hint: ${s.argumentHint}\n`;
+    }
+  }
+  return { content: [{ type: "text", text: output }] };
+}
+
+async function handleGetSkill(args) {
+  const { name } = args;
+  const skill = getSkill(name);
+  if (!skill) {
+    return { content: [{ type: "text", text: `Skill '${name}' not found.` }], isError: true };
+  }
+  let output = `=== 🛠️ Skill: ${skill.name} (${skill.category}) ===\n`;
+  output += `Description: ${skill.description}\n\n`;
+  output += skill.body;
+  return { content: [{ type: "text", text: output }] };
+}
 
 async function handleListRepos() {
   const repos = await getRepositories();
@@ -492,7 +617,7 @@ async function handleSearchCode(args) {
       }
   }
   
-  const vector = await getEmbedding(searchQuery, PRIORITY.CRITICAL);
+  const vector = await getEmbedding(searchQuery);
   if (!vector) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
   
   const results = await searchBlobs(vector, limit, resolvedRepoId);
@@ -503,7 +628,7 @@ async function handleSearchCode(args) {
       const dateStr = r.last_seen_at ? new Date(r.last_seen_at).toISOString().split('T')[0] : 'unknown';
       const projectTag = r.project ? `[${r.project}]` : '';
       const pathStr = r.file_path ? ` | Path: ${r.file_path}` : '';
-      output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | ${projectTag} ${r.file_name}${pathStr} | Blob: ${r.id} | Seen: ${dateStr} ---\n`;
+      output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | ${projectTag} ${r.file_name}${pathStr} | Seen: ${dateStr} ---\n`;
       output += (r.summary || '(no preview)') + '\n';
   }
   return { content: [{ type: "text", text: output }] };
@@ -515,7 +640,7 @@ async function handleDeepSearch(args) {
   console.error(`[krusch-context-mcp] Executing deep context search for: "${query}"...`);
   
   // Generate embedding ONCE and share across all queries
-  const vector = await getEmbedding(query, PRIORITY.CRITICAL);
+  const vector = await getEmbedding(query);
   if (!vector) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
   
   // Resolve repo ID for blob search
@@ -598,7 +723,7 @@ async function handleHealthCheck() {
   const repoCount = repoCheck.rows[0].count;
   const nuggetCount = nuggetCheck.rows[0].count;
   const v2Count = v2Check.rows[0].count;
-  return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Company Brain states (v2): ${v2Count}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Database: kruschdb (pgvector)\n- Version: 1.1.0` }] };
+  return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Company Brain states (v2): ${v2Count}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Database: kruschdb (pgvector)\n- Version: 1.0.0` }] };
 }
 
 async function handleDocsList() {
@@ -624,7 +749,7 @@ async function handleDocsSearch(args) {
   }
   const resolvedRepoId = repoRes.rows[0].id;
   
-  const vector = await getEmbedding(searchQuery, PRIORITY.CRITICAL);
+  const vector = await getEmbedding(searchQuery);
   if (!vector) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
   
   const results = await searchBlobs(vector, limit, resolvedRepoId);
@@ -672,9 +797,11 @@ const TOOL_HANDLERS = new Map([
   ['krusch_context_nugget_nudges',   (args) => nuggetNudges(args)],
   ['krusch_context_nugget_forget',   (args) => nuggetForget(args)],
   ['krusch_context_nugget_list',     (args) => nuggetList(args)],
-  // Session Bridge
-  ['krusch_context_write_session_handoff', (args) => writeSessionHandoff(args)],
-  ['krusch_context_read_session_review',   (args) => readSessionReview(args)],
+  ['krusch_context_think',           (args) => handleThink(args)],
+  ['krusch_context_list_skills',     () => handleListSkills()],
+  ['krusch_context_get_skill',      (args) => handleGetSkill(args)],
+  ['krusch_context_proactive_nudge', (args) => handleProactiveNudge(args)],
+  ['krusch_context_nudge_feedback', (args) => handleNudgeFeedback(args)],
 ]);
 
 const tracer = trace.getTracer('krusch-context-mcp');
@@ -728,6 +855,7 @@ async function main() {
   initTracing(tracePath);
   console.error(`[krusch-context-mcp] Tracing initialized: ${tracePath}`);
 
+  await loadSkills();
   await verifyDatabase();
   const transport = new StdioServerTransport();
   await server.connect(transport);
