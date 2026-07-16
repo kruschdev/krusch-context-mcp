@@ -256,7 +256,7 @@ krusch-context-mcp/
 ├── scripts/                  # Benchmarking, evaluation, and maintenance
 ├── tests/                    # *.test.js = automated, test_*.js = smoke
 ├── docs/
-│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 27 tools
+│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 31 tools
 │   ├── SETUP.md              # Configuration, storage routing, troubleshooting
 │   └── research/             # Sentra Company Brain research essays
 └── package.json
@@ -269,7 +269,7 @@ krusch-context-mcp/
 ```bash
 npm test                                # Automated (node:test, *.test.js)
 npm run test:smoke                      # JSON-RPC stdio smoke tests
-node tests/test_client.js               # All 26 tools against live DB
+node tests/test_client.js               # All 31 tools against live DB
 node scripts/benchmark_latency.js       # End-to-end latency
 node scripts/eval_accuracy.js           # Precision/recall
 ```
