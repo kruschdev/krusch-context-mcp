@@ -3,6 +3,7 @@ node_modules/
 *.log
 GEMINI_INFLIGHT.md
 INFLIGHT.md
+*SESSION_REVIEW.md
 spec.md
 AGENTS.md
 .agent/
