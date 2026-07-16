@@ -2,7 +2,7 @@
   "name": "krusch-context-mcp",
   "version": "1.2.0",
   "type": "module",
-  "description": "Unified MCP server merging PG-Git codebase search with episodic homelab memory",
+  "description": "Unified MCP server merging semantic codebase search, episodic memory, holographic steering nuggets, and a proactive trajectory auditor.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
