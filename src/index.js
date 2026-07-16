@@ -24,7 +24,7 @@ import { writeState, resolveConflict, getProvenance, updateOntology, searchLens,
 import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
 import { handleThink } from './think-engine.js';
 import { handleProactiveNudge, handleNudgeFeedback } from './proactive-engine.js';
-import { getEmbedding } from 'pg-git-mcp/lib/embedding.js';
+import { getEmbedding } from './embedding-helper.js';
 import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
 

@@ -6,9 +6,10 @@
  */
 
 import { ollamaQueue, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
+import { chat } from './llm.js';
 
 /**
- * Generates semantic tags from text content using a local LLM via the shared Ollama queue.
+ * Generates semantic tags from text content using a local LLM via the shared Ollama queue or custom completions.
  * @param {string} text - The text content to tag.
  * @param {object} [options]
  * @param {string} [options.prompt] - Custom prompt override. Defaults to a generic keyword extraction prompt.
@@ -23,6 +24,24 @@ export async function generateTagsFromLLM(text, options = {}) {
         asJson = false
     } = options;
 
+    if (process.env.COMPLETION_URL) {
+        try {
+            const tagModel = process.env.TAG_MODEL || 'llama3.2';
+            const responseText = await chat(
+                "You are a helpful assistant that extracts keywords/tags from text.",
+                prompt,
+                { model: tagModel }
+            );
+            if (!responseText) return null;
+            let tags = responseText.split(',').map(t => t.trim()).filter(t => t.length > 0);
+            if (lowercase) tags = tags.map(t => t.toLowerCase());
+            return asJson ? JSON.stringify(tags) : tags;
+        } catch (err) {
+            console.error(`[Custom Tag] Error: ${err.message}`);
+            return null;
+        }
+    }
+
     try {
         return await ollamaQueue.enqueue(async (endpoint) => {
             const url = `${endpoint.replace(/\/$/, '')}/api/generate`;
@@ -30,7 +49,7 @@ export async function generateTagsFromLLM(text, options = {}) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    model: "llama3.2",
+                    model: process.env.TAG_MODEL || "llama3.2",
                     prompt,
                     stream: false
                 })

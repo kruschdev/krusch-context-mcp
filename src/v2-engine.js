@@ -9,7 +9,7 @@
  */
 
 import { pool } from 'pg-git-mcp/db/pool.js';
-import { getEmbedding, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
+import { getEmbedding, PRIORITY } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { generateTagsFromLLM } from './llm-tags.js';
 

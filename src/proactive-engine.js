@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import { chat } from './llm.js';
 import { searchMemory } from './memory-engine.js';
 import { nuggetNudges } from './nuggets-engine.js';
-import { getEmbedding } from 'pg-git-mcp/lib/embedding.js';
+import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { writeState } from './v2-engine.js';
 
@@ -108,21 +108,23 @@ Rules for output:
     // Try local Ollama first, fallback to OpenRouter or other configuration
     let llmConfig = {
         provider: 'ollama',
-        model: process.env.PROACTIVE_MODEL || 'qwen2.5-coder:7b',
-        apiUrl: process.env.OLLAMA_URL 
-            ? `${process.env.OLLAMA_URL.replace(/\/$/, '')}/v1/chat/completions` 
-            : 'http://localhost:11434/v1/chat/completions',
+        model: process.env.COMPLETION_MODEL || process.env.PROACTIVE_MODEL || 'qwen2.5-coder:7b',
+        apiUrl: process.env.COMPLETION_URL
+            || (process.env.OLLAMA_URL 
+                ? `${process.env.OLLAMA_URL.replace(/\/$/, '')}/v1/chat/completions` 
+                : 'http://localhost:11434/v1/chat/completions'),
+        apiKey: process.env.COMPLETION_API_KEY || null,
         maxTokens: 1000,
         temperature: 0.1
     };
 
     // If OLLAMA_URL is not set but OPENROUTER_API_KEY is present, default to OpenRouter
-    if (process.env.OPENROUTER_API_KEY && !process.env.OLLAMA_URL && !process.env.USE_LOCAL_OLLAMA_ONLY) {
+    if (process.env.OPENROUTER_API_KEY && !process.env.OLLAMA_URL && !process.env.COMPLETION_URL && !process.env.USE_LOCAL_OLLAMA_ONLY) {
         llmConfig = {
             provider: 'openai',
             apiKey: process.env.OPENROUTER_API_KEY,
             apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
-            model: process.env.PROACTIVE_MODEL || 'google/gemini-2.5-flash',
+            model: process.env.COMPLETION_MODEL || process.env.PROACTIVE_MODEL || 'google/gemini-2.5-flash',
             maxTokens: 1000,
             temperature: 0.1
         };

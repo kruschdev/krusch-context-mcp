@@ -39,6 +39,8 @@ A single [Model Context Protocol](https://modelcontextprotocol.io/) server expos
 
 **🔄 Switch models without losing context** — Memory is decoupled from the reasoning engine. Swap between Gemini, Claude, GPT-4o, or local models mid-project — every model inherits the same context.
 
+**🔌 Model-Provider Agnostic & Custom Endpoints** — While Ollama is the default because it reduces installation friction to a minimum (handling automatic model fetching, dynamic VRAM loading, and dynamic model swapping out-of-the-box), the codebase is fully provider-agnostic. You can configure custom OpenAI-compatible completion or embedding endpoints (such as `llama.cpp`'s `llama-server`, LM Studio, or vLLM) by setting `COMPLETION_URL` and `EMBEDDING_URL` in your `.env`.
+
 **⚡ One server, not three** — Codebase search, episodic memory, and steering nuggets in a single process with shared connection pool and embedding pipeline.
 
 ---

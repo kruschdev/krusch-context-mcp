@@ -17,11 +17,24 @@ cp .env.example .env
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DATABASE_URL` | PostgreSQL connection string (e.g., `postgresql://user:pass@host:port/kruschdb`) | *(required)* |
-| `OLLAMA_URL` | Primary Ollama endpoint | `http://localhost:11434` |
+| `OLLAMA_URL` | Primary Ollama endpoint (Default completion & embedding engine) | `http://localhost:11434` |
 | `OLLAMA_FLEET_URLS` | Comma-separated additional Ollama endpoints for GPU fleet load balancing | *(none)* |
-| `EMBED_MODEL` | Ollama embedding model | `bge-large` |
-| `TAG_MODEL` | Ollama model for tag extraction | `llama3.2` |
+| `EMBED_MODEL` | Embedding model identifier | `bge-large` |
+| `TAG_MODEL` | Model for tag extraction | `llama3.2` |
+| `COMPLETION_URL` | Custom OpenAI-compatible completion API URL (e.g., `http://localhost:8080/v1/chat/completions`) | *(none)* |
+| `COMPLETION_API_KEY` | Custom API Key for completions (if required) | *(none)* |
+| `COMPLETION_MODEL` | Custom model identifier to send to custom completion API | *(none)* |
+| `EMBEDDING_URL` | Custom embedding API URL (OpenAI-compatible `/v1/embeddings` or raw `llama.cpp` `/embedding`) | *(none)* |
+| `EMBEDDING_API_KEY` | Custom API Key for embeddings (if required) | *(none)* |
 | `EXTERNAL_DOCS_CONFIG_PATH` | Path to JSON config for ingested manuals | `pg-git/config/external_docs.json` |
+
+### Custom Endpoints & Model Agnosticism
+
+While Ollama is the default choice to minimize setup friction (it manages model caching, GPU VRAM offloading, and on-demand model concurrency/swapping), you can route requests to any OpenAI-compatible API or local server (like `llama.cpp`'s `llama-server`, LM Studio, or vLLM).
+
+If `COMPLETION_URL` is set, the server will route tag extraction, proactive trajectory auditing, and semantic reasoning (`think`) through the custom OpenAI completion endpoint.
+If `EMBEDDING_URL` is set, the server will bypass the local Ollama embedding queue and post directly to the custom endpoint, automatically handling standard `/v1/embeddings` (OpenAI format) and raw `/embedding` (llama.cpp native format) response schemas.
+
 
 ---
 

@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { chat } from './llm.js';
 import { searchMemory } from './memory-engine.js';
-import { getEmbedding, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
+import { getEmbedding, PRIORITY } from './embedding-helper.js';
 import { searchBlobs } from 'pg-git-mcp/server/git-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
@@ -92,10 +92,12 @@ export async function handleThink({ query, project }) {
         temperature: 0.1
     } : {
         provider: 'ollama',
-        model: process.env.THINK_MODEL || 'qwen2.5-coder:14b',
-        apiUrl: process.env.OLLAMA_URL 
-            ? `${process.env.OLLAMA_URL.replace(/\/$/, '')}/v1/chat/completions` 
-            : 'http://localhost:11434/v1/chat/completions',
+        model: process.env.COMPLETION_MODEL || process.env.THINK_MODEL || 'qwen2.5-coder:14b',
+        apiUrl: process.env.COMPLETION_URL
+            || (process.env.OLLAMA_URL 
+                ? `${process.env.OLLAMA_URL.replace(/\/$/, '')}/v1/chat/completions` 
+                : 'http://localhost:11434/v1/chat/completions'),
+        apiKey: process.env.COMPLETION_API_KEY || null,
         maxTokens: 4000,
         temperature: 0.1
     };

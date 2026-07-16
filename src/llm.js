@@ -5,11 +5,17 @@ dotenv.config();
  * Standard OpenAI-compatible client chat helper (standalone for public context MCP)
  */
 export async function chat(systemPrompt, userPrompt, config = {}) {
-    const model = config.model || 'qwen2.5-coder:7b';
+    const model = config.model 
+        || process.env.COMPLETION_MODEL 
+        || 'qwen2.5-coder:7b';
     const temperature = config.temperature ?? 0.1;
     const maxTokens = config.maxTokens ?? 1000;
-    const apiUrl = config.apiUrl || 'http://localhost:11434/v1/chat/completions';
-    const apiKey = config.apiKey || null;
+    const apiUrl = config.apiUrl 
+        || process.env.COMPLETION_URL 
+        || (process.env.OLLAMA_URL ? `${process.env.OLLAMA_URL.replace(/\/$/, '')}/v1/chat/completions` : 'http://localhost:11434/v1/chat/completions');
+    const apiKey = config.apiKey 
+        || process.env.COMPLETION_API_KEY 
+        || null;
 
     const payload = {
         model,
