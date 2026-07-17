@@ -140,6 +140,16 @@ Implements the three-layer organizational memory model from the [Sentra "Company
 > **You:** "How did we structure the auth system?"  
 > **Agent:** *[`search_memory`]* From 'lessons': chose singleton JWT factory to avoid circular dependencies.
 
+### Granularity-Aware Search (GRASP)
+
+`search_memory` supports deterministic GRASP parameters to dynamically adjust context depth and retrieval strategy:
+* **Keyword/Tag Matches:** Bypass dense vector search to retrieve exact terms or tags:
+  `search_memory({ category: "lessons", query: "JWT", search_type: "keyword" })`
+* **Version Provenance Lineage:** Automatically retrieve and append the parent revision chain of the memory:
+  `search_memory({ category: "priorities", query: "database", include_history: true })`
+* **Codebase Edge Resolution:** Fetch and append linked git blob references (`memory_to_blob_edges`):
+  `search_memory({ category: "bugs", query: "VRAM leak", include_linked_blobs: true })`
+
 ### Codebase Search
 
 > **You:** "How does our auth middleware work?"  
