@@ -8,7 +8,7 @@
 
 This project is a single MCP server (stdio transport) that unifies three subsystems into one process:
 
-1. **Episodic Memory** — Vector-embedded memories (bugs, lessons, priorities, outcomes, activity) stored in hybrid SQLite + Postgres
+1. **Episodic Memory** — Vector-embedded memories (`bugs`, `lessons`, `priorities`, `outcomes`, `activity`) stored in hybrid SQLite + Postgres. These maintain agent state across sessions, track workarounds, and document learnings. For a comprehensive guide, see [EPISODIC_MEMORY.md](file:///home/krusch/homelab/projects/krusch-context-mcp/docs/EPISODIC_MEMORY.md).
 2. **Holographic Nuggets** — Lightweight key-value steering facts (preferences, conventions, corrections) with semantic retrieval
 3. **Codebase Search** — Semantic search over all indexed source files via the sibling `pg-git` project
 4. **Proactive Auditor (Memory Agent Loop)** — Background trajectory auditor that verifies actions against past rules and updates weights based on developer feedback loops (Direct-OPD/PUST)

@@ -27,7 +27,7 @@ A single [Model Context Protocol](https://modelcontextprotocol.io/) server expos
 | Capability | What It Provides |
 |-----------|-----------------|
 | 🔍 **Semantic Codebase Search** | Search the *meaning* of your code, not just filenames. "How do we handle auth?" returns the actual implementation. |
-| 🧠 **Episodic Memory** | Bugs, decisions, and lessons persist across sessions, retrieved by semantic relevance with temporal decay. |
+| 🧠 **Episodic Memory** | Bugs, decisions, and lessons persist across sessions, retrieved by semantic relevance with temporal decay. See [Episodic Memory Guide](docs/EPISODIC_MEMORY.md). |
 | 💎 **Steering Nudges** | Lightweight key-value facts (preferences, conventions) give the agent behavioral continuity without re-prompting. |
 | 📖 **Documentation Search** | Ingested external docs are searchable locally — your agent references *your* versions, not its training data. |
 | 🛡️ **Proactive Auditor (Memory Agent)** | Trajectory auditing that learns from feedback (Direct-OPD) to verify trajectories and log alignment signals. |
@@ -133,6 +133,8 @@ Implements the three-layer organizational memory model from the [Sentra "Company
 ## Usage Examples
 
 ### Episodic Memory
+
+For a detailed technical guide on categories, architecture, sync mechanics, and agent lifecycle patterns, see the [Episodic Memory Guide](docs/EPISODIC_MEMORY.md).
 
 > **You:** "That fixed the port conflict! Save this."  
 > **Agent:** *[`add_memory`]* Saved to 'bugs': port 5441 conflicts with legacy DB, use 5442.

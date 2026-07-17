@@ -65,7 +65,9 @@ Understanding where data lives is critical for querying correctly.
 4. **Nuggets `kind: 'project'`** → need `active_project` to resolve the SQLite DB
 5. **Nuggets `kind: 'user'`/`'agent'`** → always global Postgres
 
-### Memory Categories
+### Memory Categories (Episodic Memory)
+
+For a detailed analysis of episodic memory implementation, scoring, and storage flow, see the [Episodic Memory Guide](EPISODIC_MEMORY.md).
 
 | Category | When to Use |
 |----------|-------------|
