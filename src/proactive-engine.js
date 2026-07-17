@@ -5,6 +5,7 @@ import { nuggetNudges } from './nuggets-engine.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { writeState } from './v2-engine.js';
+import { pool } from 'pg-git-mcp/db/pool.js';
 
 // Ensure environment variables are loaded
 dotenv.config();
@@ -51,7 +52,7 @@ export async function handleProactiveNudge({ history, project }) {
         throw new McpError(ErrorCode.InternalError, "Failed to generate query embedding");
     }
 
-    // 3. Search memories (lessons, bugs, priorities) and nuggets concurrently
+    // 3. Search Macro-scale (lessons, bugs, priorities, nuggets) and Meso-scale (activities)
     const categories = ['lessons', 'bugs', 'priorities'];
     const memoryPromises = categories.map(cat =>
         searchMemory({ category: cat, query: queryText, limit: 3, active_project: project, _embedding: vector })
@@ -67,23 +68,52 @@ export async function handleProactiveNudge({ history, project }) {
             return { content: [{ type: "text", text: "" }] };
         });
 
-    const [nuggetsResult, ...memoryResults] = await Promise.all([nuggetsPromise, ...memoryPromises]);
+    const mesoPromise = pool.query(`
+        SELECT content, created_at FROM interaction_memory
+        WHERE category = 'activity' AND (project = $1 OR project IS NULL)
+        ORDER BY created_at DESC LIMIT 3
+    `, [project || null]).catch(err => {
+        console.error('[krusch-context-mcp] Meso activities query failed:', err.message);
+        return { rows: [] };
+    });
 
-    // 4. Compile context block
+    const [nuggetsResult, mesoResult, ...memoryResults] = await Promise.all([nuggetsPromise, mesoPromise, ...memoryPromises]);
+
+    // 4. Compile multi-scale context block
     let contextBlock = "";
+
+    // Micro-scale
+    contextBlock += `### 1. Micro-Scale Context (Current Task)\nQuery / Target: "${queryText}"\n\n`;
+
+    // Meso-scale
+    if (mesoResult && mesoResult.rows && mesoResult.rows.length > 0) {
+        contextBlock += `### 2. Meso-Scale Context (Recent Activities)\n`;
+        for (const row of mesoResult.rows) {
+            const dateStr = row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : 'unknown';
+            contextBlock += `- [${dateStr}] ${row.content}\n`;
+        }
+        contextBlock += `\n`;
+    }
+
+    // Macro-scale
+    let macroBlock = "";
     for (let i = 0; i < categories.length; i++) {
         const text = memoryResults[i].content[0].text;
         if (text && !text.includes("No results found")) {
-            contextBlock += `### Past ${categories[i].toUpperCase()}\n${text}\n\n`;
+            macroBlock += `#### Past ${categories[i].toUpperCase()}\n${text}\n\n`;
         }
     }
 
     const nuggetText = nuggetsResult.content[0].text;
     if (nuggetText && !nuggetText.includes("No relevant nudges found")) {
-        contextBlock += `### Holographic Nuggets\n${nuggetText}\n\n`;
+        macroBlock += `#### Holographic Nuggets\n${nuggetText}\n\n`;
     }
 
-    // If no context is found, there is nothing to audit against
+    if (macroBlock.trim()) {
+        contextBlock += `### 3. Macro-Scale Context (Lessons, Bugs, & Rules)\n${macroBlock}`;
+    }
+
+    // If no context exists to audit against, return NO_NUDGES_REQUIRED
     if (!contextBlock.trim()) {
         return { content: [{ type: "text", text: "NO_NUDGES_REQUIRED" }] };
     }
@@ -175,4 +205,123 @@ export async function handleNudgeFeedback({ query_text, nudge_text, user_approve
         action_trace,
         project: project || null
     });
+}
+
+/**
+ * Analyzes the execution trajectory of a memory state using STRACE principles.
+ * Identifies root cause steps where errors first occurred or where confidence dropped.
+ *
+ * @param {object} args
+ * @param {string} args.memory_id - The UUID of the leaf/head memory to analyze.
+ * @returns {Promise<{content: Array}>} MCP tool response
+ */
+export async function handleAnalyzeTrajectory({ memory_id }) {
+    if (!memory_id) {
+        throw new McpError(ErrorCode.InvalidParams, "Missing required parameter 'memory_id'");
+    }
+
+    const client = await pool.connect();
+    try {
+        // Query the parent-child chain (provenance) of the memory, including action_trace
+        const queryStr = `
+            WITH RECURSIVE provenance_tree AS (
+                SELECT id, parent_id, version_id, author_id, source_ref, created_at, content, status, action_trace
+                FROM interaction_memory
+                WHERE id = $1
+                UNION ALL
+                SELECT m.id, m.parent_id, m.version_id, m.author_id, m.source_ref, m.created_at, m.content, m.status, m.action_trace
+                FROM interaction_memory m
+                INNER JOIN provenance_tree pt ON pt.parent_id = m.id
+            )
+            SELECT * FROM provenance_tree ORDER BY version_id ASC;
+        `;
+        const res = await client.query(queryStr, [memory_id]);
+        if (res.rows.length === 0) {
+            return { content: [{ type: "text", text: `Error: Memory ID '${memory_id}' not found.` }], isError: true };
+        }
+
+        let report = `### 📊 Structural Trajectory Analysis (STRACE) for Memory ${memory_id.substring(0, 8)}\n\n`;
+        report += `Total versions traced: **${res.rows.length}**\n\n`;
+
+        const faults = [];
+        let totalSteps = 0;
+
+        for (const row of res.rows) {
+            report += `#### Version ${row.version_id} (Author: ${row.author_id}, Status: ${row.status})\n`;
+            report += `- **Created At:** ${row.created_at.toISOString()}\n`;
+            if (row.source_ref) {
+                report += `- **Source Ref:** \`${row.source_ref}\`\n`;
+            }
+
+            let trace = [];
+            if (row.action_trace) {
+                try {
+                    trace = typeof row.action_trace === 'string' ? JSON.parse(row.action_trace) : row.action_trace;
+                } catch(e) {
+                    report += `  - ⚠️ Failed to parse action trace JSON.\n`;
+                }
+            }
+
+            if (!Array.isArray(trace)) {
+                trace = trace ? [trace] : [];
+            }
+
+            if (trace.length === 0) {
+                report += `  - *No action trace logged for this version.*\n`;
+                continue;
+            }
+
+            report += `- **Action Trace Steps:**\n`;
+            for (const step of trace) {
+                totalSteps++;
+                const stepIdx = step.step_index || step.step || totalSteps;
+                const actionName = step.action || step.tool || 'unknown_action';
+                const status = step.status || (step.success === false ? 'failed' : 'success');
+                const resultText = step.result || step.output || step.error || '';
+                const confidence = step.confidence !== undefined ? step.confidence : 1.0;
+
+                const statusEmoji = status === 'failed' || resultText.toLowerCase().includes('error') || resultText.toLowerCase().includes('failed') ? '❌' : '✅';
+                
+                report += `  ${statusEmoji} **Step ${stepIdx}:** \`${actionName}\` (Confidence: ${confidence.toFixed(2)})\n`;
+                if (step.args) {
+                    report += `    - **Arguments:** \`${JSON.stringify(step.args)}\`\n`;
+                }
+
+                // If step failed or output contains error, log as potential causal fault node
+                const isError = status === 'failed' || resultText.toLowerCase().includes('error') || resultText.toLowerCase().includes('failed') || resultText.toLowerCase().includes('exception');
+                if (isError) {
+                    faults.push({
+                        version: row.version_id,
+                        step: stepIdx,
+                        action: actionName,
+                        confidence,
+                        snippet: resultText.substring(0, 200)
+                    });
+                }
+            }
+            report += `\n`;
+        }
+
+        // Causal Localization & Fault Isolation
+        report += `### 🔍 Causal Fault Isolation\n\n`;
+        if (faults.length === 0) {
+            report += `✅ **No step-level failures or anomalies detected in the trajectory.**\n`;
+        } else {
+            report += `⚠️ Found **${faults.length}** anomaly/failure steps in the execution graph:\n\n`;
+            for (const fault of faults) {
+                report += `- **[Version ${fault.version}, Step ${fault.step}]** \`${fault.action}\` (Confidence: ${fault.confidence.toFixed(2)}):\n`;
+                report += `  > *Error Snip:* \`${fault.snippet.replace(/\n/g, ' ')}\`\n`;
+            }
+            
+            // Highlight the root cause (earliest version, earliest step)
+            const root = faults[0];
+            report += `\n🎯 **STRACE Root Cause Suggestion:** The trajectory drift likely originated at **Version ${root.version}, Step ${root.step}** during the execution of \`${root.action}\`.\n`;
+        }
+
+        return { content: [{ type: "text", text: report }] };
+    } catch (err) {
+        throw new McpError(ErrorCode.InternalError, `Trajectory analysis database error: ${err.message}`);
+    } finally {
+        client.release();
+    }
 }

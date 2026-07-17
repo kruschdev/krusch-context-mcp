@@ -215,6 +215,20 @@ async function run() {
         console.log(`   ⚠️ ${e.message}`);
     }
 
+    // 10b. Test krusch_context_analyze_trajectory (using the state we just wrote)
+    console.log('\n📊 Testing krusch_context_analyze_trajectory...');
+    try {
+        const targetId = v2StateId || '00000000-0000-0000-0000-000000000000';
+        const trajRes = await send('tools/call', {
+            name: 'krusch_context_analyze_trajectory',
+            arguments: { memory_id: targetId }
+        });
+        const text = trajRes.result?.content?.[0]?.text || '';
+        console.log(`   ${text.substring(0, 300)}`);
+    } catch (e) {
+        console.log(`   ⚠️ ${e.message}`);
+    }
+
     // 11. Test krusch_context_search_lens
     console.log('\n🔭 Testing krusch_context_search_lens...');
     try {

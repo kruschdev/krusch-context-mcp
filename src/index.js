@@ -23,7 +23,7 @@ import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, cons
 import { writeState, resolveConflict, getProvenance, updateOntology, searchLens, traverseGraph, linkBlob } from './v2-engine.js';
 import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
 import { handleThink } from './think-engine.js';
-import { handleProactiveNudge, handleNudgeFeedback } from './proactive-engine.js';
+import { handleProactiveNudge, handleNudgeFeedback, handleAnalyzeTrajectory } from './proactive-engine.js';
 import { getEmbedding } from './embedding-helper.js';
 import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
@@ -160,7 +160,7 @@ async function verifyDatabase() {
     }
 }
 
-const server = new Server({ name: "krusch-context-mcp", version: "1.0.0" }, { capabilities: { tools: {}, prompts: {} } });
+const server = new Server({ name: "krusch-context-mcp", version: "1.2.0" }, { capabilities: { tools: {}, prompts: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
@@ -566,6 +566,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["query_text", "nudge_text", "user_approved", "agent_corrected"]
         }
+      },
+      {
+        name: "krusch_context_analyze_trajectory",
+        description: "Analyze the step-level execution path of a memory ID using STRACE. Identifies causal fault steps and failure patterns.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            memory_id: { type: "string", description: "The UUID of the leaf state in the interaction_memory table to trace." }
+          },
+          required: ["memory_id"]
+        }
       }
     ]
   };
@@ -851,6 +862,7 @@ const TOOL_HANDLERS = new Map([
   ['krusch_context_get_skill',      (args) => handleGetSkill(args)],
   ['krusch_context_proactive_nudge', (args) => handleProactiveNudge(args)],
   ['krusch_context_nudge_feedback', (args) => handleNudgeFeedback(args)],
+  ['krusch_context_analyze_trajectory', (args) => handleAnalyzeTrajectory(args)],
 ]);
 
 const tracer = trace.getTracer('krusch-context-mcp');

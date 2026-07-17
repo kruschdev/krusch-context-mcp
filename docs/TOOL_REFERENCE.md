@@ -75,6 +75,23 @@
 
 ---
 
+### `krusch_context_analyze_trajectory`
+
+**Structural Trajectory Analysis (STRACE)**: Analyzes the step-level execution path of a memory ID using STRACE principles. It identifies root cause steps where errors first occurred or where confidence dropped by traversing version provenance tree from the `interaction_memory` table and performing Causal Fault Isolation.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `memory_id` | `string` | ✅ | — | The UUID of the leaf/head memory in the interaction_memory table to trace. |
+
+**Example call:**
+```json
+{
+  "memory_id": "9aea1850-834e-4fff-9893-19e352f497d1"
+}
+```
+
+---
+
 ## Episodic Memory Tools
 
 ### `krusch_context_add_memory`

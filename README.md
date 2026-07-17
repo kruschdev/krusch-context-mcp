@@ -22,7 +22,7 @@ Every time you start a new AI coding session, your agent starts from zero. It do
 
 ## What It Does
 
-A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **31 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
+A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **32 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
 
 | Capability | What It Provides |
 |-----------|-----------------|
@@ -76,7 +76,7 @@ Add to your IDE MCP settings (e.g., `.cursor/mcp.json`, `claude_desktop_config.j
 }
 ```
 
-Restart your IDE — your agent now has access to all 31 tools.
+Restart your IDE — your agent now has access to all 32 tools.
 
 > **Upgrading?** `git pull origin main && npm install && npm start` — idempotent migrations run on startup.
 
@@ -246,6 +246,7 @@ Implements the three-layer organizational memory model from the [Sentra "Company
 | **System, Auditing, & Skills** | |
 | `proactive_nudge` | Trajectory auditing — warn on rule/lesson violations |
 | `nudge_feedback` | Log developer/agent feedback to record alignment signals |
+| `analyze_trajectory` | Trajectory auditing — analyze execution path using STRACE and isolate faults |
 | `think` | Perform context synthesis, conflict detection, and gap analysis |
 | `list_skills` / `get_skill` | Browse and read specialized agent skills Registry |
 | `docs_list` / `docs_search` | External documentation search |
@@ -268,7 +269,7 @@ krusch-context-mcp/
 ├── scripts/                  # Benchmarking, evaluation, and maintenance
 ├── tests/                    # *.test.js = automated, test_*.js = smoke
 ├── docs/
-│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 31 tools
+│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 32 tools
 │   ├── SETUP.md              # Configuration, storage routing, troubleshooting
 │   └── research/             # Sentra Company Brain research essays
 └── package.json
@@ -281,7 +282,7 @@ krusch-context-mcp/
 ```bash
 npm test                                # Automated (node:test, *.test.js)
 npm run test:smoke                      # JSON-RPC stdio smoke tests
-node tests/test_client.js               # All 31 tools against live DB
+node tests/test_client.js               # All 32 tools against live DB
 node scripts/benchmark_latency.js       # End-to-end latency
 node scripts/eval_accuracy.js           # Precision/recall
 ```

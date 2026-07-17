@@ -2,7 +2,7 @@
 
 > Unified MCP server: PG-Git codebase search + Homelab episodic memory + Holographic Nuggets + External docs search.
 
-> **Last audit**: 2026-07-14 | **Version**: 1.0.0 | **Tools**: 31
+> **Last audit**: 2026-07-17 | **Version**: 1.2.0 | **Tools**: 32
 
 ## Architecture Overview
 
@@ -56,7 +56,7 @@ Project-scoped data follows a two-tier model:
 | `src/skills-engine.js` | Agent skills loader and prompt registry engine |
 | `src/proactive-engine.js` | Trajectory auditor (proactive_nudge) and feedback collector (nudge_feedback) |
 
-## Tool Surface (31 tools)
+## Tool Surface (32 tools)
 
 | Tool | Source | Key Parameters |
 |------|--------|---------------|
@@ -91,6 +91,7 @@ Project-scoped data follows a two-tier model:
 | `krusch_context_get_skill` | `skills-engine.js` | `name`★ |
 | `krusch_context_proactive_nudge` | `proactive-engine.js` | `history`★, `project` |
 | `krusch_context_nudge_feedback` | `proactive-engine.js` | `query_text`★, `nudge_text`★, `user_approved`★, `agent_corrected`★, `correction_diff`, `project` |
+| `krusch_context_analyze_trajectory` | `proactive-engine.js` | `memory_id`★ |
 
 > ★ = required parameter
 
@@ -119,13 +120,13 @@ krusch-context-mcp/
 │   ├── memory-engine.test.js # Integration tests (pg-git + consolidation + v2 write/resolve)
 │   ├── lakebase.test.js      # Lakebase pull/push sync verification
 │   ├── sqlite-memory.test.js # SQLite memory engine isolation tests
-│   ├── test_client.js        # Smoke test for all 26 tools via JSON-RPC
+│   ├── test_client.js        # Smoke test for all 32 tools via JSON-RPC
 │   ├── test_v2_memory.js     # Company Brain v2 multi-agent write + conflict resolution
 │   ├── test_v2_lens_graph.js  # Lens-based retrieval + graph traversal
 │   └── test_v2_action_memory.js # Action Memory graph + commitment compilation
 ├── docs/
 │   ├── assets/               # Banner and documentation images
-│   └── TOOL_REFERENCE.md     # Full parameter reference for all 26 tools
+│   └── TOOL_REFERENCE.md     # Full parameter reference for all 32 tools
 ├── data/
 │   └── traces.jsonl          # OpenTelemetry tool execution traces
 ├── spec.md                   # Original project specification
@@ -164,7 +165,7 @@ npm test
 # Run stdio-based smoke tests (spawns full MCP server)
 npm run test:smoke
 
-# Smoke test all 26 tools against live kruschdb
+# Smoke test all 32 tools against live kruschdb
 node tests/test_client.js
 
 # Benchmark embedding + search latency

@@ -31,6 +31,32 @@ async function generateOntologyTags(text) {
 }
 
 /**
+ * Recursively inspects and truncates long string fields in the action trace object to prevent DB bloat.
+ * @param {any} val - The value to inspect and truncate.
+ * @param {number} [maxLen=2048] - Maximum string length allowed.
+ * @returns {any} Truncated object.
+ */
+function truncateTrace(val, maxLen = 2048) {
+    if (typeof val === 'string') {
+        if (val.length > maxLen) {
+            return val.substring(0, maxLen) + '... (truncated due to size)';
+        }
+        return val;
+    }
+    if (Array.isArray(val)) {
+        return val.map(item => truncateTrace(item, maxLen));
+    }
+    if (val !== null && typeof val === 'object') {
+        const obj = {};
+        for (const [key, value] of Object.entries(val)) {
+            obj[key] = truncateTrace(value, maxLen);
+        }
+        return obj;
+    }
+    return val;
+}
+
+/**
  * Company Brain v2: Write a memory state with optimistic concurrency control.
  * @param {object} params
  * @param {string} params.content - The memory content
@@ -54,7 +80,9 @@ export async function writeState({ content, category, author_id, parent_id, sour
         finalOntologyTags = await generateOntologyTags(content);
     }
     const tagsStr = finalOntologyTags && finalOntologyTags.length > 0 ? `{${finalOntologyTags.map(t => `"${t}"`).join(',')}}` : null;
-    const actionTraceStr = action_trace ? JSON.stringify(action_trace) : null;
+    
+    const processedTrace = action_trace ? truncateTrace(action_trace) : null;
+    const actionTraceStr = processedTrace ? JSON.stringify(processedTrace) : null;
 
     const client = await pool.connect();
     try {
