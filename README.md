@@ -305,17 +305,22 @@ node scripts/eval_accuracy.js           # Precision/recall
 
 ---
 
-## Acknowledgments
+## Acknowledgments & References
 
-The evolution from a simple RAG cache to a stateful **Company Brain Substrate** is deeply inspired by the [Sentra "Company Brain" Essay Series](https://sentra.app). We recommend reading their work on why organizational memory is an infrastructure problem.
+This project is built upon and inspired by the following foundational research papers, architectural frameworks, and open-source projects:
 
-The automated, continuous optimization of agent tool usage through execution tracing and LLM analysis is powered by the [HALO RLM Engine](https://github.com/context-labs/halo).
+### Architectural Foundations
+- **Company Brain Substrate (v2)**: Core concept and multi-layered organizational memory model inspired by the [Sentra "Company Brain" Essay Series](https://sentra.app).
+- **Holographic Nuggets**: Lightweight key-value steering facts adapted from the original [NeoVertex Nuggets](https://github.com/NeoVertex1/nuggets) design.
+- **Lakebase Compute/Storage Decoupling**: Storage routing and local-first compute cache separation inspired by the [Neon Serverless Postgres Architecture](https://neon.tech/docs/introduction/architecture-overview).
+- **Tool Tracing & Optimization**: Automated optimization of agent execution paths powered by the [HALO RLM Engine](https://github.com/context-labs/halo).
 
-The proactive context auditor alignment feedback loops are powered by paradigms introduced in:
-- **Proxy Exploration and Reusable Guidance (PUST)**: Fu et al., [Proxy Exploration and Reusable Guidance: A Modular LLM Post-Training Paradigm via Proxy-Guided Update Signals](https://huggingface.co/papers/2607.11505) (ArXiv: [2607.11505](https://arxiv.org/abs/2607.11505)).
-- **Direct On-Policy Distillation (Direct-OPD)**: Feng et al., [Weak-to-Strong Generalization via Direct On-Policy Distillation](https://huggingface.co/papers/2607.05394) (ArXiv: [2607.05394](https://arxiv.org/abs/2607.05394)).
-- **Proactive Memory Agent**: Wu et al., [Remember When It Matters: Proactive Memory Agent for Long-Horizon Agents](https://huggingface.co/papers/2607.08716) (ArXiv: [2607.08716](https://arxiv.org/abs/2607.08716)).
-- **Granularity-Aware Search Policy (GRASP)**: Gandhi et al., [GRASP: GRanularity-Aware Search Policy for Agentic RAG](https://huggingface.co/papers/2607.10463) (ArXiv: [2607.10463](https://arxiv.org/abs/2607.10463)).
+### Research Papers & Algorithms
+- **Semantic Consolidation**: Centroid-based semantic memory compression without re-embedding based on the [Geometry of Consolidation repository](https://github.com/niashwin/geometry-of-consolidation).
+- **Proactive Memory Agent**: Long-horizon execution warnings and memory-guided auditing based on Wu et al., [Remember When It Matters: Proactive Memory Agent for Long-Horizon Agents](https://arxiv.org/abs/2607.08716) (ArXiv: 2607.08716).
+- **Direct On-Policy Distillation (Direct-OPD)**: Weak-to-strong feedback distillation for proactive context rules based on Feng et al., [Weak-to-Strong Generalization via Direct On-Policy Distillation](https://arxiv.org/abs/2607.05394) (ArXiv: 2607.05394).
+- **Proxy Exploration and Reusable Guidance (PUST)**: Modular guidance paradigm using feedback traces based on Fu et al., [Proxy Exploration and Reusable Guidance: A Modular LLM Post-Training Paradigm via Proxy-Guided Update Signals](https://arxiv.org/abs/2607.11505) (ArXiv: 2607.11505).
+- **Granularity-Aware Search Policy (GRASP)**: Dynamic context depth expansion for search queries based on Gandhi et al., [GRASP: GRanularity-Aware Search Policy for Agentic RAG](https://arxiv.org/abs/2607.10463) (ArXiv: 2607.10463).
 
 ## Contributing
 
