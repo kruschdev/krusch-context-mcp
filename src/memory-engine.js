@@ -158,42 +158,214 @@ async function _searchProjectMemory(active_project, category, embeddingArray, li
     }).sort((a, b) => b.similarity - a.similarity).slice(0, limit);
 }
 
+async function _keywordSearchGlobal(category, query, limit, active_project) {
+    const client = await pool.connect();
+    try {
+        const queryParams = [category, `%${query}%`, limit];
+        let projectFilter = 'AND project IS NULL';
+        if (active_project) {
+            projectFilter = 'AND (project = $4 OR project IS NULL)';
+            queryParams.push(active_project);
+        }
+        const res = await client.query(`
+            SELECT id, project, content, tags, created_at, 1.0 as similarity
+            FROM ide_agent_memory
+            WHERE category = $1 ${projectFilter} AND content ILIKE $2
+            ORDER BY created_at DESC
+            LIMIT $3
+        `, queryParams);
+        return res.rows.map(r => ({ ...r, source: 'global' }));
+    } finally {
+        client.release();
+    }
+}
+
+async function _keywordSearchProject(active_project, category, query, limit) {
+    if (!active_project) return [];
+    const db = await getProjectDb(active_project);
+    if (!db) return [];
+    const rows = db.prepare(`
+        SELECT id, category, content, tags, created_at 
+        FROM ide_agent_memory 
+        WHERE category = ? AND content LIKE ?
+        ORDER BY created_at DESC
+        LIMIT ?
+    `).all(category, `%${query}%`, limit);
+    return rows.map(r => ({
+        id: r.id, project: active_project, content: r.content, tags: r.tags,
+        created_at: r.created_at, similarity: 1.0, source: 'project'
+    }));
+}
+
+async function _tagSearchGlobal(category, tag, limit, active_project) {
+    const client = await pool.connect();
+    try {
+        const queryParams = [category, `%${tag}%`, limit];
+        let projectFilter = 'AND project IS NULL';
+        if (active_project) {
+            projectFilter = 'AND (project = $4 OR project IS NULL)';
+            queryParams.push(active_project);
+        }
+        const res = await client.query(`
+            SELECT id, project, content, tags, created_at, 1.0 as similarity
+            FROM ide_agent_memory
+            WHERE category = $1 ${projectFilter} AND tags ILIKE $2
+            ORDER BY created_at DESC
+            LIMIT $3
+        `, queryParams);
+        return res.rows.map(r => ({ ...r, source: 'global' }));
+    } finally {
+        client.release();
+    }
+}
+
+async function _tagSearchProject(active_project, category, tag, limit) {
+    if (!active_project) return [];
+    const db = await getProjectDb(active_project);
+    if (!db) return [];
+    const rows = db.prepare(`
+        SELECT id, category, content, tags, created_at 
+        FROM ide_agent_memory 
+        WHERE category = ? AND tags LIKE ?
+        ORDER BY created_at DESC
+        LIMIT ?
+    `).all(category, `%${tag}%`, limit);
+    return rows.map(r => ({
+        id: r.id, project: active_project, content: r.content, tags: r.tags,
+        created_at: r.created_at, similarity: 1.0, source: 'project'
+    }));
+}
+
+async function db_fetch_provenance(memory_id) {
+    const client = await pool.connect();
+    try {
+        const query = `
+            WITH RECURSIVE provenance_tree AS (
+                SELECT id, parent_id, version_id, author_id, source_ref, created_at, content, status
+                FROM interaction_memory
+                WHERE id = $1
+                UNION ALL
+                SELECT m.id, m.parent_id, m.version_id, m.author_id, m.source_ref, m.created_at, m.content, m.status
+                FROM interaction_memory m
+                INNER JOIN provenance_tree pt ON pt.parent_id = m.id
+            )
+            SELECT id, version_id, author_id, created_at, content, status 
+            FROM provenance_tree 
+            WHERE id != $1
+            ORDER BY version_id DESC;
+        `;
+        const res = await client.query(query, [memory_id]);
+        return res.rows;
+    } catch(err) {
+        console.warn(`[krusch-context] Provenance expansion failed for memory ID ${memory_id}: ${err.message}`);
+        return [];
+    } finally {
+        client.release();
+    }
+}
+
+async function db_fetch_linked_blobs(memory_id) {
+    const client = await pool.connect();
+    try {
+        const res = await client.query(`
+            SELECT blob_id, relationship 
+            FROM memory_to_blob_edges 
+            WHERE memory_id = $1
+            ORDER BY created_at DESC
+        `, [memory_id]);
+        return res.rows;
+    } catch(err) {
+        console.warn(`[krusch-context] Linked blobs query failed for memory ID ${memory_id}: ${err.message}`);
+        return [];
+    } finally {
+        client.release();
+    }
+}
+
 /**
- * Searches the persistent IDE database via semantic embeddings.
+ * Searches the persistent IDE database via semantic embeddings, keywords, or tags.
+ * Supports GRASP context-expansion (provenance lineage & codebase linkage).
  * @param {object} params
  * @param {string} params.category - Category to search
- * @param {string} params.query - Semantic search query
+ * @param {string} params.query - Search query string
  * @param {number} [params.limit=3] - Max results to return
  * @param {string} [params.active_project] - Project context for SQLite isolation
  * @param {number[]} [params._embedding] - Optional pre-computed embedding
+ * @param {string} [params.search_type='semantic'] - 'semantic', 'keyword', or 'tag'
+ * @param {boolean} [params.include_history=false] - If true, traverses and appends version parent history
+ * @param {boolean} [params.include_linked_blobs=false] - If true, retrieves linked git file blobs
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function searchMemory({ category, query, limit = 3, active_project, _embedding }) {
-    if (!category || !query) throw new McpError(ErrorCode.InvalidParams, "Missing params");
+export async function searchMemory({ category, query, limit = 3, active_project, _embedding, search_type = 'semantic', include_history = false, include_linked_blobs = false }) {
+    if (!category || !query) throw new McpError(ErrorCode.InvalidParams, "Missing category or query params");
 
-    const embeddingArray = _embedding || await getEmbedding(query, PRIORITY.HIGH);
-    if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
+    let pgResults = [];
+    let sqliteResults = [];
 
-    const pgResults = await _searchGlobalMemory(category, embeddingArray, limit, active_project);
-    const sqliteResults = await _searchProjectMemory(active_project, category, embeddingArray, limit);
+    if (search_type === 'keyword') {
+        pgResults = await _keywordSearchGlobal(category, query, limit, active_project);
+        sqliteResults = await _keywordSearchProject(active_project, category, query, limit);
+    } else if (search_type === 'tag') {
+        pgResults = await _tagSearchGlobal(category, query, limit, active_project);
+        sqliteResults = await _tagSearchProject(active_project, category, query, limit);
+    } else {
+        // default semantic search
+        const embeddingArray = _embedding || await getEmbedding(query, PRIORITY.HIGH);
+        if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
+        pgResults = await _searchGlobalMemory(category, embeddingArray, limit, active_project);
+        sqliteResults = await _searchProjectMemory(active_project, category, embeddingArray, limit);
+    }
 
     const results = [...pgResults, ...sqliteResults]
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, limit);
 
     if (results.length === 0) {
-        return { content: [{ type: "text", text: `=== 🧠 Memory Retrieval: ${category} ===\n\nNo results found.` }] };
+        return { content: [{ type: "text", text: `=== 🧠 Memory Retrieval (${search_type}): ${category} ===\n\nNo results found.` }] };
     }
 
-    let output = `=== 🧠 Memory Retrieval: ${category} ===\n`;
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    let output = `=== 🧠 Memory Retrieval (${search_type}): ${category} ===\n`;
     for (const r of results) {
         let tagsStr = '';
         if (r.tags) {
-            try { tagsStr = ` [Tags: ${JSON.parse(r.tags).join(', ')}]`; } catch(e) { console.warn(`[krusch-context] Warning: Failed to parse JSON tags for memory ID ${r.id}`); }
+            try { 
+                const parsed = typeof r.tags === 'string' ? JSON.parse(r.tags) : r.tags;
+                if (Array.isArray(parsed)) {
+                    tagsStr = ` [Tags: ${parsed.join(', ')}]`; 
+                }
+            } catch(e) { 
+                tagsStr = ` [Tags: ${r.tags}]`; 
+            }
         }
         const dateStr = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : 'unknown';
         const projectStr = r.source === 'project' ? ` | Project: ${r.project}` : ' | Global';
+        
         output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | ID: ${r.id} | Date: ${dateStr}${projectStr}${tagsStr} ---\n${r.content}\n`;
+
+        // GRASP Expansion: Include lineage history
+        if (include_history && UUID_REGEX.test(r.id)) {
+            const history = await db_fetch_provenance(r.id);
+            if (history && history.length > 0) {
+                output += `\n  📜 [Provenance History / Lineage]:\n`;
+                for (const h of history) {
+                    const hDate = new Date(h.created_at).toISOString().split('T')[0];
+                    output += `    └─ Ver ${h.version_id} (${hDate}) by ${h.author_id}: "${h.content.substring(0, 150)}..." [Status: ${h.status}]\n`;
+                }
+            }
+        }
+
+        // GRASP Expansion: Include linked codebase files (blobs)
+        if (include_linked_blobs && UUID_REGEX.test(r.id)) {
+            const blobs = await db_fetch_linked_blobs(r.id);
+            if (blobs && blobs.length > 0) {
+                output += `\n  📄 [Linked Codebase References]:\n`;
+                for (const b of blobs) {
+                    output += `    └─ Git Blob SHA: ${b.blob_id} [Relation: ${b.relationship}]\n`;
+                }
+            }
+        }
     }
     return { content: [{ type: "text", text: output }] };
 }

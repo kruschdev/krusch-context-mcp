@@ -32,10 +32,22 @@ import { pool } from 'pg-git-mcp/db/pool.js';
 async function verifyDatabase() {
     try {
         await pool.query('SELECT 1');
+        
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS ide_agent_memory (
+                id SERIAL PRIMARY KEY,
+                category VARCHAR(50) NOT NULL,
+                content TEXT NOT NULL,
+                tags TEXT,
+                embedding VECTOR(1024),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
         try {
             await pool.query('ALTER TABLE ide_agent_memory ADD COLUMN project VARCHAR(255)');
         } catch (e) {
-            if (e.code !== '42701') throw e; // 42701 is duplicate column
+            if (e.code !== '42701' && e.code !== '42P07') throw e; // 42701 duplicate column, 42P07 duplicate relation/column in some PG configs
         }
         try {
             await pool.query('ALTER TABLE ide_agent_memory ADD COLUMN tags TEXT');
@@ -169,14 +181,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "krusch_context_search_memory",
-        description: "Search the persistent IDE database for past lessons, bugs, priorities, or project outcomes via semantic embeddings.",
+        description: "Search the persistent IDE database for past lessons, bugs, priorities, or project outcomes. Supports GRASP options (semantic, keyword, tag matching; history/lineage expansion; codebase file association).",
         inputSchema: {
           type: "object",
           properties: {
             active_project: { type: "string" },
             category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
             query: { type: "string" },
-            limit: { type: "number", default: 3 }
+            limit: { type: "number", default: 3 },
+            search_type: { type: "string", enum: ['semantic', 'keyword', 'tag'], default: 'semantic' },
+            include_history: { type: "boolean", default: false },
+            include_linked_blobs: { type: "boolean", default: false }
           },
           required: ["category", "query"]
         }
