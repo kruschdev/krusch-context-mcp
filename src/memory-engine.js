@@ -3,6 +3,7 @@ import { getEmbedding, PRIORITY } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
 import { generateTagsFromLLM } from './llm-tags.js';
+import { isPgContextEnabled, syncPgContextPoints } from './pgcontext-helper.js';
 
 const DECAY_RATE = 0.01;
 const AUTO_TAG = true; // Hardcoded for context MCP
@@ -44,10 +45,14 @@ async function _addProjectMemory(project, category, content, finalTags, embeddin
 async function _addGlobalMemory(category, content, finalTags, embeddingStr) {
     const client = await pool.connect();
     try {
-        await client.query(`
+        const res = await client.query(`
             INSERT INTO ide_agent_memory (project, category, content, embedding, tags)
             VALUES (NULL, $1, $2, $3::vector, $4)
+            RETURNING id
         `, [category, content, embeddingStr, finalTags]);
+        if (res.rows.length > 0) {
+            await syncPgContextPoints(pool, 'ide_agent_memory', [res.rows[0].id]);
+        }
     } finally {
         client.release();
     }
@@ -94,6 +99,39 @@ async function _searchGlobalMemory(category, embeddingArray, limit, active_proje
     const client = await pool.connect();
     try {
         const embeddingStr = `[${embeddingArray.join(',')}]`;
+
+        if (isPgContextEnabled()) {
+            try {
+                const filterConditions = [{ key: "category", match: category }];
+                if (active_project) {
+                    filterConditions.push({ key: "project", match: active_project });
+                }
+                const filterJson = JSON.stringify({ must: filterConditions });
+                
+                const res = await client.query(`
+                    WITH pgctx_matches AS (
+                        SELECT source_key::int as id, score as distance
+                        FROM pgcontext.search(
+                            'ide_agent_memory',
+                            $1::vector,
+                            $2,
+                            100
+                        )
+                    )
+                    SELECT 
+                        m.id, m.project, m.content, m.tags, m.created_at,
+                        (1 - p.distance) * exp(-$4::float * EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - m.created_at))/86400) as similarity
+                    FROM pgctx_matches p
+                    JOIN ide_agent_memory m ON m.id = p.id
+                    ORDER BY similarity DESC
+                    LIMIT $3
+                `, [embeddingStr, filterJson, limit, DECAY_RATE]);
+                return res.rows.map(r => ({ ...r, source: 'global' }));
+            } catch (pgctxErr) {
+                console.error('[memory-engine] pgContext search fallback to standard vector search:', pgctxErr.message);
+            }
+        }
+
         const queryParams = [embeddingStr, category, limit, DECAY_RATE];
         let projectFilter = 'AND project IS NULL';
         if (active_project) {

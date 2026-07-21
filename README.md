@@ -266,6 +266,7 @@ krusch-context-mcp/
 │   ├── v2-engine.js          # Company Brain v2 substrate
 │   ├── nuggets-engine.js     # Holographic Nuggets CRUD
 │   ├── sqlite-engine.js      # Lakebase SQLite layer (pull/push sync)
+│   ├── pgcontext-helper.js   # pgContext extension detection & HNSW index setup
 │   ├── proactive-engine.js   # Proactive trajectory auditor
 │   └── llm-tags.js           # Shared LLM tag generation
 ├── scripts/                  # Benchmarking, evaluation, and maintenance
@@ -314,6 +315,7 @@ This project is built upon and inspired by the following foundational research p
 - **Holographic Nuggets**: Lightweight key-value steering facts adapted from the original [NeoVertex Nuggets](https://github.com/NeoVertex1/nuggets) design.
 - **Lakebase Compute/Storage Decoupling**: Storage routing and local-first compute cache separation inspired by the [Neon Serverless Postgres Architecture](https://neon.tech/docs/introduction/architecture-overview).
 - **Tool Tracing & Optimization**: Automated optimization of agent execution paths powered by the [HALO RLM Engine](https://github.com/context-labs/halo).
+- **pgContext Vector Acceleration**: Native PostgreSQL 17 HNSW index access method and single-pass metadata filtering powered by [Evokoa pgContext](https://github.com/evokoa/pgContext).
 
 ### Research Papers & Algorithms
 - **Semantic Consolidation**: Centroid-based semantic memory compression without re-embedding based on the [Geometry of Consolidation repository](https://github.com/niashwin/geometry-of-consolidation).

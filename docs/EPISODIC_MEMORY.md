@@ -36,14 +36,14 @@ graph LR
    - Stored in `<project-root>/.agent/memory.db`.
    - Zero-latency reads and writes for project-specific operations.
    - Resilient to network disruptions and PostgreSQL latency spikes.
-2. **Object Storage (PostgreSQL):**
+2. **Object Storage (PostgreSQL + pgContext Acceleration):**
    - Stored in `kruschdb` inside the `ide_agent_memory` table.
    - Serves as the fleet-wide, durable persistent store.
-   - Allows cross-project searching and central backup.
+   - Accelerated via **[Evokoa pgContext](https://github.com/evokoa/pgContext)** (PostgreSQL 17 extension) when active, using page-native `pgcontext_hnsw` indexes and single-pass metadata filtering (`pgcontext.search`).
 
 ### Sync Pipeline (SQLite ↔ Postgres)
 - **Pull Sync (Postgres → SQLite):** Happens on the first tool access for a project. It pulls all episodic memories matching the project name from Postgres into the local SQLite database.
-- **Push Sync (SQLite → Postgres):** Whenever a memory is added/updated in the local SQLite cache, an async write-behind process pushes the changes to PostgreSQL.
+- **Push Sync (SQLite → Postgres):** Whenever a memory is added/updated in the local SQLite cache, an async write-behind process pushes the changes to PostgreSQL (and updates `pgcontext` point tracking).
 
 ---
 

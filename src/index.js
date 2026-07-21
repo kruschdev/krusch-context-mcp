@@ -24,14 +24,22 @@ import { writeState, resolveConflict, getProvenance, updateOntology, searchLens,
 import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
 import { handleThink } from './think-engine.js';
 import { handleProactiveNudge, handleNudgeFeedback, handleAnalyzeTrajectory } from './proactive-engine.js';
+import { writeSessionHandoff, readSessionReview } from './session-engine.js';
 import { getEmbedding } from './embedding-helper.js';
 import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
+import { detectPgContext, initPgContextCollections } from './pgcontext-helper.js';
 
 // Verify DB connection
 async function verifyDatabase() {
     try {
         await pool.query('SELECT 1');
+        
+        const hasPgContext = await detectPgContext(pool);
+        if (hasPgContext) {
+            console.error('[krusch-context-mcp] pgContext extension active. Initializing collections...');
+            await initPgContextCollections(pool);
+        }
         
         await pool.query(`
             CREATE TABLE IF NOT EXISTS ide_agent_memory (
@@ -577,6 +585,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["memory_id"]
         }
+      },
+      {
+        name: "krusch_context_write_session_handoff",
+        description: "Session Bridge (IDE ↔ Jean): Write the IDE session summary, calculate modified files, insert the DB record, and autonomously spawn the Jean SRE companion for review. Call this when executing /close.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project: { type: "string" },
+            summary: { type: "string" }
+          },
+          required: ["project", "summary"]
+        }
+      },
+      {
+        name: "krusch_context_read_session_review",
+        description: "Session Bridge (Jean ↔ IDE): Fetch the latest session review from the Jean SRE companion. This is guaranteed to be idempotent (it atomically marks the review as consumed). Call this when executing /continue.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project: { type: "string" }
+          },
+          required: ["project"]
+        }
       }
     ]
   };
@@ -863,6 +894,8 @@ const TOOL_HANDLERS = new Map([
   ['krusch_context_proactive_nudge', (args) => handleProactiveNudge(args)],
   ['krusch_context_nudge_feedback', (args) => handleNudgeFeedback(args)],
   ['krusch_context_analyze_trajectory', (args) => handleAnalyzeTrajectory(args)],
+  ['krusch_context_write_session_handoff', (args) => writeSessionHandoff(args)],
+  ['krusch_context_read_session_review',  (args) => readSessionReview(args)],
 ]);
 
 const tracer = trace.getTracer('krusch-context-mcp');

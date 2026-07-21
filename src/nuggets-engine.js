@@ -1,8 +1,8 @@
 import { pool } from 'pg-git-mcp/db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-
 import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
+import { isPgContextEnabled, syncPgContextPoints } from './pgcontext-helper.js';
 
 const VALID_KINDS = new Set(['project', 'user', 'agent']);
 
@@ -44,12 +44,16 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
 
     const client = await pool.connect();
     try {
-        await client.query(`
+        const res = await client.query(`
             INSERT INTO ide_agent_nuggets (key, value, kind, embedding)
             VALUES ($1, $2, $3, $4::vector)
             ON CONFLICT (key) DO UPDATE 
             SET value = EXCLUDED.value, kind = EXCLUDED.kind, embedding = EXCLUDED.embedding, updated_at = CURRENT_TIMESTAMP
+            RETURNING id
         `, [key, value, kind, embeddingStr]);
+        if (res.rows.length > 0) {
+            await syncPgContextPoints(pool, 'ide_agent_nuggets', [res.rows[0].id]);
+        }
     } finally {
         client.release();
     }

@@ -51,6 +51,7 @@ Project-scoped data follows a two-tier model:
 | `src/v2-engine.js` | Company Brain v2 substrate (write_state, resolve_conflict, provenance, ontology, lens, graph, link_blob) |
 | `src/nuggets-engine.js` | Holographic Nuggets CRUD (remember, nudges, forget, list) with hybrid SQLite/Postgres routing |
 | `src/sqlite-engine.js` | Lakebase SQLite layer — project DB init, pull/push sync, cosine similarity helper |
+| `src/pgcontext-helper.js` | pgContext extension detection, collection setup, HNSW index & point sync |
 | `src/llm-tags.js` | Shared LLM tag generation helper (used by memory-engine + v2-engine) |
 | `src/think-engine.js` | cited context synthesis, conflict detection, and gap analysis |
 | `src/skills-engine.js` | Agent skills loader and prompt registry engine |
