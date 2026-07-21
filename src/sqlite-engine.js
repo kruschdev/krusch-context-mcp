@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { pool } from 'pg-git-mcp/db/pool.js';
+import { syncPgContextPoints } from './pgcontext-helper.js';
 
 import { fileURLToPath } from 'url';
 
@@ -171,6 +172,7 @@ export async function pushProjectMemory(projectName, db) {
         
         // 1. Push unsynced episodic memories
         const unsyncedMems = db.prepare(`SELECT id, category, content, tags, embedding FROM ide_agent_memory WHERE pg_id IS NULL`).all();
+        const pushedMemIds = [];
         for (const mem of unsyncedMems) {
             // Reconstruct array string if necessary
             let embedStr = mem.embedding;
@@ -187,28 +189,39 @@ export async function pushProjectMemory(projectName, db) {
             );
             
             const newPgId = res.rows[0].id;
+            pushedMemIds.push(newPgId);
             db.prepare(`UPDATE ide_agent_memory SET pg_id = ? WHERE id = ?`).run(newPgId, mem.id);
         }
 
         // 2. Push unsynced nuggets
         const unsyncedNugs = db.prepare(`SELECT key, value, kind, embedding FROM ide_agent_nuggets WHERE pg_synced = 0`).all();
+        const pushedNugIds = [];
         for (const nug of unsyncedNugs) {
              let embedStr = nug.embedding;
              if (embedStr && !embedStr.startsWith('[')) {
                  embedStr = `[${embedStr}]`;
              }
              
-             await client.query(
+             const res = await client.query(
                  `INSERT INTO ide_agent_nuggets (project, key, value, kind, embedding)
                   VALUES ($1, $2, $3, $4, $5)
-                  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, embedding = EXCLUDED.embedding, updated_at = CURRENT_TIMESTAMP`,
+                  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, embedding = EXCLUDED.embedding, updated_at = CURRENT_TIMESTAMP
+                  RETURNING id`,
                  [projectName, nug.key, nug.value, nug.kind, embedStr]
              );
+             if (res.rows.length > 0) pushedNugIds.push(res.rows[0].id);
              
              db.prepare(`UPDATE ide_agent_nuggets SET pg_synced = 1 WHERE key = ?`).run(nug.key);
         }
         
         await client.query('COMMIT');
+
+        if (pushedMemIds.length > 0) {
+            await syncPgContextPoints(pool, 'ide_agent_memory', pushedMemIds);
+        }
+        if (pushedNugIds.length > 0) {
+            await syncPgContextPoints(pool, 'ide_agent_nuggets', pushedNugIds);
+        }
     } catch (e) {
         await client.query('ROLLBACK');
         console.error(`[sqlite-engine] Async push failed for ${projectName}:`, e);

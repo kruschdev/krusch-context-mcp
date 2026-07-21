@@ -83,24 +83,59 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project, _e
     const client = await pool.connect();
     try {
         const embeddingStr = `[${embeddingArray.join(',')}]`;
-        let sql = `
-            SELECT key, value, kind, created_at, (embedding <=> $1::vector) as distance, 'global' as source
-            FROM ide_agent_nuggets
-            WHERE embedding IS NOT NULL
-        `;
-        let params = [embeddingStr];
-        
-        if (kinds && kinds.length > 0) {
-            sql += ` AND kind = ANY($2)`;
-            params.push(kinds);
-        }
-        
-        // Fetch extra just in case we need to merge
-        sql += ` ORDER BY embedding <=> $1::vector LIMIT $${params.length + 1}`;
-        params.push(limit * 2);
+        const fetchLimit = limit * 2;
+        let pgContextHandled = false;
 
-        const res = await client.query(sql, params);
-        combinedResults.push(...res.rows);
+        if (isPgContextEnabled()) {
+            try {
+                const filterConditions = [];
+                if (kinds && kinds.length === 1) {
+                    filterConditions.push({ key: "kind", match: kinds[0] });
+                }
+                const filterJson = filterConditions.length > 0 ? JSON.stringify({ must: filterConditions }) : '{}';
+
+                const res = await client.query(`
+                    WITH pgctx_matches AS (
+                        SELECT source_key::int as id, score as distance
+                        FROM pgcontext.search(
+                            'ide_agent_nuggets',
+                            $1::vector,
+                            $2,
+                            $3
+                        )
+                    )
+                    SELECT n.key, n.value, n.kind, n.created_at, p.distance, 'global' as source
+                    FROM pgctx_matches p
+                    JOIN ide_agent_nuggets n ON n.id = p.id
+                    ORDER BY p.distance ASC
+                    LIMIT $3
+                `, [embeddingStr, filterJson, fetchLimit]);
+                combinedResults.push(...res.rows);
+                pgContextHandled = true;
+            } catch (pgctxErr) {
+                console.error('[nuggets-engine] pgContext search fallback to standard vector search:', pgctxErr.message);
+            }
+        }
+
+        if (!pgContextHandled) {
+            let sql = `
+                SELECT key, value, kind, created_at, (embedding <=> $1::vector) as distance, 'global' as source
+                FROM ide_agent_nuggets
+                WHERE embedding IS NOT NULL
+            `;
+            let params = [embeddingStr];
+            
+            if (kinds && kinds.length > 0) {
+                sql += ` AND kind = ANY($2)`;
+                params.push(kinds);
+            }
+            
+            sql += ` ORDER BY embedding <=> $1::vector LIMIT $${params.length + 1}`;
+            params.push(fetchLimit);
+
+            const res = await client.query(sql, params);
+            combinedResults.push(...res.rows);
+        }
     } finally {
         client.release();
     }

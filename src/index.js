@@ -28,7 +28,7 @@ import { writeSessionHandoff, readSessionReview } from './session-engine.js';
 import { getEmbedding } from './embedding-helper.js';
 import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
-import { detectPgContext, initPgContextCollections } from './pgcontext-helper.js';
+import { detectPgContext, initPgContextCollections, isPgContextEnabled } from './pgcontext-helper.js';
 
 // Verify DB connection
 async function verifyDatabase() {
@@ -814,7 +814,8 @@ async function handleHealthCheck() {
   const repoCount = repoCheck.rows[0].count;
   const nuggetCount = nuggetCheck.rows[0].count;
   const v2Count = v2Check.rows[0].count;
-  return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Company Brain states (v2): ${v2Count}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Database: kruschdb (pgvector)\n- Version: 1.2.0` }] };
+  const engineStatus = isPgContextEnabled() ? 'pgContext (HNSW + Single-Pass Filter)' : 'pgvector (Standard)';
+  return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Company Brain states (v2): ${v2Count}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Vector Engine: ${engineStatus}\n- Database: kruschdb\n- Version: 1.2.0` }] };
 }
 
 async function handleDocsList() {

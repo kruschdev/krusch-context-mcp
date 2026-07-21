@@ -102,12 +102,14 @@ async function _searchGlobalMemory(category, embeddingArray, limit, active_proje
 
         if (isPgContextEnabled()) {
             try {
-                const filterConditions = [{ key: "category", match: category }];
+                const filterJson = JSON.stringify({ must: [{ key: "category", match: category }] });
+                let projectFilter = 'WHERE m.project IS NULL';
+                const queryParams = [embeddingStr, filterJson, limit, DECAY_RATE];
                 if (active_project) {
-                    filterConditions.push({ key: "project", match: active_project });
+                    projectFilter = 'WHERE (m.project = $5 OR m.project IS NULL)';
+                    queryParams.push(active_project);
                 }
-                const filterJson = JSON.stringify({ must: filterConditions });
-                
+
                 const res = await client.query(`
                     WITH pgctx_matches AS (
                         SELECT source_key::int as id, score as distance
@@ -123,9 +125,10 @@ async function _searchGlobalMemory(category, embeddingArray, limit, active_proje
                         (1 - p.distance) * exp(-$4::float * EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - m.created_at))/86400) as similarity
                     FROM pgctx_matches p
                     JOIN ide_agent_memory m ON m.id = p.id
+                    ${projectFilter}
                     ORDER BY similarity DESC
                     LIMIT $3
-                `, [embeddingStr, filterJson, limit, DECAY_RATE]);
+                `, queryParams);
                 return res.rows.map(r => ({ ...r, source: 'global' }));
             } catch (pgctxErr) {
                 console.error('[memory-engine] pgContext search fallback to standard vector search:', pgctxErr.message);
