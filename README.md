@@ -115,6 +115,7 @@ graph TD;
 ### Key Design Decisions
 
 - **Lakebase Architecture** — Local SQLite for zero-latency reads, async write-behind to durable PostgreSQL. A `+0.3` local scoring bias mitigates Ebbinghaus forgetting as the global corpus grows. *Inspired by [Neon](https://neon.com/docs/introduction/architecture-overview).*
+- **pgContext Vector Engine** — Native PostgreSQL 17 page-native HNSW index access method (`pgcontext_hnsw`) with single-pass JSON metadata filtering and exact MVCC/RLS re-checking, preventing vector recall collapse under selective filters. *Inspired by [Evokoa pgContext](https://github.com/evokoa/pgContext).*
 - **Hybrid Retrieval** — Auto-tagged via `llama3.2` to address pure-cosine failure modes (negation, numeric, role-swap). *Per [Sentra](https://sentra.app).*
 - **Consolidation** — Semantic dedup via L2-normalized centroid averaging without re-embedding. *From [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation).*
 - **Holographic Nuggets** — Lightweight steering facts adapted from [NeoVertex1/nuggets](https://github.com/NeoVertex1/nuggets).

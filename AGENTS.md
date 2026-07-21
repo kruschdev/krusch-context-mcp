@@ -12,8 +12,9 @@ This project is a single MCP server (stdio transport) that unifies three subsyst
 2. **Holographic Nuggets** — Lightweight key-value steering facts (preferences, conventions, corrections) with semantic retrieval
 3. **Codebase Search** — Semantic search over all indexed source files via the sibling `pg-git` project
 4. **Proactive Auditor (Memory Agent Loop)** — Background trajectory auditor that verifies actions against past rules and updates weights based on developer feedback loops (Direct-OPD/PUST)
+5. **pgContext Vector Acceleration** — Optional native PostgreSQL 17 engine extension providing page-native HNSW indexes (`pgcontext_hnsw`) and single-pass JSON metadata filtering with exact MVCC/RLS re-checking.
 
-All four share a single `pg.Pool` connection to `kruschdb` and a single fleet-balanced Ollama embedding pipeline.
+All five share a single `pg.Pool` connection to `kruschdb` and a single fleet-balanced Ollama embedding pipeline.
 
 ### Lakebase Architecture (Compute/Storage Decoupling)
 
