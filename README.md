@@ -22,13 +22,18 @@ Every time you start a new AI coding session, your agent starts from zero. It do
 
 ## What It Does
 
-A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **32 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
+A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **42 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
 
 | Capability | What It Provides |
 |-----------|-----------------|
+| ⚡ **Unified Hybrid Retrieval** | Polygres-inspired single-call retrieval combining vector search, multi-hop graph walks (`graph_hops`), server-side token packing (`limit_tokens`), and optional **Rubric4Setwise** minimal cover reranking. |
 | 🔍 **Semantic Codebase Search** | Search the *meaning* of your code, not just filenames. "How do we handle auth?" returns the actual implementation. |
 | 🧠 **Episodic Memory** | Bugs, decisions, and lessons persist across sessions, retrieved by semantic relevance with temporal decay. See [Episodic Memory Guide](docs/EPISODIC_MEMORY.md). |
 | 💎 **Steering Nudges** | Lightweight key-value facts (preferences, conventions) give the agent behavioral continuity without re-prompting. |
+| 🐞 **AgentDebugX Error Hub** | Failure observability, trajectory root-cause attribution, and execution recovery pattern retrieval for SRE queue healing. |
+| ⚙️ **DataFlow-Harness Grounded Codegen** | Grounded MCP operator registry and schema-validated pipeline DAG mutations (`AddNode`, `WireEdge`, `UpdateNodeConfig`). |
+| 📊 **Rubric4Setwise Reranking** | Document-set selection evaluating Redundancy, Conflict, and Complementarity rubrics to filter candidate sets down to minimal covering sets. |
+| 🔬 **AREX Deep Research Engine** | Recursively self-improving inner research evidence tracking paired with outer self-improvement constraint audits. |
 | 📖 **Documentation Search** | Ingested external docs are searchable locally — your agent references *your* versions, not its training data. |
 | 🛡️ **Proactive Auditor (Memory Agent)** | Trajectory auditing that learns from feedback (Direct-OPD) to verify trajectories and log alignment signals. |
 | 🌍 **Zero-Trust Deep Search** | One tool call cross-references codebase reality with historical memory to verify understanding before acting. |
@@ -266,6 +271,11 @@ krusch-context-mcp/
 │   ├── memory-engine.js      # Episodic memory CRUD + consolidation
 │   ├── v2-engine.js          # Company Brain v2 substrate
 │   ├── nuggets-engine.js     # Holographic Nuggets CRUD
+│   ├── unified-retrieval.js  # Unified Hybrid Retrieval engine
+│   ├── agentdebugx-engine.js # AgentDebugX Error Hub & failure observability
+│   ├── dataflow-engine.js    # DataFlow-Harness grounded pipeline registry & DAG mutations
+│   ├── setwise-engine.js     # Rubric4Setwise minimal cover document-set selection
+│   ├── arex-engine.js        # AREX deep research state engine & constraint audit
 │   ├── sqlite-engine.js      # Lakebase SQLite layer (pull/push sync)
 │   ├── pgcontext-helper.js   # pgContext extension detection & HNSW index setup
 │   ├── proactive-engine.js   # Proactive trajectory auditor
@@ -273,7 +283,7 @@ krusch-context-mcp/
 ├── scripts/                  # Benchmarking, evaluation, and maintenance
 ├── tests/                    # *.test.js = automated, test_*.js = smoke
 ├── docs/
-│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 32 tools
+│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 42 tools
 │   ├── SETUP.md              # Configuration, storage routing, troubleshooting
 │   └── research/             # Sentra Company Brain research essays
 └── package.json
@@ -286,7 +296,8 @@ krusch-context-mcp/
 ```bash
 npm test                                # Automated (node:test, *.test.js)
 npm run test:smoke                      # JSON-RPC stdio smoke tests
-node tests/test_client.js               # All 32 tools against live DB
+node tests/test_client.js               # All 42 tools against live DB
+node tests/test_ai_watch_integrations.js # AI Watch paper integration suite
 node scripts/benchmark_latency.js       # End-to-end latency
 node scripts/eval_accuracy.js           # Precision/recall
 ```
@@ -319,6 +330,10 @@ This project is built upon and inspired by the following foundational research p
 - **pgContext Vector Acceleration**: Native PostgreSQL 17 HNSW index access method and single-pass metadata filtering powered by [Evokoa pgContext](https://github.com/evokoa/pgContext).
 
 ### Research Papers & Algorithms
+- **AgentDebugX (Failure Observability & Error Hub)**: Open-source toolkit for failure observability, trajectory root-cause attribution, and recovery patch bundles based on Wang et al., [AgentDebugX: An Open-Source Toolkit for Failure Observability, Attribution, and Recovery in LLM Agents](https://huggingface.co/papers/2607.18754) (ArXiv: 2607.18754).
+- **DataFlow-Harness (Grounded Code-Agent Platform)**: Grounded MCP operator registry and typed, schema-validated DAG mutations based on Zhang et al., [DataFlow-Harness: A Grounded Code-Agent Platform for Constructing Editable LLM Data Pipelines](https://huggingface.co/papers/2607.16617) (ArXiv: 2607.16617).
+- **Rubric4Setwise (Beyond Relevance-Centered Retrieval)**: Rubric-oriented document-set selection evaluating Redundancy, Conflict, and Complementarity into minimal covering sets based on Liu et al., [Beyond Relevance-Centered Retrieval: Rubric-Oriented Document-Set Selection and Ranking](https://huggingface.co/papers/2607.19238) (ArXiv: 2607.19238).
+- **AREX (Recursively Self-Improving Deep Research)**: Inner research evidence state paired with outer self-improvement constraint audits based on Lu et al., [AREX: Towards a Recursively Self-Improving Agent for Deep Research](https://huggingface.co/papers/2607.21461) (ArXiv: 2607.21461).
 - **Semantic Consolidation**: Centroid-based semantic memory compression without re-embedding based on the [Geometry of Consolidation repository](https://github.com/niashwin/geometry-of-consolidation).
 - **Proactive Memory Agent**: Long-horizon execution warnings and memory-guided auditing based on Wu et al., [Remember When It Matters: Proactive Memory Agent for Long-Horizon Agents](https://arxiv.org/abs/2607.08716) (ArXiv: 2607.08716).
 - **Direct On-Policy Distillation (Direct-OPD)**: Weak-to-strong feedback distillation for proactive context rules based on Feng et al., [Weak-to-Strong Generalization via Direct On-Policy Distillation](https://arxiv.org/abs/2607.05394) (ArXiv: 2607.05394).

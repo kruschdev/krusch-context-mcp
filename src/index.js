@@ -29,6 +29,11 @@ import { getEmbedding } from './embedding-helper.js';
 import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
 import { detectPgContext, initPgContextCollections, isPgContextEnabled } from './pgcontext-helper.js';
+import { unifiedRetrieve } from './unified-retrieval.js';
+import { initAgentDebugXTable, logAgentFailure, searchFailures, getRecoveryPattern } from './agentdebugx-engine.js';
+import { initDataFlowTables, registerOperator, inspectOperatorRegistry, mutatePipelineDag } from './dataflow-engine.js';
+import { setwiseRerank } from './setwise-engine.js';
+import { initArexTable, updateResearchState, auditResearchConstraints } from './arex-engine.js';
 
 // Verify DB connection
 async function verifyDatabase() {
@@ -161,6 +166,11 @@ async function verifyDatabase() {
             )
         `);
 
+        // Initialize AI Watch research integration tables
+        await initAgentDebugXTable();
+        await initDataFlowTables();
+        await initArexTable();
+
         console.error('[krusch-context-mcp] Database connection verified via pg-git pool. Migrations completed.');
     } catch (err) {
         console.error('[krusch-context-mcp] FATAL: Cannot reach PostgreSQL:', err.message);
@@ -173,6 +183,21 @@ const server = new Server({ name: "krusch-context-mcp", version: "1.2.0" }, { ca
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
+      {
+        name: "krusch_context_retrieve",
+        description: "Polygres-inspired unified context retrieval tool. Combines HNSW vector search, multi-hop graph walks, and server-side token budget packing into a single context payload.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            project: { type: "string" },
+            graph_hops: { type: "number", default: 1 },
+            limit_tokens: { type: "number", default: 4000 },
+            include_code: { type: "boolean", default: true }
+          },
+          required: ["query"]
+        }
+      },
       {
         name: "krusch_context_add_memory",
         description: "Add a new fact or memory to the persistent IDE database. Use this strictly to document bugs, priorities, lessons, or project outcomes.",
@@ -608,6 +633,127 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["project"]
         }
+      },
+      // AgentDebugX Tools
+      {
+        name: "krusch_context_log_agent_failure",
+        description: "AgentDebugX Error Hub: Log an agent execution failure trajectory, attributed root cause, and recovery patch bundle.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agent_name: { type: "string" },
+            error_symptom: { type: "string" },
+            trajectory: { type: "array", description: "Array of trajectory step objects" },
+            root_cause: { type: "string" },
+            recovery_patch: { type: "object", description: "Recovery patch or parameter modifications" }
+          },
+          required: ["agent_name", "error_symptom", "root_cause"]
+        }
+      },
+      {
+        name: "krusch_context_search_failures",
+        description: "AgentDebugX Error Hub: Search for past agent failure bundles matching an error symptom or query.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            agent_name: { type: "string" },
+            limit: { type: "number", default: 5 }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "krusch_context_get_recovery_pattern",
+        description: "AgentDebugX Error Hub: Get execution recovery pattern and patch for a failure bundle ID.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            failure_id: { type: "number" }
+          },
+          required: ["failure_id"]
+        }
+      },
+      // DataFlow-Harness Tools
+      {
+        name: "krusch_context_register_pipeline_operator",
+        description: "DataFlow-Harness: Register a grounded dataflow/ingestion operator with strict input, output, and side-effect schemas.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            input_schema: { type: "object" },
+            output_schema: { type: "object" },
+            side_effects: { type: "string" },
+            docs: { type: "string" }
+          },
+          required: ["name", "input_schema", "output_schema"]
+        }
+      },
+      {
+        name: "krusch_context_inspect_pipeline_registry",
+        description: "DataFlow-Harness: Inspect active grounded operator schemas in the MCP registry.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            filter: { type: "string" }
+          }
+        }
+      },
+      {
+        name: "krusch_context_mutate_pipeline_dag",
+        description: "DataFlow-Harness: Mutate a pipeline DAG using grounded, typed operations (AddNode, RemoveNode, WireEdge, UpdateNodeConfig).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pipeline_name: { type: "string" },
+            mutation_type: { type: "string", enum: ["AddNode", "RemoveNode", "WireEdge", "UpdateNodeConfig"] },
+            node_data: { type: "object" },
+            edge_data: { type: "object" }
+          },
+          required: ["pipeline_name", "mutation_type"]
+        }
+      },
+      // Rubric4Setwise Tool
+      {
+        name: "krusch_context_setwise_rerank",
+        description: "Rubric4Setwise: Rerank candidate document/memory sets against Redundancy, Conflict, and Complementarity rubrics into a minimal covering set.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            candidates: { type: "array", description: "Array of candidate document/memory objects" },
+            query: { type: "string" },
+            target_count: { type: "number", default: 5 }
+          },
+          required: ["candidates", "query"]
+        }
+      },
+      // AREX Deep Research Tools
+      {
+        name: "krusch_context_update_research_state",
+        description: "AREX Deep Research: Update or create research state maintaining verified evidence and unresolved constraints.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            task_id: { type: "string" },
+            verified_evidence: { type: "array" },
+            unresolved_constraints: { type: "array" },
+            next_action_hints: { type: "array" }
+          },
+          required: ["task_id"]
+        }
+      },
+      {
+        name: "krusch_context_arex_audit",
+        description: "AREX Deep Research: Audit research evidence and unresolved constraints for a task to produce self-improving next follow-up steps.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            task_id: { type: "string" },
+            candidate_response: { type: "string" }
+          },
+          required: ["task_id"]
+        }
       }
     ]
   };
@@ -858,6 +1004,8 @@ async function handleDocsSearch(args) {
 
 // --- Dispatch table: tool name → handler function ---
 const TOOL_HANDLERS = new Map([
+  // Polygres-inspired Unified Context Retrieval
+  ['krusch_context_retrieve',       (args) => unifiedRetrieve(args)],
   // Memory engine (v1)
   ['krusch_context_add_memory',     (args) => addMemory(args)],
   ['krusch_context_search_memory',  (args) => searchMemory(args)],
@@ -897,6 +1045,19 @@ const TOOL_HANDLERS = new Map([
   ['krusch_context_analyze_trajectory', (args) => handleAnalyzeTrajectory(args)],
   ['krusch_context_write_session_handoff', (args) => writeSessionHandoff(args)],
   ['krusch_context_read_session_review',  (args) => readSessionReview(args)],
+  // AgentDebugX
+  ['krusch_context_log_agent_failure',     (args) => logAgentFailure(args)],
+  ['krusch_context_search_failures',        (args) => searchFailures(args)],
+  ['krusch_context_get_recovery_pattern',   (args) => getRecoveryPattern(args)],
+  // DataFlow-Harness
+  ['krusch_context_register_pipeline_operator', (args) => registerOperator(args)],
+  ['krusch_context_inspect_pipeline_registry',  (args) => inspectOperatorRegistry(args)],
+  ['krusch_context_mutate_pipeline_dag',       (args) => mutatePipelineDag(args)],
+  // Rubric4Setwise
+  ['krusch_context_setwise_rerank',         (args) => setwiseRerank(args)],
+  // AREX
+  ['krusch_context_update_research_state',  (args) => updateResearchState(args)],
+  ['krusch_context_arex_audit',             (args) => auditResearchConstraints(args)],
 ]);
 
 const tracer = trace.getTracer('krusch-context-mcp');

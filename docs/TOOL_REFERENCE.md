@@ -617,3 +617,115 @@ Semantically search a specific external manual by name.
 Verify that the server is alive, connected to the database, and functioning. No parameters required.
 
 Returns memory count, nugget count, repo count, DB status, and version.
+
+---
+
+## 🔬 AI Watch Core Research Integration Tools
+
+### `krusch_context_log_agent_failure`
+
+**AgentDebugX Error Hub**: Log an agent execution failure trajectory, attributed root cause, and recovery patch bundle.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `agent_name` | `string` | ✅ | — | Name of the failing agent (e.g. `jean-sre`, `chrys-worker`) |
+| `error_symptom` | `string` | ✅ | — | High-level failure symptom description |
+| `trajectory` | `object[]` | ❌ | `[]` | Recorded step-by-step agent trajectory objects |
+| `root_cause` | `string` | ✅ | — | Attributed root cause of the execution failure |
+| `recovery_patch` | `object` | ❌ | `{}` | JSON patch or parameter modifications for rerun recovery |
+
+---
+
+### `krusch_context_search_failures`
+
+**AgentDebugX Error Hub**: Search the Error Hub for past agent failure bundles matching a symptom or query.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | `string` | ✅ | — | Natural language search query or error symptom |
+| `agent_name` | `string` | ❌ | `null` | Optional agent name filter |
+| `limit` | `number` | ❌ | `5` | Maximum failure bundles to return |
+
+---
+
+### `krusch_context_get_recovery_pattern`
+
+**AgentDebugX Error Hub**: Retrieve specific execution recovery pattern and patch instructions for a failure bundle ID.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `failure_id` | `number` | ✅ | — | Failure bundle ID in Error Hub |
+
+---
+
+### `krusch_context_register_pipeline_operator`
+
+**DataFlow-Harness Grounded Codegen**: Register a grounded dataflow/ingestion operator with strict input, output, and side-effect schemas.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | ✅ | — | Unique operator name (e.g., `ExtractLegalStatutes`) |
+| `input_schema` | `object` | ✅ | — | JSON schema defining operator input arguments |
+| `output_schema` | `object` | ✅ | — | JSON schema defining operator return outputs |
+| `side_effects` | `string` | ❌ | `'none'` | Side effects description (`none`, `db_write`, `fs_write`) |
+| `docs` | `string` | ❌ | `''` | Usage documentation for code-agents |
+
+---
+
+### `krusch_context_inspect_pipeline_registry`
+
+**DataFlow-Harness Grounded Codegen**: Inspect active grounded operator schemas in the MCP registry.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `filter` | `string` | ❌ | `null` | Optional keyword filter |
+
+---
+
+### `krusch_context_mutate_pipeline_dag`
+
+**DataFlow-Harness Grounded Codegen**: Mutate a pipeline DAG using grounded, typed operations (`AddNode`, `RemoveNode`, `WireEdge`, `UpdateNodeConfig`).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `pipeline_name` | `string` | ✅ | — | Name of target pipeline DAG |
+| `mutation_type` | `string` | ✅ | — | Mutation type: `AddNode`, `RemoveNode`, `WireEdge`, `UpdateNodeConfig` |
+| `node_data` | `object` | ❌ | `null` | Target node object (`{ id, operator_name, config }`) |
+| `edge_data` | `object` | ❌ | `null` | Target edge object (`{ from, to, mapping }`) |
+
+---
+
+### `krusch_context_setwise_rerank`
+
+**Rubric4Setwise Reranking**: Rerank candidate document/memory sets against Redundancy, Conflict, and Complementarity rubrics to return a minimal covering set.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `candidates` | `object[]` | ✅ | — | Array of candidate document/memory objects |
+| `query` | `string` | ✅ | — | Original query string |
+| `target_count` | `number` | ❌ | `5` | Maximum minimal covering set items to return |
+
+---
+
+### `krusch_context_update_research_state`
+
+**AREX Deep Research**: Update or create an AREX research state maintaining verified evidence and unresolved constraints.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `task_id` | `string` | ✅ | — | Unique research task ID |
+| `verified_evidence` | `array` | ❌ | `[]` | List of verified evidence statements/claims |
+| `unresolved_constraints` | `array` | ❌ | `[]` | List of open/unverified research constraints |
+| `next_action_hints` | `array` | ❌ | `[]` | List of suggested follow-up research actions |
+
+---
+
+### `krusch_context_arex_audit`
+
+**AREX Deep Research**: Audit research evidence and unresolved constraints for a task to produce self-improving next follow-up steps.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `task_id` | `string` | ✅ | — | Research task ID to audit |
+| `candidate_response` | `string` | ❌ | `''` | Optional candidate response to verify |
+
