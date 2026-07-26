@@ -20,38 +20,7 @@ By pairing **[Polygres.com](https://polygres.com)** (Evokoa's AI-native PostgreS
 
 ## 🏗️ The 100% Cloud Stack Architecture
 
-```text
-┌──────────────────────────────────────────────────────────┐
-│             Client IDE (Cursor / Claude / Windsurf)       │
-└────────────────────────────┬─────────────────────────────┘
-                             │ (MCP Tool Execution)
-                             ▼
-┌──────────────────────────────────────────────────────────┐
-│                   krusch-context-mcp                     │
-└──────────────┬────────────────────────────┬──────────────┘
-               │ (1) Text Query             │ (3) HNSW Vector +
-               ▼                            │     pgGraph Walk
-┌─────────────────────────────┐  ┌──────────▼───────────────┐
-│     OpenRouter.ai API       │  │      Polygres.com        │
-│  (baai/bge-large-en-v1.5)   │  │  (Managed PostgreSQL)    │
-└──────────────┬──────────────┘  └──────────┬───────────────┘
-               │ (2) 1024-dim Vector        │ (4) Context Block
-               └────────────────────────────┘
-```
-
-```mermaid
-graph TD;
-    SubGraph1[Client IDE / Coding Agent] -->|MCP Tool Call| MCP[krusch-context-mcp Server];
-    
-    subgraph "100% Cloud Infrastructure"
-        MCP -->|Text Query| OR[OpenRouter.ai Embeddings API];
-        OR -->|1024-dim bge-large Vector| MCP;
-        MCP -->|HNSW ANN + pgGraph Traversal| PG[(Polygres.com Cloud DB)];
-        PG -->|Packed Context Block| MCP;
-    end
-    
-    MCP -->|Formatted RAG Context| SubGraph1;
-```
+![100% Cloud-Native AI Memory Architecture](/home/krusch/homelab/projects/krusch-context-mcp/docs/assets/cloud_architecture_diagram.png)
 
 ### 1. Storage & Graph-Vector Engine: [Polygres.com](https://polygres.com)
 * **What it is**: "Postgres for the Agent Era" by Evokoa — a managed PostgreSQL platform fusing relational tables, `pgGraph` multi-hop relationship walks, and `pgContext` page-native HNSW vector indexes.
