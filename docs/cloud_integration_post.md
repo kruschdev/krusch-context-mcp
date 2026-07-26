@@ -18,6 +18,25 @@ By pairing **[Polygres.com](https://polygres.com)** (Evokoa's AI-native PostgreS
 
 ## 🏗️ The 100% Cloud Stack Architecture
 
+```text
+┌──────────────────────────────────────────────────────────┐
+│             Client IDE (Cursor / Claude / Windsurf)       │
+└────────────────────────────┬─────────────────────────────┘
+                             │ (MCP Tool Execution)
+                             ▼
+┌──────────────────────────────────────────────────────────┐
+│                   krusch-context-mcp                     │
+└──────────────┬────────────────────────────┬──────────────┘
+               │ (1) Text Query             │ (3) HNSW Vector +
+               ▼                            │     pgGraph Walk
+┌─────────────────────────────┐  ┌──────────▼───────────────┐
+│     OpenRouter.ai API       │  │      Polygres.com        │
+│  (baai/bge-large-en-v1.5)   │  │  (Managed PostgreSQL)    │
+└──────────────┬──────────────┘  └──────────┬───────────────┘
+               │ (2) 1024-dim Vector        │ (4) Context Block
+               └────────────────────────────┘
+```
+
 ```mermaid
 graph TD;
     SubGraph1[Client IDE / Coding Agent] -->|MCP Tool Call| MCP[krusch-context-mcp Server];
@@ -38,7 +57,7 @@ graph TD;
 * **Feature Highlights**:
   * **Single-Pass Metadata Filtering**: Prevents vector recall collapse under selective category/project filters.
   * **Multi-Hop Graph Walks (`graph_hops`)**: Dynamically traverses relationships (e.g., `Memory -> Referenced Git Blob -> Related Test Suite`).
-  * **Token Budget Management (`limit_tokens`)**: Server-side token truncation prevents context window overflow.
+  * **Token Budget Packing (`limit_tokens`)**: Server-side token truncation prevents context window overflow.
 
 ### 2. Cloud Embeddings: [OpenRouter.ai](https://openrouter.ai)
 * **Model**: `baai/bge-large-en-v1.5` (1024-dimensional dense vectors).
@@ -68,14 +87,14 @@ Switching an agent to the 100% cloud stack requires just a few environment varia
 # --- Polygres.com Cloud Database & Runtime API ---
 POLYGRES_PROJECT_ID="p4b2ef196c33edbd8be43174"
 POLYGRES_RUNTIME_URL="https://p4b2ef196c33edbd8be43174.api.db.polygres.com/v1"
-POLYGRES_API_KEY="poly_live_5c4a37a1c7c3c3b880fb4aa6e5b5941e"
+POLYGRES_API_KEY="poly_live_YOUR_POLYGRES_API_KEY"
 
 # Direct Native PostgreSQL Connection
-DATABASE_URL="postgresql://krusch:password@app.polygres.com:5432/kruschdb?sslmode=require"
+DATABASE_URL="postgresql://username:password@app.polygres.com:5432/kruschdb?sslmode=require"
 
 # --- OpenRouter Cloud Embeddings (baai/bge-large-en-v1.5) ---
 EMBEDDING_URL="https://openrouter.ai/api/v1/embeddings"
-EMBEDDING_API_KEY="sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+EMBEDDING_API_KEY="sk-or-v1-YOUR_OPENROUTER_API_KEY"
 EMBED_MODEL="baai/bge-large-en-v1.5"
 ```
 
