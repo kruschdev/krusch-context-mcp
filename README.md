@@ -307,16 +307,18 @@ node scripts/eval_accuracy.js           # Precision/recall
 
 ---
 
-## Related Projects
+## Related Projects & Infrastructure
 
-| Project | Role |
-|---------|------|
+| Project / Service | Role |
+|-------------------|------|
 | [PG-Git-MCP](https://github.com/kruschdev/pg-git-mcp) | Semantic codebase search engine (sibling dependency) |
+| [Polygres.com](https://polygres.com) | AI-native PostgreSQL cloud platform by Evokoa (`pgContext` & `pgGraph` native) |
+| [OpenRouter.ai](https://openrouter.ai) | Unified cloud LLM & embedding API (`baai/bge-large-en-v1.5`) |
+| [AgentDebugX](https://github.com/AgentDebugX/AgentDebugX) | Open-source failure observability, attribution, and recovery toolkit |
 | [Krusch Memory MCP](https://github.com/kruschdev/krusch-memory-mcp) | Legacy standalone memory (superseded) |
 | [Krusch Sequential MCP](https://github.com/kruschdev/krusch-sequential-mcp) | Sequential thinking with PG persistence |
 | [Krusch Cascade Router](https://github.com/kruschdev/krusch-cascade-router) | Automated LLM inference routing |
 | [NeoVertex Nuggets](https://github.com/NeoVertex1/nuggets) | Original Holographic Nuggets architecture |
-| [AgentDebugX](https://github.com/AgentDebugX/AgentDebugX) | Open-source failure observability, attribution, and recovery toolkit |
 
 ---
 
@@ -324,7 +326,9 @@ node scripts/eval_accuracy.js           # Precision/recall
 
 This project is built upon and inspired by the following foundational research papers, architectural frameworks, and open-source projects:
 
-### Architectural Foundations
+### Architectural Foundations & Cloud Services
+- **Polygres AI-Native Database**: Postgres for the Agent Era by Evokoa combining relational, graph, and vector capabilities ([Polygres.com](https://polygres.com)).
+- **OpenRouter Embeddings Engine**: Unified cloud embeddings API for `baai/bge-large-en-v1.5` vector generation ([OpenRouter.ai](https://openrouter.ai)).
 - **Company Brain Substrate (v2)**: Core concept and multi-layered organizational memory model inspired by the [Sentra "Company Brain" Essay Series](https://sentra.app).
 - **Holographic Nuggets**: Lightweight key-value steering facts adapted from the original [NeoVertex Nuggets](https://github.com/NeoVertex1/nuggets) design.
 - **AgentDebugX Error Hub**: Failure observability, trajectory root-cause attribution, and Error Hub recovery patch bundles powered by [AgentDebugX](https://github.com/AgentDebugX/AgentDebugX).
