@@ -9,6 +9,7 @@
     "test": "node --test tests/*.test.js",
     "test:smoke": "node --env-file=.env tests/test_client.js && node --env-file=.env tests/test_v2_memory.js && node --env-file=.env tests/test_v2_lens_graph.js && node --env-file=.env tests/test_v2_action_memory.js && node --env-file=.env tests/test_proactive.js && node --env-file=.env tests/test_ai_watch_integrations.js",
     "test:aiwatch": "node --env-file=.env tests/test_ai_watch_integrations.js",
+    "test:cloud": "node --env-file=.env tests/test_cloud_integration.js",
     "bench:memory": "node --env-file=.env scripts/benchmark_memory_eval.js",
     "export:polygres": "node scripts/export_to_polygres.js",
     "install-hook": "node scripts/install_git_hook.js"
