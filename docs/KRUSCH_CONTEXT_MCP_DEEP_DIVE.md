@@ -24,23 +24,7 @@ Most memory integrations for AI coding agents fall into two extreme traps:
 
 ## 🌟 What Makes `krusch-context-mcp` Special? (5 Key Innovations)
 
-```mermaid
-graph TD;
-    Agent[IDE Coding Agent / Cursor / Claude Code] -->|MCP Tool Execution| MCP[krusch-context-mcp Engine];
-    
-    subgraph "5 Unified Memory Subsystems"
-        MCP --> Engine1[1. Episodic Memory + Temporal Recency Decay];
-        MCP --> Engine2[2. Holographic Steering Nuggets];
-        MCP --> Engine3[3. Company Brain v2 Consensus Substrate];
-        MCP --> Engine4[4. Codebase & Docs Hybrid Search];
-        MCP --> Engine5[5. AI Watch Research Engines];
-    end
-    
-    subgraph "Lakebase Compute & Storage Architecture"
-        Engine1 & Engine2 & Engine3 & Engine4 & Engine5 -->|Zero-Latency Read| LocalDB[(Local Project SQLite Cache)];
-        LocalDB -->|Async Write-Behind Sync| CloudPG[(Polygres.com Cloud PostgreSQL)];
-    end
-```
+![5 Unified Memory Subsystems Architecture](/home/krusch/homelab/projects/krusch-context-mcp/docs/assets/krusch_context_mcp_5_subsystems_diagram.png)
 
 ### 1. Mathematical Temporal Recency Decay
 Memories aren't static. In real-world software engineering, code bases evolve rapidly. `krusch-context-mcp` weights semantic similarity against temporal age:
