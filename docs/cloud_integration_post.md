@@ -4,6 +4,8 @@
 > **Date**: July 26, 2026  
 > **Tags**: `#AI` `#MCP` `#PostgreSQL` `#Polygres` `#OpenRouter` `#DeveloperTools` `#AgenticRAG`
 
+![AI Cloud Database & Working Memory Architecture](/home/krusch/homelab/projects/krusch-context-mcp/docs/assets/cloud_database_header.png)
+
 ---
 
 ## 💡 Overview
