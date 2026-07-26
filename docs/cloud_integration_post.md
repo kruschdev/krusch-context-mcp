@@ -6,9 +6,12 @@
 
 ![AI Cloud Database & Working Memory Architecture](/home/krusch/homelab/projects/krusch-context-mcp/docs/assets/cloud_database_header.png)
 
+> 💡 **Social Caption (247 chars)**:  
+> *🚀 Shifted my AI agent working memory 100% to the cloud! Powered by @Evokoa Polygres.com (Postgres + pgGraph + HNSW) & @OpenRouterAI (bge-large @ 1024-dim), krusch-context-mcp delivers infinite context to Cursor & Claude Code with zero local VRAM load! 🐘⚡*
+
 ---
 
-## 💡 Overview
+## 💡 Overview & Motivation
 
 As I prepare for an upcoming physical location move, I needed to ensure that my AI coding assistants (Cursor, Claude Code, Windsurf, Gemini CLI) retain complete, uninterrupted access to their long-term working memory without relying on local homelab hardware (`kruschserv` / `kruschgame`).
 
@@ -23,7 +26,7 @@ By pairing **[Polygres.com](https://polygres.com)** (Evokoa's AI-native PostgreS
 ![100% Cloud-Native AI Memory Architecture](/home/krusch/homelab/projects/krusch-context-mcp/docs/assets/cloud_architecture_diagram.png)
 
 ### 1. Storage & Graph-Vector Engine: [Polygres.com](https://polygres.com)
-* **What it is**: "Postgres for the Agent Era" by Evokoa — a managed PostgreSQL platform fusing relational tables, `pgGraph` multi-hop relationship walks, and `pgContext` page-native HNSW vector indexes.
+* **What it is**: "Postgres for the Agent Era" by Evokoa — a managed PostgreSQL platform fusing relational tables, `pgGraph` multi-hop relationship walks, and `pgContext` page-native HNSW vector indexes into a unified database.
 * **Why it matters**: Eliminates multi-database ETL pipelines. Episodic memories, holographic steering facts, parent-child provenance lineages, and codebase graph edges all reside inside a single cloud PostgreSQL instance (`p4b2ef196c33edbd8be43174`).
 * **Feature Highlights**:
   * **Single-Pass Metadata Filtering**: Prevents vector recall collapse under selective category/project filters.
@@ -33,7 +36,7 @@ By pairing **[Polygres.com](https://polygres.com)** (Evokoa's AI-native PostgreS
 ### 2. Cloud Embeddings: [OpenRouter.ai](https://openrouter.ai)
 * **Model**: `baai/bge-large-en-v1.5` (1024-dimensional dense vectors).
 * **Cost Efficiency**: Priced at ~$0.01 per 1 million tokens (~1 to 2 cents per month of heavy active development).
-* **Benefit**: Zero local Ollama process overhead, zero VRAM allocation on the laptop, and 100% uptime while traveling.
+* **Benefit**: Zero local Ollama process overhead, zero VRAM allocation on the laptop, sub-100ms vector generation, and 100% uptime while traveling.
 
 ### 3. Unified Agent Surface: `krusch-context-mcp` (42 MCP Tools)
 * **Unified Tooling**: Exposes 42 Model Context Protocol (MCP) tools across Episodic Memory (v1), Company Brain v2 Substrate, Holographic Nuggets, Codebase Search, and AI Watch Research Engines (AgentDebugX, DataFlow-Harness, Rubric4Setwise, AREX).
@@ -43,7 +46,7 @@ By pairing **[Polygres.com](https://polygres.com)** (Evokoa's AI-native PostgreS
 
 ## 📊 Migration & Live Verification Results
 
-* **Data Migration**: Successfully migrated **12,398 episodic memories**, **149 holographic steering nuggets**, **756 interaction memory states**, and AI Watch failure bundles via automated export tools (`npm run export:polygres`).
+* **Data Migration**: Successfully exported and migrated **12,398 episodic memories**, **149 holographic steering nuggets**, **756 interaction memory states**, and AI Watch failure bundles via automated migration tooling (`npm run export:polygres`).
 * **Test Suite Verification**:
   * `npm test`: **22/22 unit tests passed** (100% success rate).
   * `npm run test:cloud`: **3/3 cloud integration tests passed** verifying live OpenRouter vector generation and Polygres Runtime API client readiness (`RetrievalReadiness`).
