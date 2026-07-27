@@ -4,12 +4,12 @@
 
 ---
 
-## ⚡ Option 1: Standalone Single X Reply (279 chars - Copy-Paste)
+## ⚡ Option 1: Standalone Single X Reply (Copy-Paste)
 
 Great Q! We guarantee Read-Your-Own-Writes consistency via Lakebase tiering:
 
 1. Writes commit **synchronously to local SQLite** (<1ms) before tool return. Next-step reads hit local SQLite instantly!
-2. Cloud push to @Evokoa Polygres.com is async background.
+2. Cloud push to @polygres is async background.
 3. Multi-agent conflicts resolve via v2 DAG versioning. ⚡
 
 ---
@@ -24,7 +24,7 @@ Great Q! We guarantee Read-Your-Own-Writes (RYOW) consistency through a 2-tier l
 ---
 
 ### Tweet 2:
-2/ **Async Cloud Sync**: Background workers push the local commit to @Evokoa Polygres.com without stalling the agent turn.  
+2/ **Async Cloud Sync**: Background workers push the local commit to @polygres (@dale_everett) without stalling the agent turn.  
 3/ **Cross-Device Conflicts**: Multi-agent versioning uses parent-child DAGs (`parent_id`) & `resolve_conflict` consensus!
 
 Zero turn latency + instant consistency. ⚡🐘

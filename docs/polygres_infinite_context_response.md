@@ -18,11 +18,11 @@ Polygres articulates the ultimate paradigm shift in agentic AI architecture: **S
 
 ## 🐦 Option 1: X (Twitter) Quote Tweet / Reply (Copy-Paste)
 
-> 💡 *Copy & paste as a Quote Tweet or Reply to Evokoa's Polygres announcement:*
+> 💡 *Copy & paste as a Quote Tweet or Reply to Polygres / Dale Everett:*
 
 The "Infinite Context Window" isn't a 2M token prompt window—it's putting hybrid retrieval & graph traversal directly where your data lives! 🐘⚡
 
-That's why we built **`krusch-context-mcp`** on top of @Evokoa **Polygres.com**:
+That's why we built **`krusch-context-mcp`** on top of @polygres (@dale_everett):
 
 • **`pgContext`**: Hybrid RRF search + HNSW vectors + Postgres permissions.
 • **`pgGraph`**: Multi-hop relationship walks (Memory ➔ Code Blob ➔ Tests).
@@ -40,7 +40,7 @@ Stop squeezing prompts. Make your DB queryable as memory! 🧠
 
 ### Why We Bet on Polygres for the Infinite Context Window
 
-Evokoa's launch of Polygres, `pgContext`, and `pgGraph` nails the fundamental bottleneck in modern AI agent development: **context fragmentation**.
+Dale Everett and the Evokoa team's launch of Polygres, `pgContext`, and `pgGraph` nails the fundamental bottleneck in modern AI agent development: **context fragmentation**.
 
 When building `krusch-context-mcp`, we recognized that fitting context into LLM prompts breaks down at scale:
 * Squeezing thousands of lines into prompts wastes context budget and induces LLM attention degradation (the "Lost in the Middle" phenomenon).

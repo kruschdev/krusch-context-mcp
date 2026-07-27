@@ -19,13 +19,13 @@ Together, they eliminate both database fragmentation AND agent protocol fragment
 
 ## 🐦 Option 1: X (Twitter) Quote Tweet / Reply
 
-> 💡 *Copy & paste as a Quote Tweet or Reply to Evokoa's pgContext announcement:*
+> 💡 *Copy & paste as a Quote Tweet or Reply to Polygres / Dale Everett:*
 
 The "Retrieval Hydra" in AI infra is real. 🐍
 
 Splitting primary application data (Postgres) and vector embeddings (separate vector DB) creates desynced states and bloated orchestration code.
 
-That's why we built **`krusch-context-mcp`** on top of @Evokoa **pgContext** on Polygres.com:
+That's why we built **`krusch-context-mcp`** on top of @polygres (@dale_everett):
 
 🐘 **Database Layer**: `pgContext` fuses HNSW vector search, full-text search & `pgGraph` inside Postgres (3.8x-5.3x faster than vanilla pgvector).  
 🧠 **Agent Layer**: Single MCP server delivering 5 memory subsystems (Episodic, Steering, Consensus, Codebase & AI Watch) to Cursor & Claude Code.
@@ -42,7 +42,7 @@ One database. One MCP server. Zero Hydra heads to fight. ⚡
 
 ### The Single Center of Gravity: Why We Bet on `pgContext`
 
-Evokoa's latest article on `pgContext` poses a fundamental question: *Why manage two representations of reality when you can put advanced retrieval where the data already lives?*
+Dale Everett and the team's latest article on `pgContext` poses a fundamental question: *Why manage two representations of reality when you can put advanced retrieval where the data already lives?*
 
 When building `krusch-context-mcp`, we observed AI coding assistants suffering from two distinct levels of infrastructure fragmentation:
 
