@@ -2,6 +2,7 @@ import { initAgentDebugXTable, logAgentFailure, searchFailures, getRecoveryPatte
 import { initDataFlowTables, registerOperator, inspectOperatorRegistry, mutatePipelineDag } from '../src/dataflow-engine.js';
 import { setwiseRerank, selectMinimalCoveringSet } from '../src/setwise-engine.js';
 import { initArexTable, updateResearchState, auditResearchConstraints } from '../src/arex-engine.js';
+import { initAcmTable, manageContextLifecycle, auditContextBudget } from '../src/acm-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
 
 async function runTests() {
@@ -13,6 +14,7 @@ async function runTests() {
         await initAgentDebugXTable();
         await initDataFlowTables();
         await initArexTable();
+        await initAcmTable();
         console.log('✅ Tables initialized.\n');
 
         // 2. Test AgentDebugX
@@ -79,6 +81,33 @@ async function runTests() {
         const arexAuditRes = await auditResearchConstraints({ task_id: 'research_task_99' });
         console.log('\nAREX Audit Result:\n', arexAuditRes.content[0].text);
         console.log('✅ AREX test passed.\n');
+
+        // 6. Test Agentic Context Management (ACM)
+        console.log('6️⃣ Testing Agentic Context Management (ACM)...');
+        const stageRes = await manageContextLifecycle({
+            action: 'stage',
+            fragment_id: 'frag_research_context_01',
+            content: 'Agentic Context Management treats context as a lifecycle & architecture problem, managing window pressure & token cost.',
+            stage: 'staged',
+            project: 'test_acm_proj',
+            ttl_days: 14
+        });
+        console.log('ACM Stage Result:', stageRes.content[0].text);
+
+        const auditRes = await auditContextBudget({
+            project: 'test_acm_proj',
+            token_budget: 4096,
+            current_tokens: 1024
+        });
+        console.log('\nACM Audit Budget Result:\n', auditRes.content[0].text);
+
+        const compactRes = await manageContextLifecycle({
+            action: 'compact',
+            fragment_id: 'frag_research_context_01',
+            content: 'ACM treats context window management & token cost as an architectural lifecycle problem.'
+        });
+        console.log('\nACM Compact Result:', compactRes.content[0].text);
+        console.log('✅ ACM test passed.\n');
 
         console.log('🎉 ALL AI WATCH INTEGRATION TESTS PASSED CLEANLY!');
     } catch (e) {

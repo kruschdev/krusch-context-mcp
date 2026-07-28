@@ -22,7 +22,7 @@ Every time you start a new AI coding session, your agent starts from zero. It do
 
 ## What It Does
 
-A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **42 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
+A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **44 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
 
 | Capability | What It Provides |
 |-----------|-----------------|
@@ -30,6 +30,7 @@ A single [Model Context Protocol](https://modelcontextprotocol.io/) server expos
 | 🔍 **Semantic Codebase Search** | Search the *meaning* of your code, not just filenames. "How do we handle auth?" returns the actual implementation. |
 | 🧠 **Episodic Memory** | Bugs, decisions, and lessons persist across sessions, retrieved by semantic relevance with temporal decay. See [Episodic Memory Guide](docs/EPISODIC_MEMORY.md). |
 | 💎 **Steering Nudges** | Lightweight key-value facts (preferences, conventions) give the agent behavioral continuity without re-prompting. |
+| 🔄 **Agentic Context Management (ACM)** | Structured context lifecycle staging, compaction, eviction retention policies, and context window token budget auditing ([ArXiv: 2607.21503](https://huggingface.co/papers/2607.21503)). |
 | 🐞 [**AgentDebugX Error Hub**](https://github.com/AgentDebugX/AgentDebugX) | Failure observability, trajectory root-cause attribution, and execution recovery pattern retrieval for SRE queue healing. |
 | ⚙️ **DataFlow-Harness Grounded Codegen** | Grounded MCP operator registry and schema-validated pipeline DAG mutations (`AddNode`, `WireEdge`, `UpdateNodeConfig`). |
 | 📊 **Rubric4Setwise Reranking** | Document-set selection evaluating Redundancy, Conflict, and Complementarity rubrics to filter candidate sets down to minimal covering sets. |
@@ -253,6 +254,8 @@ For a detailed technical guide on categories, architecture, sync mechanics, and 
 | **Nuggets** | |
 | `nugget_remember` / `nugget_nudges` / `nugget_forget` / `nugget_list` | Steering fact CRUD |
 | **System, Auditing, & Skills** | |
+| `manage_lifecycle` | Agentic Context Management (ACM) fragment lifecycle (stage, compact, evict, get, list) |
+| `audit_budget` | Agentic Context Management (ACM) token budget and context pressure auditing |
 | `proactive_nudge` | Trajectory auditing — warn on rule/lesson violations |
 | `nudge_feedback` | Log developer/agent feedback to record alignment signals |
 | `analyze_trajectory` | Trajectory auditing — analyze execution path using STRACE and isolate faults |
@@ -273,6 +276,7 @@ krusch-context-mcp/
 │   ├── v2-engine.js          # Company Brain v2 substrate
 │   ├── nuggets-engine.js     # Holographic Nuggets CRUD
 │   ├── unified-retrieval.js  # Unified Hybrid Retrieval engine
+│   ├── acm-engine.js          # Agentic Context Management (ACM) engine & token cost auditing
 │   ├── agentdebugx-engine.js # AgentDebugX Error Hub & failure observability
 │   ├── dataflow-engine.js    # DataFlow-Harness grounded pipeline registry & DAG mutations
 │   ├── setwise-engine.js     # Rubric4Setwise minimal cover document-set selection
@@ -284,7 +288,7 @@ krusch-context-mcp/
 ├── scripts/                  # Benchmarking, evaluation, and maintenance
 ├── tests/                    # *.test.js = automated, test_*.js = smoke
 ├── docs/
-│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 42 tools
+│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 44 tools
 │   ├── SETUP.md              # Configuration, storage routing, troubleshooting
 │   └── research/             # Sentra Company Brain research essays
 └── package.json
@@ -297,7 +301,7 @@ krusch-context-mcp/
 ```bash
 npm test                                # Automated (node:test, *.test.js)
 npm run test:smoke                      # JSON-RPC stdio smoke tests
-node tests/test_client.js               # All 42 tools against live DB
+node tests/test_client.js               # All 44 tools against live DB
 node tests/test_ai_watch_integrations.js # AI Watch paper integration suite
 node scripts/benchmark_latency.js       # End-to-end latency
 node scripts/eval_accuracy.js           # Precision/recall
@@ -337,6 +341,7 @@ This project is built upon and inspired by the following foundational research p
 - **pgContext Vector Acceleration**: Native PostgreSQL 17 HNSW index access method and single-pass metadata filtering powered by [Evokoa pgContext](https://github.com/evokoa/pgContext).
 
 ### Research Papers & Algorithms
+- **Agentic Context Management (ACM)**: Context lifecycle staging, compaction, eviction retention, and token budget auditing based on Gaurav Dadhich, [Agentic Context Management: Solving Agent Memory and Cost by Treating Them as Lifecycle and Architecture Problems](https://huggingface.co/papers/2607.21503) (ArXiv: 2607.21503).
 - **AgentDebugX (Failure Observability & Error Hub)**: Open-source toolkit for failure observability, trajectory root-cause attribution, and recovery patch bundles based on Wang et al., [AgentDebugX: An Open-Source Toolkit for Failure Observability, Attribution, and Recovery in LLM Agents](https://huggingface.co/papers/2607.18754) ([AgentDebugX GitHub](https://github.com/AgentDebugX/AgentDebugX) · ArXiv: 2607.18754).
 - **DataFlow-Harness (Grounded Code-Agent Platform)**: Grounded MCP operator registry and typed, schema-validated DAG mutations based on Zhang et al., [DataFlow-Harness: A Grounded Code-Agent Platform for Constructing Editable LLM Data Pipelines](https://huggingface.co/papers/2607.16617) (ArXiv: 2607.16617).
 - **Rubric4Setwise (Beyond Relevance-Centered Retrieval)**: Rubric-oriented document-set selection evaluating Redundancy, Conflict, and Complementarity into minimal covering sets based on Liu et al., [Beyond Relevance-Centered Retrieval: Rubric-Oriented Document-Set Selection and Ranking](https://huggingface.co/papers/2607.19238) (ArXiv: 2607.19238).

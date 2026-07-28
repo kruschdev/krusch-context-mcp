@@ -729,3 +729,32 @@ Returns memory count, nugget count, repo count, DB status, and version.
 | `task_id` | `string` | ✅ | — | Research task ID to audit |
 | `candidate_response` | `string` | ❌ | `''` | Optional candidate response to verify |
 
+---
+
+### `krusch_context_manage_lifecycle`
+
+**Agentic Context Management (ACM)**: Manage context fragment lifecycle stages (`stage`, `compact`, `evict`, `get`, `list`) and retention policies (HF Paper ArXiv: 2607.21503).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `action` | `string` | ❌ | `'stage'` | Lifecycle action: `'stage'`, `'compact'`, `'evict'`, `'get'`, `'list'` |
+| `fragment_id` | `string` | ❌ | — | Unique fragment identifier |
+| `content` | `string` | ❌ | — | Text content or summary |
+| `stage` | `string` | ❌ | `'staged'` | Fragment stage: `'staged'`, `'active'`, `'compacted'`, `'evicted'` |
+| `ttl_days` | `number` | ❌ | `30` | Retention TTL in days |
+| `project` | `string` | ❌ | `'default'` | Target project identifier |
+| `metadata` | `object` | ❌ | `{}` | Optional arbitrary JSON metadata |
+
+---
+
+### `krusch_context_audit_budget`
+
+**Agentic Context Management (ACM)**: Audit context window pressure, token budget consumption, and eviction/compaction recommendations (HF Paper ArXiv: 2607.21503).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `project` | `string` | ❌ | `'default'` | Target project identifier |
+| `token_budget` | `number` | ❌ | `8192` | Total token budget limit |
+| `current_tokens` | `number` | ❌ | `0` | Additional unmanaged prompt tokens |
+
+

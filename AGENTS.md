@@ -2,7 +2,7 @@
 
 > Unified MCP server: PG-Git codebase search + Homelab episodic memory + Holographic Nuggets + External docs search.
 
-> **Last audit**: 2026-07-17 | **Version**: 1.2.0 | **Tools**: 32
+> **Last audit**: 2026-07-28 | **Version**: 1.3.0 | **Tools**: 44
 
 ## Architecture Overview
 
@@ -13,14 +13,15 @@ This project is a single MCP server (stdio transport) that unifies three subsyst
 3. **Codebase Search** — Semantic search over all indexed source files via the sibling `pg-git` project
 4. **Proactive Auditor (Memory Agent Loop)** — Background trajectory auditor that verifies actions against past rules and updates weights based on developer feedback loops (Direct-OPD/PUST)
 5. **pgContext Vector Acceleration** — Optional native PostgreSQL 17 engine extension providing page-native HNSW indexes (`pgcontext_hnsw`) and single-pass JSON metadata filtering with exact MVCC/RLS re-checking.
+6. **Agentic Context Management (ACM)** — Context fragment lifecycle staging, compaction, eviction retention policies, and context window token budget auditing (HF Paper ArXiv: 2607.21503).
 
-All five share a single `pg.Pool` connection to `kruschdb` and a single fleet-balanced Ollama embedding pipeline.
+All six share a single `pg.Pool` connection to `kruschdb` and a single fleet-balanced Ollama embedding pipeline.
 
 ### Lakebase Architecture (Compute/Storage Decoupling)
 
 Project-scoped data follows a two-tier model:
 - **Compute Cache**: Per-project SQLite databases at `<project>/.agent/memory.db` — zero-latency reads
-- **Object Storage**: Durable Postgres tables (`ide_agent_memory`, `ide_agent_nuggets`, `interaction_memory`) — fleet-wide persistence
+- **Object Storage**: Durable Postgres tables (`ide_agent_memory`, `ide_agent_nuggets`, `interaction_memory`, `ide_agent_context_lifecycle`) — fleet-wide persistence
 - **Sync**: Async write-behind (SQLite → Postgres) on every write; read-ahead pull (Postgres → SQLite) on first project access
 
 ### Storage Routing Rules
@@ -51,6 +52,7 @@ Project-scoped data follows a two-tier model:
 | `src/memory-engine.js` | Episodic memory CRUD (add, search, list, delete, update, consolidate, compile_state) |
 | `src/v2-engine.js` | Company Brain v2 substrate (write_state, resolve_conflict, provenance, ontology, lens, graph, link_blob) |
 | `src/nuggets-engine.js` | Holographic Nuggets CRUD (remember, nudges, forget, list) with hybrid SQLite/Postgres routing |
+| `src/acm-engine.js` | Agentic Context Management (ACM) fragment lifecycle (stage, compact, evict) & token budget auditing |
 | `src/sqlite-engine.js` | Lakebase SQLite layer — project DB init, pull/push sync, cosine similarity helper |
 | `src/pgcontext-helper.js` | pgContext extension detection, collection setup, HNSW index & point sync |
 | `src/llm-tags.js` | Shared LLM tag generation helper (used by memory-engine + v2-engine) |
@@ -58,7 +60,7 @@ Project-scoped data follows a two-tier model:
 | `src/skills-engine.js` | Agent skills loader and prompt registry engine |
 | `src/proactive-engine.js` | Trajectory auditor (proactive_nudge) and feedback collector (nudge_feedback) |
 
-## Tool Surface (32 tools)
+## Tool Surface (44 tools)
 
 | Tool | Source | Key Parameters |
 |------|--------|---------------|
@@ -94,6 +96,8 @@ Project-scoped data follows a two-tier model:
 | `krusch_context_proactive_nudge` | `proactive-engine.js` | `history`★, `project` |
 | `krusch_context_nudge_feedback` | `proactive-engine.js` | `query_text`★, `nudge_text`★, `user_approved`★, `agent_corrected`★, `correction_diff`, `project` |
 | `krusch_context_analyze_trajectory` | `proactive-engine.js` | `memory_id`★ |
+| `krusch_context_manage_lifecycle` | `acm-engine.js` | `action`, `fragment_id`, `content`, `stage`, `ttl_days`, `project` |
+| `krusch_context_audit_budget` | `acm-engine.js` | `project`, `token_budget`, `current_tokens` |
 
 > ★ = required parameter
 

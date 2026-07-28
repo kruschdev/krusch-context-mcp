@@ -34,6 +34,7 @@ import { initAgentDebugXTable, logAgentFailure, searchFailures, getRecoveryPatte
 import { initDataFlowTables, registerOperator, inspectOperatorRegistry, mutatePipelineDag } from './dataflow-engine.js';
 import { setwiseRerank } from './setwise-engine.js';
 import { initArexTable, updateResearchState, auditResearchConstraints } from './arex-engine.js';
+import { initAcmTable, manageContextLifecycle, auditContextBudget } from './acm-engine.js';
 
 // Verify DB connection
 async function verifyDatabase() {
@@ -170,6 +171,7 @@ async function verifyDatabase() {
         await initAgentDebugXTable();
         await initDataFlowTables();
         await initArexTable();
+        await initAcmTable();
 
         console.error('[krusch-context-mcp] Database connection verified via pg-git pool. Migrations completed.');
     } catch (err) {
@@ -754,6 +756,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["task_id"]
         }
+      },
+      {
+        name: "krusch_context_manage_lifecycle",
+        description: "Agentic Context Management (ACM): Manage context fragment lifecycle (stage, compact, evict, get, list) and retention policies.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            action: { type: "string", description: "'stage' | 'compact' | 'evict' | 'get' | 'list'" },
+            fragment_id: { type: "string", description: "Unique fragment identifier" },
+            content: { type: "string", description: "Context text content or summary" },
+            stage: { type: "string", description: "'staged' | 'active' | 'compacted' | 'evicted'" },
+            ttl_days: { type: "number", description: "Retention time-to-live in days (default 30)" },
+            project: { type: "string", description: "Project identifier" },
+            metadata: { type: "object", description: "Optional arbitrary metadata" }
+          }
+        }
+      },
+      {
+        name: "krusch_context_audit_budget",
+        description: "Agentic Context Management (ACM): Audit context window pressure, token budget consumption, and eviction/compaction recommendations.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project: { type: "string", description: "Project identifier" },
+            token_budget: { type: "number", description: "Total token budget (default 8192)" },
+            current_tokens: { type: "number", description: "Unmanaged prompt token count" }
+          }
+        }
       }
     ]
   };
@@ -1058,6 +1088,9 @@ const TOOL_HANDLERS = new Map([
   // AREX
   ['krusch_context_update_research_state',  (args) => updateResearchState(args)],
   ['krusch_context_arex_audit',             (args) => auditResearchConstraints(args)],
+  // ACM (Agentic Context Management - ArXiv 2607.21503)
+  ['krusch_context_manage_lifecycle',       (args) => manageContextLifecycle(args)],
+  ['krusch_context_audit_budget',           (args) => auditContextBudget(args)],
 ]);
 
 const tracer = trace.getTracer('krusch-context-mcp');
