@@ -757,4 +757,107 @@ Returns memory count, nugget count, repo count, DB status, and version.
 | `token_budget` | `number` | ❌ | `8192` | Total token budget limit |
 | `current_tokens` | `number` | ❌ | `0` | Additional unmanaged prompt tokens |
 
+---
+
+## Temporal Knowledge & Memory Invalidation (MobileMem, arXiv: 2608.13606)
+
+### `krusch_context_supersede_memory`
+
+**Temporal Fact Superseding**: Explicitly supersede an outdated memory record with updated knowledge, linking provenance lineage and marking the old record as `SUPERSEDED` so it is automatically excluded from active agent retrieval.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `number` | ✅ | — | Target memory ID to supersede |
+| `category` | `string` | ✅ | — | Category: `'priorities'`, `'bugs'`, `'outcomes'`, `'lessons'`, `'activity'` |
+| `content` | `string` | ✅ | — | New authoritative replacement content |
+| `project` | `string` | ❌ | `null` | Optional project scope |
+| `tags` | `string[]` | ❌ | `null` | Optional categorization tags |
+
+---
+
+### `krusch_context_invalidate_memory`
+
+**Memory Invalidation**: Explicitly mark a memory record as `INVALIDATED` (e.g., revoked credentials, obsolete architecture rule, superseded constraint), removing it from active retrieval while preserving audit provenance.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `number` | ✅ | — | Memory ID to invalidate |
+| `project` | `string` | ❌ | `null` | Optional project scope |
+| `reason` | `string` | ❌ | `null` | Reason for invalidating this memory |
+
+---
+
+## Hierarchical Teacher Memory Distillation (arXiv: 2608.07169)
+
+### `krusch_context_distill_teacher_memory`
+
+**Teacher Trajectory Logging**: Log a frontier teacher model execution trajectory across three memory tiers (`workflow`, `subtask`, `function`) for local student LLM agent learning.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `tier` | `string` | ✅ | — | Memory tier: `'workflow'` (plan), `'subtask'` (step), `'function'` (tool fix) |
+| `task_pattern` | `string` | ✅ | — | Task pattern or tool name (e.g. `'tool:git_commit'`) |
+| `teacher_model` | `string` | ✅ | — | Identifier of teacher model (e.g. `'gemini-2.5-pro'`) |
+| `student_model` | `string` | ❌ | `null` | Target student model (e.g. `'qwen2.5-coder:7b'`) |
+| `trajectory` | `object[]` | ✅ | — | Structured execution trajectory steps |
+| `distilled_rule` | `string` | ✅ | — | High-level operational rule distilled from trajectory |
+| `project` | `string` | ❌ | `null` | Optional project association |
+| `tags` | `string[]` | ❌ | `null` | Optional categorization tags |
+
+---
+
+### `krusch_context_retrieve_teacher_distillation`
+
+**Teacher Memory Retrieval**: Retrieve distilled teacher trajectories matching a task query or error pattern, optionally filtered by memory tier.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | `string` | ✅ | — | Search query or error message |
+| `tier` | `string` | ❌ | `null` | Optional memory tier filter (`'workflow'`, `'subtask'`, `'function'`) |
+| `project` | `string` | ❌ | `null` | Optional project filter |
+| `limit` | `number` | ❌ | `3` | Maximum matching results to return |
+
+---
+
+### `krusch_context_distill_function_memory`
+
+**Function-Tier Failure Recovery**: Distill a tool call failure and teacher correction into a Tier 3 Function Memory entry for instant student error recovery.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `tool_name` | `string` | ✅ | — | Name of tool that failed |
+| `failed_input` | `string` | ✅ | — | Input parameters that triggered failure |
+| `error_message` | `string` | ✅ | — | Error message or status code |
+| `corrected_input` | `string` | ✅ | — | Corrected parameters provided by teacher |
+| `explanation` | `string` | ✅ | — | Explanation of why the correction works |
+| `teacher_model` | `string` | ❌ | `'teacher'` | Teacher model identifier |
+| `project` | `string` | ❌ | `null` | Optional project filter |
+
+---
+
+## Diverse Skill Routing & Multi-Agent Resilience (September 2026 Breakthroughs)
+
+### `krusch_context_route_skills`
+
+**Diverse Skill Routing (DSR)**: Uses Determinantal Point Processes (DPP) to retrieve an orthogonal, non-redundant set of agent skills matching a task query without token bloat ([arXiv: 2609.05824](https://arxiv.org/abs/2609.05824)).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | `string` | ✅ | — | Task description, intent, or workflow requirements |
+| `max_skills` | `number` | ❌ | `5` | Maximum number of skills to route |
+| `max_tokens` | `number` | ❌ | `4000` | Maximum combined token budget for routed skills |
+| `diversity_lambda` | `number` | ❌ | `0.6` | Trade-off parameter balancing relevance (1.0) vs. diversity (0.0) |
+
+---
+
+### `krusch_context_evaluate_resilience`
+
+**Multi-Agent Resilience Gate**: Evaluates multi-agent execution traces and inter-agent handoffs for cascading failures, circular deadlocks, and credential leakage ([arXiv: 2609.17320](https://arxiv.org/abs/2609.17320)).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `handoffs` | `object[]` | ✅ | — | Array of handoff trace events (`{ senderId, recipientId, message, status, error }`) |
+| `max_cascade_depth` | `number` | ❌ | `2` | Maximum allowed consecutive error cascade depth |
+
+
 
