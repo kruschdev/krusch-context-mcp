@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { writeSessionHandoff, readSessionReview } from '../src/session-engine.js';
+import { writeSessionHandoff, readSessionReview, initSessionEngineTable } from '../src/session-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
 
 test('Session Engine Unit Tests', async (t) => {
+    await initSessionEngineTable();
 
     await t.test('writeSessionHandoff should throw if project or summary missing', async () => {
         try {

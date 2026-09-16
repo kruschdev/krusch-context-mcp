@@ -11,7 +11,7 @@ import {
   McpError
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { loadSkills, listSkills, getSkill } from './skills-engine.js';
+import { loadSkills, listSkills, getSkill, routeSkills } from './skills-engine.js';
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -19,12 +19,12 @@ import { trace } from '@opentelemetry/api';
 import { initTracing } from './telemetry.js';
 
 // Import logic from our required MCP packages
-import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, consolidateMemories, compileProjectState } from './memory-engine.js';
+import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, consolidateMemories, compileProjectState, supersedeMemory, invalidateMemory } from './memory-engine.js';
 import { writeState, resolveConflict, getProvenance, updateOntology, searchLens, traverseGraph, linkBlob } from './v2-engine.js';
 import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
 import { handleThink } from './think-engine.js';
-import { handleProactiveNudge, handleNudgeFeedback, handleAnalyzeTrajectory } from './proactive-engine.js';
-import { writeSessionHandoff, readSessionReview } from './session-engine.js';
+import { handleProactiveNudge, handleNudgeFeedback, handleAnalyzeTrajectory, handleEvaluateResilience } from './proactive-engine.js';
+import { writeSessionHandoff, readSessionReview, initSessionEngineTable } from './session-engine.js';
 import { getEmbedding } from './embedding-helper.js';
 import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
@@ -35,6 +35,7 @@ import { initDataFlowTables, registerOperator, inspectOperatorRegistry, mutatePi
 import { setwiseRerank } from './setwise-engine.js';
 import { initArexTable, updateResearchState, auditResearchConstraints } from './arex-engine.js';
 import { initAcmTable, manageContextLifecycle, auditContextBudget } from './acm-engine.js';
+import { initTeacherMemoryTable, distillTeacherMemory, retrieveTeacherDistillation, distillFunctionMemory } from './teacher-distillation-engine.js';
 
 // Verify DB connection
 async function verifyDatabase() {
@@ -65,6 +66,26 @@ async function verifyDatabase() {
         }
         try {
             await pool.query('ALTER TABLE ide_agent_memory ADD COLUMN tags TEXT');
+        } catch (e) {
+            if (e.code !== '42701') throw e;
+        }
+        try {
+            await pool.query("ALTER TABLE ide_agent_memory ADD COLUMN status VARCHAR(20) DEFAULT 'ACTIVE'");
+        } catch (e) {
+            if (e.code !== '42701') throw e;
+        }
+        try {
+            await pool.query('ALTER TABLE ide_agent_memory ADD COLUMN supersedes_id INT');
+        } catch (e) {
+            if (e.code !== '42701') throw e;
+        }
+        try {
+            await pool.query('ALTER TABLE ide_agent_memory ADD COLUMN superseded_by INT');
+        } catch (e) {
+            if (e.code !== '42701') throw e;
+        }
+        try {
+            await pool.query('ALTER TABLE ide_agent_memory ADD COLUMN valid_until TIMESTAMP');
         } catch (e) {
             if (e.code !== '42701') throw e;
         }
@@ -172,6 +193,8 @@ async function verifyDatabase() {
         await initDataFlowTables();
         await initArexTable();
         await initAcmTable();
+        await initTeacherMemoryTable();
+        await initSessionEngineTable();
 
         console.error('[krusch-context-mcp] Database connection verified via pg-git pool. Migrations completed.');
     } catch (err) {
@@ -180,7 +203,7 @@ async function verifyDatabase() {
     }
 }
 
-const server = new Server({ name: "krusch-context-mcp", version: "1.2.0" }, { capabilities: { tools: {}, prompts: {} } });
+const server = new Server({ name: "krusch-context-mcp", version: "1.4.0" }, { capabilities: { tools: {}, prompts: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
@@ -202,21 +225,50 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "krusch_context_add_memory",
-        description: "Add a new fact or memory to the persistent IDE database. Use this strictly to document bugs, priorities, lessons, or project outcomes.",
+        description: "Add a new fact or memory to the persistent IDE database. Supports MobileMem temporal superseding (arXiv: 2608.13606) via supersedes_id.",
         inputSchema: {
           type: "object",
           properties: {
             project: { type: "string" },
             category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
             content: { type: "string" },
-            tags: { type: "array", items: { type: "string" } }
+            tags: { type: "array", items: { type: "string" } },
+            supersedes_id: { type: "number", description: "Optional ID of a previous memory record that this new fact supersedes/replaces." }
           },
           required: ["category", "content"]
         }
       },
       {
+        name: "krusch_context_supersede_memory",
+        description: "Explicitly supersede an outdated memory with updated knowledge, linking lineage and marking the old record as SUPERSEDED.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "number", description: "Target memory ID to supersede" },
+            category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
+            content: { type: "string", description: "New authoritative content" },
+            project: { type: "string" },
+            tags: { type: "array", items: { type: "string" } }
+          },
+          required: ["id", "category", "content"]
+        }
+      },
+      {
+        name: "krusch_context_invalidate_memory",
+        description: "Explicitly mark a memory record as INVALIDATED (e.g. revoked secret, deprecated invariant, obsolete design rule).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "number", description: "Memory ID to invalidate" },
+            project: { type: "string" },
+            reason: { type: "string", description: "Reason for invalidating this memory" }
+          },
+          required: ["id"]
+        }
+      },
+      {
         name: "krusch_context_search_memory",
-        description: "Search the persistent IDE database for past lessons, bugs, priorities, or project outcomes. Supports GRASP options (semantic, keyword, tag matching; history/lineage expansion; codebase file association).",
+        description: "Search the persistent IDE database for past lessons, bugs, priorities, or project outcomes. Supports MobileMem active lineage filtering (excludes invalidated/superseded records by default) and GRASP options.",
         inputSchema: {
           type: "object",
           properties: {
@@ -226,7 +278,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             limit: { type: "number", default: 3 },
             search_type: { type: "string", enum: ['semantic', 'keyword', 'tag'], default: 'semantic' },
             include_history: { type: "boolean", default: false },
-            include_linked_blobs: { type: "boolean", default: false }
+            include_linked_blobs: { type: "boolean", default: false },
+            include_superseded: { type: "boolean", default: false, description: "If true, includes superseded and invalidated records (useful for audits)" }
           },
           required: ["category", "query"]
         }
@@ -784,6 +837,95 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             current_tokens: { type: "number", description: "Unmanaged prompt token count" }
           }
         }
+      },
+      {
+        name: "krusch_context_distill_teacher_memory",
+        description: "Hierarchical Teacher Memory Distillation (Paper 2608.07169): Log a teacher execution trajectory (workflow, subtask, or function tier) for student LLM agent learning.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            tier: { type: "string", enum: ["workflow", "subtask", "function"], description: "Memory tier: 'workflow' (task plan), 'subtask' (step goal), 'function' (tool error fix)" },
+            task_pattern: { type: "string", description: "Task pattern name or tool name (e.g. 'tool:git_commit')" },
+            teacher_model: { type: "string", description: "Identifier of the teacher model (e.g. 'gemini-3.5-flash')" },
+            student_model: { type: "string", description: "Target student model (e.g. 'qwen2.5-coder:7b')" },
+            trajectory: { type: "array", items: { type: "object" }, description: "Structured execution trajectory steps" },
+            distilled_rule: { type: "string", description: "High-level operational rule distilled from the trajectory" },
+            project: { type: "string", description: "Optional project association" },
+            tags: { type: "array", items: { type: "string" } }
+          },
+          required: ["tier", "task_pattern", "teacher_model", "trajectory", "distilled_rule"]
+        }
+      },
+      {
+        name: "krusch_context_retrieve_teacher_distillation",
+        description: "Hierarchical Teacher Memory Distillation (Paper 2608.07169): Retrieve distilled teacher trajectories matching a query and optional memory tier.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Search query or error message" },
+            tier: { type: "string", enum: ["workflow", "subtask", "function"], description: "Optional memory tier filter" },
+            project: { type: "string", description: "Optional project filter" },
+            limit: { type: "number", description: "Max results to return (default 3)" }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "krusch_context_distill_function_memory",
+        description: "Hierarchical Teacher Memory Distillation (Paper 2608.07169): Distill a tool call failure and teacher fix into a Tier 3 Function Memory entry for local student LLM error recovery.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            tool_name: { type: "string", description: "Tool that experienced an error" },
+            failed_input: { type: "string", description: "Input parameters that caused failure" },
+            error_message: { type: "string", description: "Error output or status" },
+            corrected_input: { type: "string", description: "Corrected input parameters provided by teacher" },
+            explanation: { type: "string", description: "Explanation of why the fix works" },
+            teacher_model: { type: "string", description: "Teacher model identifier" },
+            project: { type: "string", description: "Optional project filter" }
+          },
+          required: ["tool_name", "failed_input", "error_message", "corrected_input", "explanation"]
+        }
+      },
+      {
+        name: "krusch_context_route_skills",
+        description: "Diverse Skill Routing (DSR, arXiv: 2609.05824): Uses Determinantal Point Processes (DPP) to retrieve an orthogonal, non-redundant set of agent skills matching a task query without prompt bloat.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Task description, intent, or workflow requirements" },
+            max_skills: { type: "number", default: 5, description: "Maximum number of skills to route (default 5)" },
+            max_tokens: { type: "number", default: 4000, description: "Maximum combined token budget for routed skills" },
+            diversity_lambda: { type: "number", default: 0.6, description: "Weight parameter balancing relevance vs diversity (0.0 to 1.0, default 0.6)" }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "krusch_context_evaluate_resilience",
+        description: "Emergence World Multi-Agent Resilience Gate (arXiv: 2609.17320): Evaluates multi-agent execution traces and inter-agent handoffs for cascading failures, circular deadlocks, and credential leakage.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            handoffs: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  senderId: { type: "string" },
+                  recipientId: { type: "string" },
+                  message: { type: "string" },
+                  status: { type: "string", enum: ["SUCCESS", "ERROR", "FAILED", "PENDING", "RESOLVED"] },
+                  error: { type: "string" }
+                },
+                required: ["senderId", "recipientId", "message"]
+              },
+              description: "Array of inter-agent handoff trace events"
+            },
+            max_cascade_depth: { type: "number", default: 2, description: "Maximum allowed consecutive error cascade depth" }
+          },
+          required: ["handoffs"]
+        }
       }
     ]
   };
@@ -1037,9 +1179,11 @@ const TOOL_HANDLERS = new Map([
   // Polygres-inspired Unified Context Retrieval
   ['krusch_context_retrieve',       (args) => unifiedRetrieve(args)],
   // Memory engine (v1)
-  ['krusch_context_add_memory',     (args) => addMemory(args)],
-  ['krusch_context_search_memory',  (args) => searchMemory(args)],
-  ['krusch_context_list_memories',  (args) => listMemories(args)],
+  ['krusch_context_add_memory',       (args) => addMemory(args)],
+  ['krusch_context_supersede_memory', (args) => supersedeMemory(args)],
+  ['krusch_context_invalidate_memory', (args) => invalidateMemory(args)],
+  ['krusch_context_search_memory',    (args) => searchMemory(args)],
+  ['krusch_context_list_memories',    (args) => listMemories(args)],
   ['krusch_context_delete_memory',  (args) => deleteMemory(args)],
   ['krusch_context_update_memory',  (args) => updateMemory(args)],
   ['krusch_context_consolidate',    (args) => consolidateMemories(args)],
@@ -1091,6 +1235,14 @@ const TOOL_HANDLERS = new Map([
   // ACM (Agentic Context Management - ArXiv 2607.21503)
   ['krusch_context_manage_lifecycle',       (args) => manageContextLifecycle(args)],
   ['krusch_context_audit_budget',           (args) => auditContextBudget(args)],
+  // Hierarchical Teacher Memory Distillation (ArXiv 2608.07169)
+  ['krusch_context_distill_teacher_memory',        (args) => distillTeacherMemory(args)],
+  ['krusch_context_retrieve_teacher_distillation', (args) => retrieveTeacherDistillation(args)],
+  ['krusch_context_distill_function_memory',       (args) => distillFunctionMemory(args)],
+  // Diverse Skill Routing (ArXiv 2609.05824)
+  ['krusch_context_route_skills',                  (args) => routeSkills(args)],
+  // Multi-Agent Resilience Gate (ArXiv 2609.17320)
+  ['krusch_context_evaluate_resilience',           (args) => handleEvaluateResilience(args)],
 ]);
 
 const tracer = trace.getTracer('krusch-context-mcp');

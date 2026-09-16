@@ -4,7 +4,27 @@ import { execSync, spawn } from 'child_process';
 import { pool } from 'pg-git-mcp/db/pool.js';
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
-const HOMELAB_ROOT = '/home/kruschdev/homelab';
+const HOMELAB_ROOT = process.env.HOMELAB_ROOT || (fs.existsSync('/home/krusch/homelab') ? '/home/krusch/homelab' : '/home/kruschdev/homelab');
+
+/**
+ * Ensures session_handoffs table exists in PostgreSQL.
+ */
+export async function initSessionEngineTable() {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS session_handoffs (
+            id SERIAL PRIMARY KEY,
+            session_type VARCHAR(50) DEFAULT 'ide',
+            direction VARCHAR(20) DEFAULT 'close',
+            project VARCHAR(255) NOT NULL,
+            content TEXT NOT NULL,
+            files_touched TEXT[],
+            conversation_id VARCHAR(255),
+            telemetry_path TEXT,
+            reviewed BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+    `);
+}
 
 function getLatestTelemetry() {
     const brainPath = path.join(process.env.HOME || process.env.USERPROFILE || '', '.gemini', 'antigravity', 'brain');

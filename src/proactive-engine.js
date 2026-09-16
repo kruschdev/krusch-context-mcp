@@ -6,6 +6,7 @@ import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { writeState } from './v2-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
+import { evaluateMultiAgentResilience } from '../../../lib/trajectory-guard.js';
 
 // Ensure environment variables are loaded
 dotenv.config();
@@ -324,4 +325,46 @@ export async function handleAnalyzeTrajectory({ memory_id }) {
     } finally {
         client.release();
     }
+}
+
+/**
+ * Multi-Agent Resilience Gate (arXiv: 2609.17320).
+ * Audits multi-agent execution traces and inter-agent handoffs for error cascades,
+ * circular deadlocks, and credential leakage.
+ *
+ * @param {object} args
+ * @param {Array<object>} args.handoffs - Array of handoff objects { senderId, recipientId, message, status, error }
+ * @param {number} [args.max_cascade_depth=2] - Maximum acceptable consecutive error cascade depth
+ * @returns {{content: Array<{type: string, text: string}>}}
+ */
+export function handleEvaluateResilience(args = {}) {
+    const { handoffs = [], max_cascade_depth = 2 } = args;
+    if (!Array.isArray(handoffs) || handoffs.length === 0) {
+        throw new McpError(ErrorCode.InvalidParams, "Parameter 'handoffs' must be a non-empty array.");
+    }
+
+    const evaluation = evaluateMultiAgentResilience(handoffs, {
+        maxCascadeDepth: max_cascade_depth
+    });
+
+    let text = `## 🛡️ Multi-Agent Resilience Evaluation (arXiv: 2609.17320)\n`;
+    text += `- **Status**: ${evaluation.resilient ? '✅ RESILIENT' : '⚠️ AT RISK / GATED'}\n`;
+    text += `- **Resilience Score**: ${(evaluation.resilienceScore * 100).toFixed(1)}%\n`;
+    text += `- **Max Cascade Depth**: ${evaluation.metrics?.maxObservedCascade || 0}\n`;
+    text += `- **Circular Deadlock**: ${evaluation.metrics?.circularDeadlock ? 'Yes' : 'None'}\n`;
+    text += `- **Credential Leakages**: ${evaluation.metrics?.memoryLeakCount || 0}\n\n`;
+
+    if (evaluation.issues && evaluation.issues.length > 0) {
+        text += `### ⚠️ Detected Failure Modes\n`;
+        for (const issue of evaluation.issues) {
+            text += `- ${issue}\n`;
+        }
+        text += `\n`;
+    }
+
+    text += `### 🎯 Recommendation\n${evaluation.verdict || 'Trajectory resilient.'}\n`;
+
+    return {
+        content: [{ type: "text", text: text.trim() }]
+    };
 }

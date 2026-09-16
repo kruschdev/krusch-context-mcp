@@ -1,6 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { routeDiverseSkills } from '../../../lib/skiller.js';
 
 const SKILLS_DIR = process.env.SKILLS_DIR || path.join(os.homedir(), 'homelab', 'skills');
 
@@ -139,4 +141,58 @@ export function listSkills() {
 
 export function getSkill(name) {
     return skillsCache.get(name.toLowerCase()) || null;
+}
+
+/**
+ * Diverse Skill Routing (DSR, arXiv: 2609.05824).
+ * Selects an orthogonal, non-redundant set of skills matching the task query using DPP.
+ *
+ * @param {object} args
+ * @param {string} args.query - Task or workflow query
+ * @param {number} [args.max_skills=5] - Maximum number of skills to route
+ * @param {number} [args.max_tokens=4000] - Token budget limit
+ * @param {number} [args.diversity_lambda=0.6] - Trade-off between relevance (1.0) and diversity (0.0)
+ * @returns {{content: Array<{type: string, text: string}>}}
+ */
+export function routeSkills(args = {}) {
+    const { query, max_skills = 5, max_tokens = 4000, diversity_lambda = 0.6 } = args;
+    if (!query) {
+        throw new McpError(ErrorCode.InvalidParams, "Parameter 'query' is required for skill routing.");
+    }
+    const allSkills = Array.from(skillsCache.values()).map(s => ({
+        name: s.name,
+        description: s.description,
+        category: s.category,
+        tags: [s.category, ...(s.metadata?.tags || [])],
+        argumentHint: s.argumentHint,
+        body: s.body,
+        tokens: Math.ceil((s.body?.length || 100) / 4)
+    }));
+
+    const result = routeDiverseSkills(query, allSkills, {
+        maxSkills: max_skills,
+        maxTokenBudget: max_tokens,
+        diversityLambda: diversity_lambda
+    });
+
+    let text = `## 🎯 Diverse Skill Routing (DSR - arXiv: 2609.05824)\n`;
+    text += `**Query**: "${query}" | **Diversity Score**: ${(result.diversityScore * 100).toFixed(1)}% | **Selected**: ${result.selectedSkills.length}\n\n`;
+
+    for (const skill of result.selectedSkills) {
+        text += `### 🛠️ ${skill.name} (${skill.category})\n`;
+        text += `> ${skill.description}\n`;
+        if (skill.argumentHint) text += `- **Argument Hint**: \`${skill.argumentHint}\`\n`;
+        text += `- **Estimated Tokens**: ~${skill.tokens}\n\n`;
+    }
+
+    if (result.rejectedOverlap && result.rejectedOverlap.length > 0) {
+        text += `### 🔄 Filtered Redundant Skills (${result.rejectedOverlap.length})\n`;
+        for (const rej of result.rejectedOverlap) {
+            text += `- **${rej.name}** (suppressed due to ${Math.round(rej.overlap * 100)}% overlap with *${rej.overlappingWith}*)\n`;
+        }
+    }
+
+    return {
+        content: [{ type: "text", text: text.trim() }]
+    };
 }

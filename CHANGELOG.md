@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-16
+
+### Added
+- **Diverse Skill Routing (DSR, arXiv: 2609.05824)**: Added `krusch_context_route_skills` tool using Determinantal Point Processes (DPP) to retrieve orthogonal, non-redundant agent skills matching a task query without token bloat.
+- **Emergence World Multi-Agent Resilience Gate (arXiv: 2609.17320)**: Added `krusch_context_evaluate_resilience` tool for auditing multi-agent execution traces, detecting cascading failure depth, circular delegation deadlocks, and credential leakage across agent handoffs.
+- **Hierarchical Teacher Memory Distillation (arXiv: 2608.07169)**: Added `krusch_context_distill_teacher_memory`, `krusch_context_retrieve_teacher_distillation`, and `krusch_context_distill_function_memory` for logging and retrieving cross-model student trajectory corrections.
+- **Temporal Fact Superseding & Invalidation (MobileMem, arXiv: 2608.13606)**: Added `krusch_context_supersede_memory` and `krusch_context_invalidate_memory` with lineage tracking and exclusion of superseded records from active semantic retrieval.
+- Automated unit test suite `tests/research-tools.test.js` covering DSR and Resilience Gate evaluations.
+
+### Fixed
+- **Missing `session_handoffs` Migration**: Added `initSessionEngineTable()` in `src/session-engine.js` and wired into `src/index.js` database startup, resolving `relation "session_handoffs" does not exist` errors on fresh databases.
+- **Ollama 404 Tag Model Fallback**: Updated default `TAG_MODEL` in `src/llm-tags.js` to `qwen2.5-coder:1.5b` (matching installed local models), eliminating HTTP 404 retries and tag generation warnings.
+- **Homelab Path Portability**: Generalized `HOMELAB_ROOT` in `src/session-engine.js` to dynamically resolve `process.env.HOMELAB_ROOT || '/home/krusch/homelab'`.
+- **Test Runner Environment**: Updated `npm test` script in `package.json` to load `--env-file=.env`, preventing PostgreSQL connection timeouts.
+- **Defensive Repository Queries**: Updated `tests/memory-engine.test.js` to gracefully skip if the Git repository table has not been initialized.
+
+### Changed
+- Expanded total MCP tool count to **53 tools**.
+- Bumped server and package version to `1.4.0`.
+
 ## [1.3.0] - 2026-07-24
 
 ### Added

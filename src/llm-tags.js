@@ -26,7 +26,7 @@ export async function generateTagsFromLLM(text, options = {}) {
 
     if (process.env.COMPLETION_URL) {
         try {
-            const tagModel = process.env.TAG_MODEL || 'llama3.2';
+            const tagModel = process.env.TAG_MODEL || 'qwen2.5-coder:1.5b';
             const responseText = await chat(
                 "You are a helpful assistant that extracts keywords/tags from text.",
                 prompt,
@@ -49,7 +49,7 @@ export async function generateTagsFromLLM(text, options = {}) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    model: process.env.TAG_MODEL || "llama3.2",
+                    model: process.env.TAG_MODEL || "qwen2.5-coder:1.5b",
                     prompt,
                     stream: false
                 })

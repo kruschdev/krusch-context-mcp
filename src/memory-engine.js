@@ -4,6 +4,7 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
 import { generateTagsFromLLM } from './llm-tags.js';
 import { isPgContextEnabled, syncPgContextPoints } from './pgcontext-helper.js';
+import { filterActiveMemories, supersedeMemoryRecord, buildMemoryLineage, MemoryInvalidationEngine } from '../../../lib/memory-invalidation.js';
 
 const DECAY_RATE = 0.01;
 const AUTO_TAG = true; // Hardcoded for context MCP
@@ -11,65 +12,102 @@ const AUTO_TAG = true; // Hardcoded for context MCP
 
 /**
  * Persists a memory to the local project-specific SQLite cache and queues for async sync.
+ * Supports temporal fact superseding.
  * @param {string} project - Project name.
  * @param {string} category - Category.
  * @param {string} content - Memory content.
  * @param {string|null} finalTags - JSON string array of tags.
  * @param {string} embeddingStr - Vector representation.
+ * @param {number|null} [supersedes_id=null] - Optional ID of memory being superseded.
  * @returns {Promise<{content: Array}>}
  */
-async function _addProjectMemory(project, category, content, finalTags, embeddingStr) {
+async function _addProjectMemory(project, category, content, finalTags, embeddingStr, supersedes_id = null) {
     const db = await getProjectDb(project);
     if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${project} not found.` }] };
-    db.prepare(`
-        INSERT INTO ide_agent_memory (category, content, tags, embedding)
-        VALUES (?, ?, ?, ?)
-    `).run(category, content, finalTags, embeddingStr);
+    
+    const info = db.prepare(`
+        INSERT INTO ide_agent_memory (category, content, tags, embedding, status, supersedes_id)
+        VALUES (?, ?, ?, ?, 'ACTIVE', ?)
+    `).run(category, content, finalTags, embeddingStr, supersedes_id);
+
+    const newId = info.lastInsertRowid;
+    if (supersedes_id) {
+        try {
+            db.prepare(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = ? WHERE id = ?`).run(newId, supersedes_id);
+            const oldRow = db.prepare(`SELECT pg_id FROM ide_agent_memory WHERE id = ?`).get(supersedes_id);
+            if (oldRow && oldRow.pg_id) {
+                const client = await pool.connect();
+                try {
+                    await client.query("UPDATE ide_agent_memory SET status = 'SUPERSEDED' WHERE id = $1", [oldRow.pg_id]);
+                } finally {
+                    client.release();
+                }
+            }
+        } catch (err) {
+            console.warn(`[memory-engine] SQLite supersede update warning: ${err.message}`);
+        }
+    }
     
     try {
         await pushProjectMemory(project, db);
     } catch (e) {
         console.error(`[memory-engine] Push failed for ${project}:`, e);
     }
-    return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${project} (${category})` }] };
+    const supersedeNote = supersedes_id ? ` (supersedes ID ${supersedes_id})` : '';
+    return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${project} (${category})${supersedeNote}` }] };
 }
 
 /**
  * Persists a memory to the global Postgres fleet memory store.
+ * Supports temporal fact superseding.
  * @param {string} category - Category.
  * @param {string} content - Memory content.
  * @param {string|null} finalTags - JSON string array of tags.
  * @param {string} embeddingStr - Vector representation.
+ * @param {number|null} [supersedes_id=null] - Optional ID of memory being superseded.
  * @returns {Promise<{content: Array}>}
  */
-async function _addGlobalMemory(category, content, finalTags, embeddingStr) {
+async function _addGlobalMemory(category, content, finalTags, embeddingStr, supersedes_id = null) {
     const client = await pool.connect();
     try {
         const res = await client.query(`
-            INSERT INTO ide_agent_memory (project, category, content, embedding, tags)
-            VALUES (NULL, $1, $2, $3::vector, $4)
+            INSERT INTO ide_agent_memory (project, category, content, embedding, tags, status, supersedes_id)
+            VALUES (NULL, $1, $2, $3::vector, $4, 'ACTIVE', $5)
             RETURNING id
-        `, [category, content, embeddingStr, finalTags]);
-        if (res.rows.length > 0) {
-            await syncPgContextPoints(pool, 'ide_agent_memory', [res.rows[0].id]);
+        `, [category, content, embeddingStr, finalTags, supersedes_id]);
+        
+        const newId = res.rows[0]?.id;
+        if (newId && supersedes_id) {
+            try {
+                await client.query(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = $1 WHERE id = $2`, [newId, supersedes_id]);
+            } catch (err) {
+                console.warn(`[memory-engine] Postgres supersede update warning: ${err.message}`);
+            }
+        }
+
+        if (newId) {
+            await syncPgContextPoints(pool, 'ide_agent_memory', [newId]);
         }
     } finally {
         client.release();
     }
-    return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved GLOBAL memory to category: ${category}` }] };
+    const supersedeNote = supersedes_id ? ` (supersedes ID ${supersedes_id})` : '';
+    return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved GLOBAL memory to category: ${category}${supersedeNote}` }] };
 }
 
 /**
  * Adds a new episodic memory to the persistent IDE database.
+ * Supports MobileMem temporal fact superseding (arXiv: 2608.13606).
  * @param {object} params
  * @param {string} params.category - Category of memory ('priorities', 'bugs', 'outcomes', 'lessons', 'activity')
  * @param {string} params.content - Text content of the memory
  * @param {string[]} [params.tags] - Optional user-defined tags
  * @param {string} [params.project] - Optional project association (saves to local SQLite if provided)
+ * @param {number} [params.supersedes_id] - Optional ID of previous memory this fact replaces/supersedes
  * @param {number[]} [params._embedding] - Optional pre-computed embedding to avoid redundant LLM calls
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function addMemory({ category, content, tags, project, _embedding }) {
+export async function addMemory({ category, content, tags, project, supersedes_id, _embedding }) {
     if (!category || !content) throw new McpError(ErrorCode.InvalidParams, "Missing params");
     
     const embeddingArray = _embedding || await getEmbedding(content);
@@ -83,9 +121,9 @@ export async function addMemory({ category, content, tags, project, _embedding }
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 
     if (project) {
-        return await _addProjectMemory(project, category, content, finalTags, embeddingStr);
+        return await _addProjectMemory(project, category, content, finalTags, embeddingStr, supersedes_id || null);
     }
-    return await _addGlobalMemory(category, content, finalTags, embeddingStr);
+    return await _addGlobalMemory(category, content, finalTags, embeddingStr, supersedes_id || null);
 }
 
 /**
@@ -143,14 +181,14 @@ async function _searchGlobalMemory(category, embeddingArray, limit, active_proje
         }
         const res = await client.query(`
             WITH semantic_matches AS (
-                SELECT id, project, content, tags, created_at, embedding <=> $1::vector as distance
+                SELECT id, project, content, tags, created_at, status, supersedes_id, superseded_by, valid_until, embedding <=> $1::vector as distance
                 FROM ide_agent_memory
                 WHERE category = $2 ${projectFilter}
                 ORDER BY embedding <=> $1::vector
                 LIMIT 100
             )
             SELECT 
-                id, project, content, tags, created_at,
+                id, project, content, tags, created_at, status, supersedes_id, superseded_by, valid_until,
                 (1 - distance) * exp(-$4::float * EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at))/86400) as similarity
             FROM semantic_matches
             ORDER BY similarity DESC
@@ -176,7 +214,7 @@ async function _searchProjectMemory(active_project, category, embeddingArray, li
     if (!db) return [];
     
     // NOTE: Full-table scan with in-JS cosine — scales to ~500 memories per project-category
-    const rows = db.prepare(`SELECT id, category, content, tags, embedding, created_at FROM ide_agent_memory WHERE category = ?`).all(category);
+    const rows = db.prepare(`SELECT id, category, content, tags, embedding, created_at, status, supersedes_id, superseded_by, valid_until FROM ide_agent_memory WHERE category = ?`).all(category);
     const now = Date.now();
     return rows.map(r => {
         let rowEmb = [];
@@ -194,6 +232,7 @@ async function _searchProjectMemory(active_project, category, embeddingArray, li
         // +0.3 bias intentionally boosts project-local results to prefer local context
         return {
             id: r.id, project: active_project, content: r.content, tags: r.tags,
+            status: r.status || 'ACTIVE', supersedes_id: r.supersedes_id, superseded_by: r.superseded_by, valid_until: r.valid_until,
             created_at: r.created_at, similarity: (sim + 0.3) * decay, source: 'project'
         };
     }).sort((a, b) => b.similarity - a.similarity).slice(0, limit);
@@ -203,15 +242,10 @@ async function _keywordSearchGlobal(category, query, limit, active_project) {
     const client = await pool.connect();
     try {
         const queryParams = [category, `%${query}%`, limit];
-        let projectFilter = 'AND project IS NULL';
-        if (active_project) {
-            projectFilter = 'AND (project = $4 OR project IS NULL)';
-            queryParams.push(active_project);
-        }
         const res = await client.query(`
-            SELECT id, project, content, tags, created_at, 1.0 as similarity
+            SELECT id, project, content, tags, created_at, status, supersedes_id, superseded_by, valid_until, 1.0 as similarity
             FROM ide_agent_memory
-            WHERE category = $1 ${projectFilter} AND content ILIKE $2
+            WHERE category = $1 AND project IS NULL AND content ILIKE $2
             ORDER BY created_at DESC
             LIMIT $3
         `, queryParams);
@@ -226,7 +260,7 @@ async function _keywordSearchProject(active_project, category, query, limit) {
     const db = await getProjectDb(active_project);
     if (!db) return [];
     const rows = db.prepare(`
-        SELECT id, category, content, tags, created_at 
+        SELECT id, category, content, tags, created_at, status, supersedes_id, superseded_by, valid_until 
         FROM ide_agent_memory 
         WHERE category = ? AND content LIKE ?
         ORDER BY created_at DESC
@@ -234,6 +268,7 @@ async function _keywordSearchProject(active_project, category, query, limit) {
     `).all(category, `%${query}%`, limit);
     return rows.map(r => ({
         id: r.id, project: active_project, content: r.content, tags: r.tags,
+        status: r.status || 'ACTIVE', supersedes_id: r.supersedes_id, superseded_by: r.superseded_by, valid_until: r.valid_until,
         created_at: r.created_at, similarity: 1.0, source: 'project'
     }));
 }
@@ -242,15 +277,10 @@ async function _tagSearchGlobal(category, tag, limit, active_project) {
     const client = await pool.connect();
     try {
         const queryParams = [category, `%${tag}%`, limit];
-        let projectFilter = 'AND project IS NULL';
-        if (active_project) {
-            projectFilter = 'AND (project = $4 OR project IS NULL)';
-            queryParams.push(active_project);
-        }
         const res = await client.query(`
-            SELECT id, project, content, tags, created_at, 1.0 as similarity
+            SELECT id, project, content, tags, created_at, status, supersedes_id, superseded_by, valid_until, 1.0 as similarity
             FROM ide_agent_memory
-            WHERE category = $1 ${projectFilter} AND tags ILIKE $2
+            WHERE category = $1 AND project IS NULL AND (tags ILIKE $2 OR tags LIKE $2)
             ORDER BY created_at DESC
             LIMIT $3
         `, queryParams);
@@ -265,7 +295,7 @@ async function _tagSearchProject(active_project, category, tag, limit) {
     const db = await getProjectDb(active_project);
     if (!db) return [];
     const rows = db.prepare(`
-        SELECT id, category, content, tags, created_at 
+        SELECT id, category, content, tags, created_at, status, supersedes_id, superseded_by, valid_until 
         FROM ide_agent_memory 
         WHERE category = ? AND tags LIKE ?
         ORDER BY created_at DESC
@@ -273,6 +303,7 @@ async function _tagSearchProject(active_project, category, tag, limit) {
     `).all(category, `%${tag}%`, limit);
     return rows.map(r => ({
         id: r.id, project: active_project, content: r.content, tags: r.tags,
+        status: r.status || 'ACTIVE', supersedes_id: r.supersedes_id, superseded_by: r.superseded_by, valid_until: r.valid_until,
         created_at: r.created_at, similarity: 1.0, source: 'project'
     }));
 }
@@ -325,7 +356,7 @@ async function db_fetch_linked_blobs(memory_id) {
 
 /**
  * Searches the persistent IDE database via semantic embeddings, keywords, or tags.
- * Supports GRASP context-expansion (provenance lineage & codebase linkage).
+ * Supports MobileMem active lineage filtering (arXiv: 2608.13606) & GRASP context-expansion.
  * @param {object} params
  * @param {string} params.category - Category to search
  * @param {string} params.query - Search query string
@@ -335,9 +366,10 @@ async function db_fetch_linked_blobs(memory_id) {
  * @param {string} [params.search_type='semantic'] - 'semantic', 'keyword', or 'tag'
  * @param {boolean} [params.include_history=false] - If true, traverses and appends version parent history
  * @param {boolean} [params.include_linked_blobs=false] - If true, retrieves linked git file blobs
+ * @param {boolean} [params.include_superseded=false] - If true, returns superseded/invalidated records
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function searchMemory({ category, query, limit = 3, active_project, _embedding, search_type = 'semantic', include_history = false, include_linked_blobs = false }) {
+export async function searchMemory({ category, query, limit = 3, active_project, _embedding, search_type = 'semantic', include_history = false, include_linked_blobs = false, include_superseded = false }) {
     if (!category || !query) throw new McpError(ErrorCode.InvalidParams, "Missing category or query params");
 
     let pgResults = [];
@@ -357,12 +389,17 @@ export async function searchMemory({ category, query, limit = 3, active_project,
         sqliteResults = await _searchProjectMemory(active_project, category, embeddingArray, limit);
     }
 
-    const results = [...pgResults, ...sqliteResults]
+    let allCandidates = [...pgResults, ...sqliteResults];
+    if (!include_superseded) {
+        allCandidates = filterActiveMemories(allCandidates);
+    }
+
+    const results = allCandidates
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, limit);
 
     if (results.length === 0) {
-        return { content: [{ type: "text", text: `=== 🧠 Memory Retrieval (${search_type}): ${category} ===\n\nNo results found.` }] };
+        return { content: [{ type: "text", text: `=== 🧠 Memory Retrieval (${search_type}): ${category} ===\n\nNo active results found.` }] };
     }
 
     const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -382,8 +419,10 @@ export async function searchMemory({ category, query, limit = 3, active_project,
         }
         const dateStr = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : 'unknown';
         const projectStr = r.source === 'project' ? ` | Project: ${r.project}` : ' | Global';
+        const statusStr = r.status && r.status !== 'ACTIVE' ? ` | [${r.status}]` : '';
+        const lineageStr = r.supersedes_id ? ` (Supersedes: #${r.supersedes_id})` : '';
         
-        output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | ID: ${r.id} | Date: ${dateStr}${projectStr}${tagsStr} ---\n${r.content}\n`;
+        output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | ID: ${r.id} | Date: ${dateStr}${projectStr}${statusStr}${lineageStr}${tagsStr} ---\n${r.content}\n`;
 
         // GRASP Expansion: Include lineage history
         if (include_history && UUID_REGEX.test(r.id)) {
@@ -409,6 +448,56 @@ export async function searchMemory({ category, query, limit = 3, active_project,
         }
     }
     return { content: [{ type: "text", text: output }] };
+}
+
+/**
+ * Supersedes an existing memory fact with updated knowledge.
+ * @param {object} params
+ * @param {number} params.id - Target memory ID to supersede
+ * @param {string} params.category - Category of memory
+ * @param {string} params.content - New updated content
+ * @param {string} [params.project] - Optional project association
+ * @param {string[]} [params.tags] - Optional tags
+ * @returns {Promise<{content: Array}>}
+ */
+export async function supersedeMemory({ id, category, content, project, tags }) {
+    if (!id || !category || !content) throw new McpError(ErrorCode.InvalidParams, "Missing id, category, or content params");
+    return await addMemory({ category, content, tags, project, supersedes_id: id });
+}
+
+/**
+ * Explicitly marks a memory record as INVALIDATED (e.g. revoked secret, deprecated invariant).
+ * @param {object} params
+ * @param {number} params.id - Memory ID to invalidate
+ * @param {string} [params.project] - Project association
+ * @param {string} [params.reason="Explicitly invalidated by agent"] - Reason for invalidation
+ * @returns {Promise<{content: Array}>}
+ */
+export async function invalidateMemory({ id, project, reason = "Explicitly invalidated by agent" }) {
+    if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing id param");
+    if (project) {
+        const db = await getProjectDb(project);
+        if (db) {
+            db.prepare(`UPDATE ide_agent_memory SET status = 'INVALIDATED' WHERE id = ?`).run(id);
+            const row = db.prepare(`SELECT pg_id FROM ide_agent_memory WHERE id = ?`).get(id);
+            if (row && row.pg_id) {
+                const client = await pool.connect();
+                try {
+                    await client.query(`UPDATE ide_agent_memory SET status = 'INVALIDATED' WHERE id = $1`, [row.pg_id]);
+                } finally {
+                    client.release();
+                }
+            }
+        }
+    } else {
+        const client = await pool.connect();
+        try {
+            await client.query(`UPDATE ide_agent_memory SET status = 'INVALIDATED' WHERE id = $1`, [id]);
+        } finally {
+            client.release();
+        }
+    }
+    return { content: [{ type: "text", text: `[krusch-context] 🗑️ Successfully marked memory ID ${id} as INVALIDATED (${reason})` }] };
 }
 
 /**

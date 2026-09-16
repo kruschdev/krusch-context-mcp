@@ -22,19 +22,23 @@ Every time you start a new AI coding session, your agent starts from zero. It do
 
 ## What It Does
 
-A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **44 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
+A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **53 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
 
 | Capability | What It Provides |
 |-----------|-----------------|
 | ⚡ **Unified Hybrid Retrieval** | Polygres-inspired single-call retrieval combining vector search, multi-hop graph walks (`graph_hops`), server-side token packing (`limit_tokens`), and optional **Rubric4Setwise** minimal cover reranking. |
+| 🎯 **Diverse Skill Routing (DSR)** | Determinantal Point Process (DPP) skill routing (`krusch_context_route_skills`) for non-redundant orthogonal tool selection without prompt bloat ([arXiv: 2609.05824](https://arxiv.org/abs/2609.05824)). |
+| 🛡️ **Multi-Agent Resilience Gate** | Emergence World stress-testing (`krusch_context_evaluate_resilience`) for error cascades, circular deadlocks, and credential leakage across agent handoffs ([arXiv: 2609.17320](https://arxiv.org/abs/2609.17320)). |
+| 🎓 **Hierarchical Teacher Memory** | Workflow, subtask, and function-tier trajectory distillation (`krusch_context_distill_teacher_memory`, `krusch_context_distill_function_memory`) for cross-model student learning ([arXiv: 2608.07169](https://arxiv.org/abs/2608.07169)). |
+| ⏳ **Temporal Fact Superseding** | MobileMem temporal fact superseding (`krusch_context_supersede_memory`) and invalidation (`krusch_context_invalidate_memory`) to eliminate outdated knowledge ([arXiv: 2608.13606](https://arxiv.org/abs/2608.13606)). |
 | 🔍 **Semantic Codebase Search** | Search the *meaning* of your code, not just filenames. "How do we handle auth?" returns the actual implementation. |
 | 🧠 **Episodic Memory** | Bugs, decisions, and lessons persist across sessions, retrieved by semantic relevance with temporal decay. See [Episodic Memory Guide](docs/EPISODIC_MEMORY.md). |
 | 💎 **Steering Nudges** | Lightweight key-value facts (preferences, conventions) give the agent behavioral continuity without re-prompting. |
 | 🔄 **Agentic Context Management (ACM)** | Structured context lifecycle staging, compaction, eviction retention policies, and context window token budget auditing ([ArXiv: 2607.21503](https://huggingface.co/papers/2607.21503)). |
-| 🐞 [**AgentDebugX Error Hub**](https://github.com/AgentDebugX/AgentDebugX) | Failure observability, trajectory root-cause attribution, and execution recovery pattern retrieval for SRE queue healing. |
-| ⚙️ **DataFlow-Harness Grounded Codegen** | Grounded MCP operator registry and schema-validated pipeline DAG mutations (`AddNode`, `WireEdge`, `UpdateNodeConfig`). |
-| 📊 **Rubric4Setwise Reranking** | Document-set selection evaluating Redundancy, Conflict, and Complementarity rubrics to filter candidate sets down to minimal covering sets. |
-| 🔬 **AREX Deep Research Engine** | Recursively self-improving inner research evidence tracking paired with outer self-improvement constraint audits. |
+| 🐞 [**AgentDebugX Error Hub**](https://github.com/AgentDebugX/AgentDebugX) | Failure observability, trajectory root-cause attribution, and execution recovery pattern retrieval for SRE queue healing ([ArXiv: 2607.18754](https://arxiv.org/abs/2607.18754)). |
+| ⚙️ **DataFlow-Harness Grounded Codegen** | Grounded MCP operator registry and schema-validated pipeline DAG mutations (`AddNode`, `WireEdge`, `UpdateNodeConfig`) ([ArXiv: 2607.16617](https://arxiv.org/abs/2607.16617)). |
+| 📊 **Rubric4Setwise Reranking** | Document-set selection evaluating Redundancy, Conflict, and Complementarity rubrics to filter candidate sets down to minimal covering sets ([ArXiv: 2607.19238](https://arxiv.org/abs/2607.19238)). |
+| 🔬 **AREX Deep Research Engine** | Recursively self-improving inner research evidence tracking paired with outer self-improvement constraint audits ([ArXiv: 2607.21461](https://arxiv.org/abs/2607.21461)). |
 | 📖 **Documentation Search** | Ingested external docs are searchable locally — your agent references *your* versions, not its training data. |
 | 🛡️ **Proactive Auditor (Memory Agent)** | Trajectory auditing that learns from feedback (Direct-OPD) to verify trajectories and log alignment signals. |
 | 🌍 **Zero-Trust Deep Search** | One tool call cross-references codebase reality with historical memory to verify understanding before acting. |
@@ -82,7 +86,7 @@ Add to your IDE MCP settings (e.g., `.cursor/mcp.json`, `claude_desktop_config.j
 }
 ```
 
-Restart your IDE — your agent now has access to all 32 tools.
+Restart your IDE — your agent now has access to all 53 tools.
 
 > **Upgrading?** `git pull origin main && npm install && npm start` — idempotent migrations run on startup.
 
@@ -288,7 +292,7 @@ krusch-context-mcp/
 ├── scripts/                  # Benchmarking, evaluation, and maintenance
 ├── tests/                    # *.test.js = automated, test_*.js = smoke
 ├── docs/
-│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 44 tools
+│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 53 tools
 │   ├── SETUP.md              # Configuration, storage routing, troubleshooting
 │   └── research/             # Sentra Company Brain research essays
 └── package.json
@@ -301,7 +305,7 @@ krusch-context-mcp/
 ```bash
 npm test                                # Automated (node:test, *.test.js)
 npm run test:smoke                      # JSON-RPC stdio smoke tests
-node tests/test_client.js               # All 44 tools against live DB
+node tests/test_client.js               # All 53 tools against live DB
 node tests/test_ai_watch_integrations.js # AI Watch paper integration suite
 node scripts/benchmark_latency.js       # End-to-end latency
 node scripts/eval_accuracy.js           # Precision/recall

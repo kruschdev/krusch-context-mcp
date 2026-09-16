@@ -13,6 +13,7 @@ import { getEmbedding } from './embedding-helper.js';
 import { isPgContextEnabled } from './pgcontext-helper.js';
 import { searchBlobs } from 'pg-git-mcp/server/git-engine.js';
 import { selectMinimalCoveringSet } from './setwise-engine.js';
+import { prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from '../../../lib/prune.js';
 
 const DECAY_RATE = 0.01; // Exponential time decay rate per day
 
@@ -28,6 +29,7 @@ export function estimateTokens(text) {
 
 /**
  * Packs ranked context items into a single Markdown payload respecting limit_tokens.
+ * Applies Pre-Synthesis pruning to strip boilerplate lines.
  * @param {Array<{type: string, title: string, content: string, score: number}>} items 
  * @param {number} limitTokens 
  * @returns {{contextText: string, packedCount: number, totalTokens: number}}
@@ -40,14 +42,14 @@ export function packTokenBudget(items, limitTokens = 4000) {
     
     for (const item of sorted) {
         const header = `### [${item.type.toUpperCase()}] ${item.title} (Relevance: ${(item.score * 100).toFixed(1)}%)\n`;
-        const body = item.content.trim() + '\n\n';
-        const itemTokens = estimateTokens(header + body);
+        const cleanedBody = prunePreSynthesis(item.content || '').trim() + '\n\n';
+        const itemTokens = estimateTokens(header + cleanedBody);
         
         if (currentTokens + itemTokens > limitTokens && packed.length > 0) {
             break; // Stop packing once budget is reached
         }
         
-        packed.push(header + body);
+        packed.push(header + cleanedBody);
         currentTokens += itemTokens;
     }
 
@@ -253,20 +255,23 @@ async function traverseGraphNeighbors(seedItems, hops = 1) {
 export async function unifiedRetrieve({ query, project, graph_hops = 1, limit_tokens = 4000, include_code = true, setwise_rerank = false }) {
     if (!query) return { content: [{ type: "text", text: "Error: Missing required query parameter." }] };
 
-    // 1. Generate query embedding
-    const queryEmbedding = await getEmbedding(query);
+    // 1. Stage-Aware Pre-Retrieval Pruning (arXiv: 2608.08389)
+    const cleanedQuery = prunePreRetrieval(query);
+
+    // 2. Generate query embedding
+    const queryEmbedding = await getEmbedding(cleanedQuery || query);
     if (!queryEmbedding) return { content: [{ type: "text", text: "Error: Failed to generate query embedding." }] };
 
-    // 2. Fetch seed nodes (Memories + Steering Nuggets)
+    // 3. Fetch seed nodes (Memories + Steering Nuggets)
     const seedMemories = await getSeedMemories(queryEmbedding, project, 10);
     const seedNuggets = await getSeedNuggets(queryEmbedding, project, 5);
     
     let allCandidates = [...seedMemories, ...seedNuggets];
 
-    // 3. Optional Direct Code Blob Search
+    // 4. Optional Direct Code Blob Search
     if (include_code) {
         try {
-            const codeBlobs = await searchBlobs(query, 5);
+            const codeBlobs = await searchBlobs(cleanedQuery || query, 5);
             if (codeBlobs && Array.isArray(codeBlobs)) {
                 const codeItems = codeBlobs.map((blob, idx) => ({
                     id: `code-direct-${idx}`,
@@ -281,15 +286,18 @@ export async function unifiedRetrieve({ query, project, graph_hops = 1, limit_to
         } catch (_) {}
     }
 
-    // 4. Multi-Hop Graph Traversal
+    // 5. Multi-Hop Graph Traversal
     let expandedGraphItems = await traverseGraphNeighbors(allCandidates, Math.min(graph_hops, 2));
 
-    // 5. Optional Rubric4Setwise Minimal Cover Reranking
+    // 6. Stage-Aware Post-Retrieval Pruning (Near-duplicate suppression)
+    expandedGraphItems = prunePostRetrieval(expandedGraphItems, { similarityThreshold: 0.88 });
+
+    // 7. Optional Rubric4Setwise Minimal Cover Reranking
     if (setwise_rerank) {
         expandedGraphItems = selectMinimalCoveringSet(expandedGraphItems, query, 10);
     }
 
-    // 6. Server-Side Token Budget Accumulator
+    // 8. Server-Side Token Budget Accumulator (Pre-Synthesis Pruned)
     const { contextText, packedCount, totalTokens } = packTokenBudget(expandedGraphItems, limit_tokens);
 
     const summaryHeader = `## 🧠 Unified Context Retrieval\n` +

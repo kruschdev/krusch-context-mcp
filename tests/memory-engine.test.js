@@ -12,15 +12,23 @@ test('Integration Test Suite for krusch-context-mcp tools', async (t) => {
     let rootTreeId = null;
 
     await t.test('should retrieve repository root tree', async () => {
-        const res = await pool.query('SELECT id FROM repositories LIMIT 1');
-        if (res.rows.length === 0) {
-            console.log('Skipping: No repositories found in db');
-            return;
+        try {
+            const res = await pool.query('SELECT id FROM repositories LIMIT 1');
+            if (res.rows.length === 0) {
+                console.log('Skipping: No repositories found in db');
+                return;
+            }
+            testRepoId = res.rows[0].id;
+            rootTreeId = await getRepoRootTree(testRepoId);
+            assert.ok(rootTreeId, 'Root tree ID should not be null');
+            assert.strictEqual(typeof rootTreeId, 'string', 'Root tree ID should be a string');
+        } catch (err) {
+            if (err.code === '42P01') {
+                console.log('Skipping: repositories table does not exist in db');
+                return;
+            }
+            throw err;
         }
-        testRepoId = res.rows[0].id;
-        rootTreeId = await getRepoRootTree(testRepoId);
-        assert.ok(rootTreeId, 'Root tree ID should not be null');
-        assert.strictEqual(typeof rootTreeId, 'string', 'Root tree ID should be a string');
     });
 
     await t.test('should list tree entries', async () => {

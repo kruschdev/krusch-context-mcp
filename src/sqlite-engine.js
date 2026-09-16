@@ -89,11 +89,44 @@ async function _initProjectDb(projectName) {
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS agent_teacher_memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pg_id INTEGER,
+            tier TEXT NOT NULL,
+            task_pattern TEXT NOT NULL,
+            teacher_model TEXT NOT NULL,
+            student_model TEXT,
+            trajectory TEXT NOT NULL,
+            distilled_rule TEXT NOT NULL,
+            embedding TEXT,
+            tags TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
     `);
     
     // Schema Evolution (Lakebase Architecture)
     try {
         db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN pg_id INTEGER;`);
+    } catch (e) {
+        if (!e.message.includes('duplicate column name')) throw e;
+    }
+    try {
+        db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN status TEXT DEFAULT 'ACTIVE';`);
+    } catch (e) {
+        if (!e.message.includes('duplicate column name')) throw e;
+    }
+    try {
+        db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN supersedes_id INTEGER;`);
+    } catch (e) {
+        if (!e.message.includes('duplicate column name')) throw e;
+    }
+    try {
+        db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN superseded_by INTEGER;`);
+    } catch (e) {
+        if (!e.message.includes('duplicate column name')) throw e;
+    }
+    try {
+        db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN valid_until DATETIME;`);
     } catch (e) {
         if (!e.message.includes('duplicate column name')) throw e;
     }
@@ -171,7 +204,7 @@ export async function pushProjectMemory(projectName, db) {
         await client.query('BEGIN');
         
         // 1. Push unsynced episodic memories
-        const unsyncedMems = db.prepare(`SELECT id, category, content, tags, embedding FROM ide_agent_memory WHERE pg_id IS NULL`).all();
+        const unsyncedMems = db.prepare(`SELECT id, category, content, tags, embedding, status, supersedes_id, superseded_by FROM ide_agent_memory WHERE pg_id IS NULL`).all();
         const pushedMemIds = [];
         for (const mem of unsyncedMems) {
             // Reconstruct array string if necessary
@@ -183,9 +216,9 @@ export async function pushProjectMemory(projectName, db) {
             let parsedTags = null;
             try { parsedTags = mem.tags ? JSON.parse(mem.tags) : null; } catch { parsedTags = mem.tags; }
             const res = await client.query(
-                `INSERT INTO ide_agent_memory (project, category, content, tags, embedding)
-                 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-                [projectName, mem.category, mem.content, parsedTags, embedStr]
+                `INSERT INTO ide_agent_memory (project, category, content, tags, embedding, status, supersedes_id, superseded_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+                [projectName, mem.category, mem.content, parsedTags, embedStr, mem.status || 'ACTIVE', mem.supersedes_id || null, mem.superseded_by || null]
             );
             
             const newPgId = res.rows[0].id;
