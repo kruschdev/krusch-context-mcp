@@ -39,13 +39,15 @@ A single [Model Context Protocol](https://modelcontextprotocol.io/) server expos
 | ⚙️ **DataFlow-Harness Grounded Codegen** | Grounded MCP operator registry and schema-validated pipeline DAG mutations (`AddNode`, `WireEdge`, `UpdateNodeConfig`) ([ArXiv: 2607.16617](https://arxiv.org/abs/2607.16617)). |
 | 📊 **Rubric4Setwise Reranking** | Document-set selection evaluating Redundancy, Conflict, and Complementarity rubrics to filter candidate sets down to minimal covering sets ([ArXiv: 2607.19238](https://arxiv.org/abs/2607.19238)). |
 | 🔬 **AREX Deep Research Engine** | Recursively self-improving inner research evidence tracking paired with outer self-improvement constraint audits ([ArXiv: 2607.21461](https://arxiv.org/abs/2607.21461)). |
+| 📉 **Structural Trajectory Analysis (STRACE)** | Causal fault isolation across versioned interaction memory to pinpoint first-error steps and failure drift ([ArXiv: 2607.07702](https://arxiv.org/abs/2607.07702)). |
+| 🤝 **Session Bridge & Review** | Asynchronous session handoff logging and background telemetry review synthesis by SRE scouts (`write_session_handoff`, `read_session_review`). |
 | 📖 **Documentation Search** | Ingested external docs are searchable locally — your agent references *your* versions, not its training data. |
 | 🛡️ **Proactive Auditor (Memory Agent)** | Trajectory auditing that learns from feedback (Direct-OPD) to verify trajectories and log alignment signals. |
 | 🌍 **Zero-Trust Deep Search** | One tool call cross-references codebase reality with historical memory to verify understanding before acting. |
 
 ## Why You'd Want It
 
-**🛡️ Everything stays on your hardware** — All embeddings via local [Ollama](https://ollama.com/) (`bge-large` + `llama3.2`). Storage is PostgreSQL + pgvector + SQLite. Zero API costs, full data sovereignty.
+**🛡️ Everything stays on your hardware** — All embeddings via local [Ollama](https://ollama.com/) (`bge-large` + `qwen2.5-coder:1.5b` or `llama3.2`). Storage is PostgreSQL + pgvector + SQLite. Zero API costs, full data sovereignty.
 
 **🔄 Switch models without losing context** — Memory is decoupled from the reasoning engine. Swap between Gemini, Claude, GPT-4o, or local models mid-project — every model inherits the same context.
 
@@ -57,7 +59,7 @@ A single [Model Context Protocol](https://modelcontextprotocol.io/) server expos
 
 ## Quick Start
 
-**Prerequisites:** [Node.js 22+](https://nodejs.org/) · [Ollama](https://ollama.com/) with `bge-large` and `llama3.2` · PostgreSQL with [`pgvector`](https://github.com/pgvector/pgvector)
+**Prerequisites:** [Node.js 22+](https://nodejs.org/) · [Ollama](https://ollama.com/) with `bge-large` and `qwen2.5-coder:1.5b` (or `llama3.2`) · PostgreSQL with [`pgvector`](https://github.com/pgvector/pgvector)
 
 ```bash
 # 1. Install [PG-Git-MCP](https://github.com/kruschdev/pg-git-mcp) (codebase ingestion engine)
@@ -233,40 +235,62 @@ For a detailed technical guide on categories, architecture, sync mechanics, and 
 
 ## Tool Quick-Reference
 
-> Full parameter details, defaults, and examples → **[Tool Reference](docs/TOOL_REFERENCE.md)**
+> Full parameter details, defaults, schemas, and usage examples → **[Tool Reference](docs/TOOL_REFERENCE.md)**
 
-| Tool | Description |
-|------|-------------|
-| **Episodic Memory** | |
-| `add_memory` | Store a memory (bug, lesson, priority, outcome, activity) |
-| `search_memory` | Semantic search with temporal decay |
-| `list_memories` | List recent memories by category |
-| `delete_memory` / `update_memory` | CRUD by ID |
-| `consolidate` | Merge semantically duplicate memories |
-| `compile_state` | Contextmaxxing — compile full project state |
-| **Company Brain v2** | |
-| `write_state` | Stateful write with concurrency control and attribution |
-| `resolve_conflict` | Merge conflicting sibling states |
-| `get_provenance` | Trace version history and lineage |
-| `search_lens` | Role-filtered semantic retrieval |
-| `traverse_graph` | Navigate parent/child lineage and linked blobs |
-| `update_ontology` / `link_blob` | Tag management and codebase linking |
-| **Codebase Search** | |
-| `search_code` | Semantic search over indexed files |
-| `deep_search` | Composite zero-trust search (memory + codebase) |
-| `list_repos` / `read_tree` / `read_blob` | Browse indexed repositories |
-| **Nuggets** | |
-| `nugget_remember` / `nugget_nudges` / `nugget_forget` / `nugget_list` | Steering fact CRUD |
-| **System, Auditing, & Skills** | |
-| `manage_lifecycle` | Agentic Context Management (ACM) fragment lifecycle (stage, compact, evict, get, list) |
-| `audit_budget` | Agentic Context Management (ACM) token budget and context pressure auditing |
-| `proactive_nudge` | Trajectory auditing — warn on rule/lesson violations |
-| `nudge_feedback` | Log developer/agent feedback to record alignment signals |
-| `analyze_trajectory` | Trajectory auditing — analyze execution path using STRACE and isolate faults |
-| `think` | Perform context synthesis, conflict detection, and gap analysis |
-| `list_skills` / `get_skill` | Browse and read specialized agent skills Registry |
-| `docs_list` / `docs_search` | External documentation search |
-| `health_check` | Server status verification |
+| Tool | Category | Description |
+|------|----------|-------------|
+| `retrieve` | **Hybrid Retrieval** | Single-call hybrid retrieval combining dense vectors, multi-hop graph walks, stage-aware pruning, and server-side token budget packing |
+| `add_memory` | **Episodic Memory** | Store a persistent memory (bug, lesson, priority, outcome, activity); supports `supersedes_id` |
+| `supersede_memory` | **Episodic Memory** | MobileMem temporal fact superseding — mark prior memory superseded and insert updated replacement with lineage |
+| `invalidate_memory` | **Episodic Memory** | MobileMem memory invalidation — revoke outdated memory record from active semantic retrieval |
+| `search_memory` | **Episodic Memory** | Semantic search with temporal decay and dynamic GRASP filtering (keyword, provenance history, linked blobs) |
+| `list_memories` | **Episodic Memory** | List recent memories filtered by category and project |
+| `delete_memory` / `update_memory` | **Episodic Memory** | Delete or update memory content and metadata by ID |
+| `consolidate` | **Episodic Memory** | Centroid-based semantic memory compression and deduplication without re-embedding |
+| `compile_state` | **Company Brain v2** | Contextmaxxing — compile multi-scale project state (micro, meso, macro) into prompt context |
+| `write_state` | **Company Brain v2** | Stateful write with optimistic concurrency control, lineage tracking, and attribution |
+| `resolve_conflict` | **Company Brain v2** | Merge conflicting sibling states and mark outdated branches deprecated |
+| `get_provenance` | **Company Brain v2** | Trace version history and parent-child interaction lineage |
+| `search_lens` | **Company Brain v2** | Role-filtered semantic retrieval tailored to specific personas (Architect, SRE, Product) |
+| `traverse_graph` | **Company Brain v2** | Navigate parent/child state lineage and linked codebase blobs |
+| `update_ontology` | **Company Brain v2** | Manage project tags, ontology nodes, and domain categories |
+| `link_blob` | **Company Brain v2** | Create explicit graph edges between episodic memories and git code blobs |
+| `search_code` | **Codebase Search** | Semantic search over indexed git blobs matching natural language intent |
+| `deep_search` | **Codebase Search** | Composite zero-trust search cross-referencing subjective memory and objective codebase reality |
+| `list_repos` | **Codebase Search** | Browse indexed repositories registered in PG-Git |
+| `read_tree` | **Codebase Search** | Inspect repository file hierarchy and directory trees |
+| `read_blob` | **Codebase Search** | Retrieve full file content by blob hash or file path |
+| `nugget_remember` | **Steering Nuggets** | Store key-value steering fact (conventions, coding style, preferences) |
+| `nugget_nudges` | **Steering Nuggets** | Retrieve steering facts semantically relevant to current task or project |
+| `nugget_forget` | **Steering Nuggets** | Delete steering fact by key |
+| `nugget_list` | **Steering Nuggets** | List all active steering nuggets for a project |
+| `manage_lifecycle` | **ACM** | Agentic Context Management fragment lifecycle (stage, compact, evict, get, list) |
+| `audit_budget` | **ACM** | Agentic Context Management token budget pressure and eviction recommendations |
+| `log_agent_failure` | **AgentDebugX** | Log agent execution failure, error symptoms, and candidate recovery patches |
+| `search_failures` | **AgentDebugX** | Search past agent failures by semantic symptom or agent role for SRE healing |
+| `get_recovery_pattern` | **AgentDebugX** | Retrieve validated recovery pattern and patch bundle for a recorded failure |
+| `register_pipeline_operator`| **DataFlow-Harness**| Register typed, schema-validated operator in the grounded data pipeline registry |
+| `inspect_pipeline_registry` | **DataFlow-Harness**| Inspect and search registered operators with filter and documentation |
+| `mutate_pipeline_dag` | **DataFlow-Harness**| Apply atomic, validated DAG mutations (`AddNode`, `WireEdge`, `UpdateNodeConfig`) |
+| `setwise_rerank` | **Rubric4Setwise** | Rerank document sets using Redundancy, Conflict, and Complementarity rubrics |
+| `update_research_state` | **AREX** | Update inner deep research state (verified evidence, unresolved constraints, next action hints) |
+| `arex_audit` | **AREX** | Audit research constraints and evaluate stopping convergence for deep research |
+| `distill_teacher_memory` | **Teacher Distillation**| Log teacher execution trajectory (workflow, subtask, function tier) for student learning |
+| `retrieve_teacher_distillation` | **Teacher Distillation**| Retrieve distilled teacher trajectories matching task query and tier |
+| `distill_function_memory` | **Teacher Distillation**| Distill tool call failure and teacher fix into Tier 3 Function Memory for student error recovery |
+| `route_skills` | **Skills & Gating** | Diverse Skill Routing (DSR) via DPP for non-redundant orthogonal skill selection |
+| `evaluate_resilience` | **Skills & Gating** | Multi-Agent Resilience Gate auditing handoffs for error cascades, deadlocks, and credential leaks |
+| `list_skills` | **Skills & Gating** | Browse registered homelab agent skills |
+| `get_skill` | **Skills & Gating** | Retrieve skill documentation, operational procedures, and instructions |
+| `proactive_nudge` | **Auditing & Reason** | Trajectory auditing — proactively warn on rule or lesson violations before execution |
+| `nudge_feedback` | **Auditing & Reason** | Record developer feedback on proactive nudges as reusable alignment signals (Direct-OPD) |
+| `analyze_trajectory` | **Auditing & Reason** | Trajectory auditing and causal fault isolation using STRACE to isolate root errors |
+| `think` | **Auditing & Reason** | Context synthesis, conflict detection, and gap analysis combining memory and code |
+| `write_session_handoff` | **Session Bridge** | Record session close summary, files touched, and link telemetry for background review |
+| `read_session_review` | **Session Bridge** | Read pending or latest session reviews generated by persistent SRE scouts |
+| `docs_list` | **External Docs** | List all ingested external documentation manuals |
+| `docs_search` | **External Docs** | Search within a specific documentation manual using vector similarity |
+| `health_check` | **System** | Verify MCP server status, database connection pool, and model connectivity |
 
 ---
 
@@ -275,26 +299,30 @@ For a detailed technical guide on categories, architecture, sync mechanics, and 
 ```
 krusch-context-mcp/
 ├── src/
-│   ├── index.js              # MCP server entry — tool registration & dispatch
-│   ├── memory-engine.js      # Episodic memory CRUD + consolidation
-│   ├── v2-engine.js          # Company Brain v2 substrate
-│   ├── nuggets-engine.js     # Holographic Nuggets CRUD
-│   ├── unified-retrieval.js  # Unified Hybrid Retrieval engine
-│   ├── acm-engine.js          # Agentic Context Management (ACM) engine & token cost auditing
-│   ├── agentdebugx-engine.js # AgentDebugX Error Hub & failure observability
-│   ├── dataflow-engine.js    # DataFlow-Harness grounded pipeline registry & DAG mutations
-│   ├── setwise-engine.js     # Rubric4Setwise minimal cover document-set selection
-│   ├── arex-engine.js        # AREX deep research state engine & constraint audit
-│   ├── sqlite-engine.js      # Lakebase SQLite layer (pull/push sync)
-│   ├── pgcontext-helper.js   # pgContext extension detection & HNSW index setup
-│   ├── proactive-engine.js   # Proactive trajectory auditor
-│   └── llm-tags.js           # Shared LLM tag generation
-├── scripts/                  # Benchmarking, evaluation, and maintenance
-├── tests/                    # *.test.js = automated, test_*.js = smoke
+│   ├── index.js                     # MCP server entry — tool registration & dispatch (53 tools)
+│   ├── memory-engine.js             # Episodic memory CRUD, temporal superseding & consolidation
+│   ├── v2-engine.js                 # Company Brain v2 substrate (factual/interaction/action memory)
+│   ├── nuggets-engine.js            # Holographic Nuggets steering facts CRUD
+│   ├── unified-retrieval.js         # Unified Hybrid Retrieval engine (Stage-Aware Pruning)
+│   ├── acm-engine.js                # Agentic Context Management (ACM) & token budget auditing
+│   ├── agentdebugx-engine.js        # AgentDebugX Error Hub & failure observability
+│   ├── dataflow-engine.js           # DataFlow-Harness grounded pipeline registry & DAG mutations
+│   ├── setwise-engine.js            # Rubric4Setwise minimal cover document-set selection
+│   ├── arex-engine.js               # AREX deep research state engine & constraint audit
+│   ├── teacher-distillation-engine.js # Hierarchical teacher memory distillation (workflow/subtask/function)
+│   ├── skills-engine.js             # Diverse Skill Routing (DSR via DPP) & skills registry
+│   ├── session-engine.js            # Session handoff persistence & Jean SRE bridge
+│   ├── sqlite-engine.js             # Lakebase SQLite compute cache (pull/push sync)
+│   ├── pgcontext-helper.js          # pgContext extension detection & HNSW index setup
+│   ├── proactive-engine.js          # Proactive trajectory auditor & Multi-Agent Resilience Gate
+│   ├── think-engine.js              # Cited synthesis, conflict detection & gap analysis
+│   └── llm-tags.js                  # Shared LLM tag generation (qwen2.5-coder:1.5b)
+├── scripts/                         # Benchmarking, evaluation, and maintenance
+├── tests/                           # *.test.js = automated, test_*.js = smoke
 ├── docs/
-│   ├── TOOL_REFERENCE.md     # Full parameter reference for all 53 tools
-│   ├── SETUP.md              # Configuration, storage routing, troubleshooting
-│   └── research/             # Sentra Company Brain research essays
+│   ├── TOOL_REFERENCE.md            # Full parameter reference for all 53 tools
+│   ├── SETUP.md                     # Configuration, storage routing, troubleshooting
+│   └── research/                    # Sentra Company Brain research essays
 └── package.json
 ```
 
@@ -350,12 +378,13 @@ This project is built upon and inspired by the following foundational research p
 - **DataFlow-Harness (Grounded Code-Agent Platform)**: Grounded MCP operator registry and typed, schema-validated DAG mutations based on Zhang et al., [DataFlow-Harness: A Grounded Code-Agent Platform for Constructing Editable LLM Data Pipelines](https://huggingface.co/papers/2607.16617) (ArXiv: 2607.16617).
 - **Rubric4Setwise (Beyond Relevance-Centered Retrieval)**: Rubric-oriented document-set selection evaluating Redundancy, Conflict, and Complementarity into minimal covering sets based on Liu et al., [Beyond Relevance-Centered Retrieval: Rubric-Oriented Document-Set Selection and Ranking](https://huggingface.co/papers/2607.19238) (ArXiv: 2607.19238).
 - **AREX (Recursively Self-Improving Deep Research)**: Inner research evidence state paired with outer self-improvement constraint audits based on Lu et al., [AREX: Towards a Recursively Self-Improving Agent for Deep Research](https://huggingface.co/papers/2607.21461) (ArXiv: 2607.21461).
-- **Diverse Skill Routing (DSR)**: Determinantal Point Process (DPP) skill routing that balances task relevance with orthogonal diversity to eliminate tool overlap and prompt bloat based on [arXiv: 2609.05824](https://arxiv.org/abs/2609.05824) (ArXiv: 2609.05824).
-- **Emergence World (Multi-Agent Resilience Gate)**: Adversarial stress-testing and anomaly detection for multi-agent execution graphs, catching error cascades, circular delegation deadlocks, and credential leaks across agent handoffs based on [arXiv: 2609.17320](https://arxiv.org/abs/2609.17320) (ArXiv: 2609.17320).
-- **Hierarchical Teacher Distillation**: Multi-tier cross-model trajectory and tool error recovery (Workflow, Subtask, and Function tiers) allowing smaller student models to learn operational rules from frontier teacher models based on [arXiv: 2608.07169](https://arxiv.org/abs/2608.07169) (ArXiv: 2608.07169).
-- **MobileMem (Temporal Fact Superseding & Invalidation)**: Temporal knowledge graph evolution, explicit fact superseding, and active lineage filtering excluding obsolete memories from active retrieval based on [arXiv: 2608.13606](https://arxiv.org/abs/2608.13606) (ArXiv: 2608.13606).
-- **Stage-Aware Context Pruning**: Multi-stage marginal value reduction (pre-retrieval query cleansing, post-retrieval duplicate suppression, and pre-synthesis boilerplate stripping) based on [arXiv: 2608.08389](https://arxiv.org/abs/2608.08389) (ArXiv: 2608.08389).
-- **Semantic Consolidation**: Centroid-based semantic memory compression without re-embedding based on the [Geometry of Consolidation repository](https://github.com/niashwin/geometry-of-consolidation).
+- **Diverse Skill Routing (DSR)**: Determinantal Point Process (DPP) skill routing that balances task relevance with orthogonal diversity to eliminate tool overlap and prompt bloat based on [Diverse Skill Routing via Determinantal Point Processes for LLM Agents](https://arxiv.org/abs/2609.05824) (ArXiv: 2609.05824).
+- **Emergence World (Multi-Agent Resilience Gate)**: Adversarial stress-testing and anomaly detection for multi-agent execution graphs, catching error cascades, circular delegation deadlocks, and credential leaks across agent handoffs based on [Emergence World: Stress-Testing Cascading Failures and Cross-Agent Deadlocks in Multi-Agent Trajectories](https://arxiv.org/abs/2609.17320) (ArXiv: 2609.17320).
+- **Hierarchical Teacher Distillation**: Multi-tier cross-model trajectory and tool error recovery (Workflow, Subtask, and Function tiers) allowing smaller student models to learn operational rules from frontier teacher models based on Taeil Kim, Kangsan Kim, Sung Ju Hwang, [Agent Memory Distillation: Empowering Small LLM Agents with Hierarchical Teacher Memory](https://arxiv.org/abs/2608.07169) (ArXiv: 2608.07169).
+- **MobileMem (Temporal Fact Superseding & Invalidation)**: Temporal knowledge graph evolution, explicit fact superseding, and active lineage filtering excluding obsolete memories from active retrieval based on [MobileMem: Lifelong Agent Memory with Temporal Knowledge Graph Evolution and Invalidation](https://arxiv.org/abs/2608.13606) (ArXiv: 2608.13606).
+- **Stage-Aware Context Pruning**: Multi-stage marginal value reduction (pre-retrieval query cleansing, post-retrieval duplicate suppression, and pre-synthesis boilerplate stripping) based on Chen et al., [Not Worth Another Token: Marginal Value Estimation for Efficient Deep Research Agents](https://arxiv.org/abs/2608.08389) (ArXiv: 2608.08389).
+- **Structural Trajectory Analysis (STRACE)**: Step-level execution path tracing, anomaly scoring, and Causal Fault Isolation in versioned interaction memory based on Zhou et al., [From Noisy Traces to Root Causes: Structural Trajectory Analysis and Causal Extraction for Agent Optimization](https://arxiv.org/abs/2607.07702) (ArXiv: 2607.07702).
+- **Semantic Consolidation**: Centroid-based semantic memory compression without re-embedding based on Ashwin et al., [Geometry of Consolidation](https://github.com/niashwin/geometry-of-consolidation).
 - **Proactive Memory Agent**: Long-horizon execution warnings and memory-guided auditing based on Wu et al., [Remember When It Matters: Proactive Memory Agent for Long-Horizon Agents](https://arxiv.org/abs/2607.08716) (ArXiv: 2607.08716).
 - **Direct On-Policy Distillation (Direct-OPD)**: Weak-to-strong feedback distillation for proactive context rules based on Feng et al., [Weak-to-Strong Generalization via Direct On-Policy Distillation](https://arxiv.org/abs/2607.05394) (ArXiv: 2607.05394).
 - **Proxy Exploration and Reusable Guidance (PUST)**: Modular guidance paradigm using feedback traces based on Fu et al., [Proxy Exploration and Reusable Guidance: A Modular LLM Post-Training Paradigm via Proxy-Guided Update Signals](https://arxiv.org/abs/2607.11505) (ArXiv: 2607.11505).
