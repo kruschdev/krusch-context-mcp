@@ -7,7 +7,7 @@
 
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';

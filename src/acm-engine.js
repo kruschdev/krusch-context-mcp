@@ -5,7 +5,7 @@
  * Based on HF Paper 2607.21503 (Gaurav Dadhich).
  */
 
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 
 /**
  * Initializes the ACM database table.

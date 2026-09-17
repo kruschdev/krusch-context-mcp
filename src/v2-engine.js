@@ -8,7 +8,7 @@
  *   - v2-engine.js handles stateful Company Brain substrate operations
  */
 
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 import { getEmbedding, PRIORITY } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { generateTagsFromLLM } from './llm-tags.js';

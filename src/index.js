@@ -26,8 +26,8 @@ import { handleThink } from './think-engine.js';
 import { handleProactiveNudge, handleNudgeFeedback, handleAnalyzeTrajectory, handleEvaluateResilience } from './proactive-engine.js';
 import { writeSessionHandoff, readSessionReview, initSessionEngineTable } from './session-engine.js';
 import { getEmbedding } from './embedding-helper.js';
-import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob, searchSymbols, getSymbolsForBlob, getSymbolGraph } from './git-engine.js';
+import { pool } from '../db/pool.js';
 import { detectPgContext, initPgContextCollections, isPgContextEnabled } from './pgcontext-helper.js';
 import { unifiedRetrieve } from './unified-retrieval.js';
 import { initAgentDebugXTable, logAgentFailure, searchFailures, getRecoveryPattern } from './agentdebugx-engine.js';
@@ -196,7 +196,7 @@ async function verifyDatabase() {
         await initTeacherMemoryTable();
         await initSessionEngineTable();
 
-        console.error('[krusch-context-mcp] Database connection verified via pg-git pool. Migrations completed.');
+        console.error('[krusch-context-mcp] Database connection verified via native pool. Migrations completed.');
     } catch (err) {
         console.error('[krusch-context-mcp] FATAL: Cannot reach PostgreSQL:', err.message);
         process.exit(1);
@@ -484,6 +484,84 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             blob_id: { type: "string", description: "The SHA hash of the blob to read" }
           },
           required: ["blob_id"]
+        }
+      },
+      {
+        name: "krusch_context_search_symbols",
+        description: "Search extracted AST code symbols (functions, classes, interfaces, methods) across indexed repositories.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Symbol name or substring to search" },
+            limit: { type: "number", default: 20 },
+            repository_id: { type: "number", description: "Optional repository ID filter" },
+            project: { type: "string", description: "Optional project name filter" }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "krusch_context_file_symbols",
+        description: "Get all AST code symbols extracted for a given file blob SHA.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blob_id: { type: "string", description: "The SHA hash of the blob" }
+          },
+          required: ["blob_id"]
+        }
+      },
+      {
+        name: "krusch_context_symbol_graph",
+        description: "Traverse dependency and call edges for an AST symbol up to N hops.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            symbol_name: { type: "string", description: "The symbol identifier to traverse" },
+            depth: { type: "number", default: 2 },
+            repository_id: { type: "number", description: "Optional repository ID" },
+            project: { type: "string", description: "Optional project name filter" }
+          },
+          required: ["symbol_name"]
+        }
+      },
+      {
+        name: "pg_git_search_symbols",
+        description: "Alias for krusch_context_search_symbols: Search extracted AST code symbols across repositories.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Symbol name or substring to search" },
+            limit: { type: "number", default: 20 },
+            repository_id: { type: "number", description: "Optional repository ID filter" },
+            project: { type: "string", description: "Optional project name filter" }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "pg_git_file_symbols",
+        description: "Alias for krusch_context_file_symbols: Get all AST symbols extracted for a blob.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blob_id: { type: "string", description: "The SHA hash of the blob" }
+          },
+          required: ["blob_id"]
+        }
+      },
+      {
+        name: "pg_git_dependency_graph",
+        description: "Alias for krusch_context_symbol_graph: Traverse symbol dependency/call graph up to N hops.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            symbol_name: { type: "string", description: "The symbol name to traverse" },
+            depth: { type: "number", default: 2 },
+            repository_id: { type: "number", description: "Optional repository ID" },
+            project: { type: "string", description: "Optional project name filter" }
+          },
+          required: ["symbol_name"]
         }
       },
       {
@@ -1029,7 +1107,7 @@ async function handleSearchCode(args) {
   const vector = await getEmbedding(searchQuery);
   if (!vector) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
   
-  const results = await searchBlobs(vector, limit, resolvedRepoId);
+  const results = await searchBlobs(vector, limit, resolvedRepoId, searchQuery);
   if (results.length === 0) return { content: [{ type: "text", text: "No semantically relevant files found." }] };
   
   let output = `=== 🔍 Semantic Codebase Results ===\n`;
@@ -1069,7 +1147,7 @@ async function handleDeepSearch(args) {
       searchMemory({ category: cat, query, limit: 2, active_project: project, _embedding: vector })
           .catch(() => ({ content: [{ type: "text", text: "" }] }))
   );
-  const blobsPromise = searchBlobs(vector, 3, resolvedRepoId);
+  const blobsPromise = searchBlobs(vector, 3, resolvedRepoId, query);
   
   const [blobMatches, ...memoryResults] = await Promise.all([blobsPromise, ...memoryPromises]);
   
@@ -1123,17 +1201,73 @@ async function handleReadBlob(args) {
   return { content: [{ type: "text", text: header + content }] };
 }
 
+async function handleSearchSymbols(args) {
+  const { query, limit = 20, repository_id, project } = args;
+  let resolvedRepoId = repository_id;
+  if (project && !resolvedRepoId) {
+    const repoRes = await pool.query('SELECT id FROM repositories WHERE name = $1', [project]);
+    if (repoRes.rows.length > 0) resolvedRepoId = repoRes.rows[0].id;
+  }
+  const symbols = await searchSymbols(query, limit, resolvedRepoId);
+  if (symbols.length === 0) return { content: [{ type: "text", text: `No symbols matching '${query}' found.` }] };
+  let output = `=== 🧩 Code Symbols Matching '${query}' (${symbols.length}) ===\n`;
+  for (const s of symbols) {
+    const doc = s.docstring ? ` - ${s.docstring.split('\n')[0]}` : '';
+    const loc = s.file_path ? ` | ${s.file_path}:${s.start_line}-${s.end_line}` : '';
+    output += `\n- [${s.kind}] ${s.name}${s.signature ? `(${s.signature})` : ''}${loc}${doc}`;
+  }
+  return { content: [{ type: "text", text: output }] };
+}
+
+async function handleFileSymbols(args) {
+  const { blob_id } = args;
+  const symbols = await getSymbolsForBlob(blob_id);
+  if (symbols.length === 0) return { content: [{ type: "text", text: `No AST symbols recorded for blob '${blob_id}'.` }] };
+  let output = `=== 🧩 AST Symbols for Blob ${blob_id.substring(0, 10)} (${symbols.length}) ===\n`;
+  for (const s of symbols) {
+    output += `\n- [${s.kind}] ${s.name} (L${s.start_line}-L${s.end_line})`;
+  }
+  return { content: [{ type: "text", text: output }] };
+}
+
+async function handleSymbolGraph(args) {
+  const { symbol_name, repository_id, project, depth = 2 } = args;
+  let resolvedRepoId = repository_id;
+  if (project && !resolvedRepoId) {
+    const repoRes = await pool.query('SELECT id FROM repositories WHERE name = $1', [project]);
+    if (repoRes.rows.length > 0) resolvedRepoId = repoRes.rows[0].id;
+  }
+  const graph = await getSymbolGraph(symbol_name, resolvedRepoId, depth);
+  let output = `=== 🕸️ Symbol Dependency Graph: ${symbol_name} ===\n`;
+  output += `Nodes: ${graph.nodes.length} | Edges: ${graph.edges.length}\n\n`;
+  if (graph.nodes.length > 0) {
+    output += `--- Symbols ---\n`;
+    for (const n of graph.nodes) {
+      output += `- [${n.kind}] ${n.name} in ${n.file_path || 'unknown'}\n`;
+    }
+  }
+  if (graph.edges.length > 0) {
+    output += `\n--- Edges ---\n`;
+    for (const e of graph.edges) {
+      output += `- ${e.source_symbol} --(${e.edge_type})--> ${e.target_symbol}\n`;
+    }
+  }
+  return { content: [{ type: "text", text: output }] };
+}
+
 async function handleHealthCheck() {
   const dbCheck = await pool.query('SELECT COUNT(*) as count FROM ide_agent_memory');
   const repoCheck = await pool.query('SELECT COUNT(*) as count FROM repositories');
   const nuggetCheck = await pool.query('SELECT COUNT(*) as count FROM ide_agent_nuggets');
   const v2Check = await pool.query("SELECT COUNT(*) as count FROM interaction_memory WHERE status = 'active'");
+  const symbolCheck = await pool.query('SELECT COUNT(*) as count FROM code_symbols').catch(() => ({ rows: [{ count: 0 }] }));
   const memoryCount = dbCheck.rows[0].count;
   const repoCount = repoCheck.rows[0].count;
   const nuggetCount = nuggetCheck.rows[0].count;
   const v2Count = v2Check.rows[0].count;
+  const symbolCount = symbolCheck.rows[0]?.count || 0;
   const engineStatus = isPgContextEnabled() ? 'pgContext (HNSW + Single-Pass Filter)' : 'pgvector (Standard)';
-  return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Company Brain states (v2): ${v2Count}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Vector Engine: ${engineStatus}\n- Database: Connected\n- Version: 1.4.0` }] };
+  return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Company Brain states (v2): ${v2Count}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Extracted symbols: ${symbolCount}\n- Vector Engine: ${engineStatus}\n- Database: Connected\n- Version: 1.4.0` }] };
 }
 
 async function handleDocsList() {
@@ -1166,7 +1300,7 @@ async function handleDocsSearch(args) {
   const vector = await getEmbedding(searchQuery);
   if (!vector) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
   
-  const results = await searchBlobs(vector, limit, resolvedRepoId);
+  const results = await searchBlobs(vector, limit, resolvedRepoId, searchQuery);
   if (results.length === 0) return { content: [{ type: "text", text: "No relevant documentation found." }] };
   
   let output = `=== 📖 Documentation Search: ${manual_name} ===\n`;
@@ -1201,13 +1335,19 @@ const TOOL_HANDLERS = new Map([
   ['krusch_context_traverse_graph',   (args) => traverseGraph(args)],
   ['krusch_context_link_blob',        (args) => linkBlob(args)],
   // PG-Git codebase
-  ['krusch_context_list_repos',  () => handleListRepos()],
-  ['krusch_context_search_code', (args) => handleSearchCode(args)],
-  ['krusch_context_deep_search', (args) => handleDeepSearch(args)],
-  ['krusch_context_read_tree',   (args) => handleReadTree(args)],
-  ['krusch_context_read_blob',   (args) => handleReadBlob(args)],
-  ['krusch_context_health_check',() => handleHealthCheck()],
-  ['krusch_context_health',      () => handleHealthCheck()],
+  ['krusch_context_list_repos',      () => handleListRepos()],
+  ['krusch_context_search_code',     (args) => handleSearchCode(args)],
+  ['krusch_context_deep_search',     (args) => handleDeepSearch(args)],
+  ['krusch_context_read_tree',       (args) => handleReadTree(args)],
+  ['krusch_context_read_blob',       (args) => handleReadBlob(args)],
+  ['krusch_context_search_symbols',   (args) => handleSearchSymbols(args)],
+  ['pg_git_search_symbols',           (args) => handleSearchSymbols(args)],
+  ['krusch_context_file_symbols',     (args) => handleFileSymbols(args)],
+  ['pg_git_file_symbols',             (args) => handleFileSymbols(args)],
+  ['krusch_context_symbol_graph',     (args) => handleSymbolGraph(args)],
+  ['pg_git_dependency_graph',         (args) => handleSymbolGraph(args)],
+  ['krusch_context_health_check',    () => handleHealthCheck()],
+  ['krusch_context_health',          () => handleHealthCheck()],
   // Docs
   ['krusch_docs_list',   () => handleDocsList()],
   ['krusch_docs_search', (args) => handleDocsSearch(args)],

@@ -8,7 +8,7 @@
 
 ## Configuration
 
-Krusch Context MCP inherits its database pool from [PG-Git-MCP](https://github.com/kruschdev/pg-git-mcp). Create a `.env` file in the project root:
+Krusch Context MCP operates with its own native, zero-dependency PostgreSQL connection pool (`db/pool.js`) and shares database schema compatibility with [PG-Git-MCP](https://github.com/kruschdev/pg-git-mcp). Create a `.env` file in the project root:
 
 ```bash
 cp .env.example .env

@@ -8,7 +8,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 
 async function exportToPolygres() {
     console.log('📦 Starting Polygres.com cloud database export...');

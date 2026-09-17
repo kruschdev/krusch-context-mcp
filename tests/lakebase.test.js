@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { addMemory } from '../src/memory-engine.js';
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 
 test('Lakebase pull/push sync pipeline', async (t) => {
 

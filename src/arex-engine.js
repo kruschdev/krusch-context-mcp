@@ -4,7 +4,8 @@
  * Based on HF Paper 2607.21461.
  */
 
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
+
 
 /**
  * Initializes AREX research state database table.

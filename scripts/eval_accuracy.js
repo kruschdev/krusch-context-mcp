@@ -1,4 +1,4 @@
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 import { getEmbedding, PRIORITY } from '../src/embedding-helper.js';
 
 const QUERIES = [

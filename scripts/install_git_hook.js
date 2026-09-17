@@ -37,20 +37,20 @@ const hookContent = `#!/bin/bash
 # Krusch Context Lakebase Auto-Sync
 # Automatically synchronizes the repository to pg-git after every commit.
 
-# Check if pg-git-mcp is installed in node_modules
-SYNC_SCRIPT="node_modules/pg-git-mcp/scripts/sync_to_pg.js"
-
-if [ -f "$SYNC_SCRIPT" ]; then
+# Check if native snapshot script or pg-git-mcp is available
+if [ -f "scripts/snapshot.js" ]; then
     echo "Backgrounding Krusch Context Lakebase sync..."
-    (node "$SYNC_SCRIPT" . > .git/lakebase_sync.log 2>&1 &)
+    (node "scripts/snapshot.js" . > .git/lakebase_sync.log 2>&1 &)
+elif [ -f "node_modules/pg-git-mcp/scripts/sync_to_pg.js" ]; then
+    echo "Backgrounding Krusch Context Lakebase sync..."
+    (node "node_modules/pg-git-mcp/scripts/sync_to_pg.js" . > .git/lakebase_sync.log 2>&1 &)
 else
-    # Fallback to global installation if it exists
     GLOBAL_SCRIPT="$(npm root -g)/pg-git-mcp/scripts/sync_to_pg.js"
     if [ -f "$GLOBAL_SCRIPT" ]; then
         echo "Backgrounding global Krusch Context Lakebase sync..."
         (node "$GLOBAL_SCRIPT" . > .git/lakebase_sync.log 2>&1 &)
     else
-        echo "Krusch Context Auto-Sync skipped: pg-git-mcp not found in node_modules or global namespace."
+        echo "Krusch Context Auto-Sync skipped: snapshot engine not found."
     fi
 fi
 `;

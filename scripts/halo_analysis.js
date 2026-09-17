@@ -3,8 +3,8 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { pool } from 'pg-git-mcp/db/pool.js';
-import { getEmbedding, ollamaQueue, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
+import { pool } from '../db/pool.js';
+import { getEmbedding, ollamaQueue, PRIORITY } from '../src/embedding-helper.js';
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

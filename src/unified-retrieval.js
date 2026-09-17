@@ -8,12 +8,13 @@
  * 4. Server-Side Token Budget Accumulator (limit_tokens)
  */
 
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { isPgContextEnabled } from './pgcontext-helper.js';
-import { searchBlobs } from 'pg-git-mcp/server/git-engine.js';
+import { searchBlobs } from './git-engine.js';
 import { selectMinimalCoveringSet } from './setwise-engine.js';
 import { prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from './prune-helper.js';
+
 
 const DECAY_RATE = 0.01; // Exponential time decay rate per day
 
@@ -192,7 +193,7 @@ async function traverseGraphNeighbors(seedItems, hops = 1) {
             visitedIds.add(graphNodeId);
 
             try {
-                // Hop 1: Code blob lookup via pg-git-mcp
+                // Hop 1: Code blob lookup via native git-engine
                 const blobs = await searchBlobs(refPath, 1);
                 if (blobs && blobs.length > 0) {
                     const blob = blobs[0];

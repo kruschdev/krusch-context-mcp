@@ -1,9 +1,47 @@
 import dotenv from 'dotenv';
-import { getEmbedding as pgGitGetEmbedding, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
+import { PRIORITY, ollamaQueue } from './llm-queue.js';
 
 dotenv.config();
 
-export { PRIORITY };
+export { PRIORITY, ollamaQueue };
+
+/**
+ * Standard local Ollama embedding with queueing and retry.
+ */
+export async function getOllamaEmbedding(text, priority = PRIORITY.LOW) {
+    try {
+        return await ollamaQueue.enqueue(async (endpoint) => {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000);
+            try {
+                const model = process.env.EMBED_MODEL || 'bge-large';
+                const res = await fetch(`${endpoint}/api/embeddings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        model, 
+                        prompt: text,
+                        truncate: true
+                    }),
+                    signal: controller.signal
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    return data.embedding;
+                } else {
+                    const errText = await res.text();
+                    throw new Error(`Status ${res.status}: ${errText}`);
+                }
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }, priority);
+    } catch (e) {
+        console.error(`[Ollama Embed] ${e.message}`);
+        return null;
+    }
+}
+
 
 /**
  * Custom local wrapper for getEmbedding to support custom embedding endpoints (e.g., OpenAI-compatible, llama.cpp, etc.)
@@ -84,6 +122,80 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
         }
     }
 
-    // Fallback to standard pg-git-mcp getEmbedding
-    return pgGitGetEmbedding(text, priority);
+    // Fallback to local Ollama getEmbedding
+    return getOllamaEmbedding(text, priority);
 }
+
+const TEXT_EXTENSIONS = new Set([
+    '.js', '.ts', '.jsx', '.tsx', '.json', '.md', '.txt',
+    '.html', '.css', '.yml', '.yaml', '.sql', '.py', '.sh',
+    '.toml', '.env', '.dockerfile', '.graphql', '.vue', '.svelte'
+]);
+
+export function isEmbeddable(ext) {
+    return TEXT_EXTENSIONS.has(ext);
+}
+
+export const MAX_EMBED_CHARS = 2000;
+
+function calculateCentroid(vectors) {
+    if (!vectors || vectors.length === 0) return null;
+    if (vectors.length === 1) return vectors[0];
+    
+    const len = vectors[0].length;
+    let centroid = new Array(len).fill(0);
+    
+    for (const vec of vectors) {
+        for (let i = 0; i < len; i++) {
+            centroid[i] += vec[i];
+        }
+    }
+    
+    let sqSum = 0;
+    for (let i = 0; i < len; i++) {
+        sqSum += centroid[i] * centroid[i];
+    }
+    
+    const norm = Math.sqrt(sqSum);
+    if (norm === 0) return centroid;
+    
+    for (let i = 0; i < len; i++) {
+        centroid[i] = centroid[i] / norm;
+    }
+    
+    return centroid;
+}
+
+export async function getChunkedCentroidEmbedding(text, priority = PRIORITY.LOW) {
+    const CHUNK_SIZE = 950;
+    const OVERLAP = 150;
+    const BATCH_SIZE = ollamaQueue.concurrency || 2;
+    
+    if (text.length <= CHUNK_SIZE) {
+        return await getEmbedding(text, priority);
+    }
+    
+    const chunks = [];
+    let start = 0;
+    while (start < text.length) {
+        chunks.push(text.substring(start, start + CHUNK_SIZE));
+        start += (CHUNK_SIZE - OVERLAP);
+    }
+    
+    const maxChunks = Math.min(chunks.length, 50);
+    const vectors = [];
+    
+    for (let i = 0; i < maxChunks; i += BATCH_SIZE) {
+        const batch = chunks.slice(i, Math.min(i + BATCH_SIZE, maxChunks));
+        const results = await Promise.all(
+            batch.map(chunk => getEmbedding(chunk, priority))
+        );
+        for (const vec of results) {
+            if (vec) vectors.push(vec);
+        }
+    }
+    
+    return calculateCentroid(vectors);
+}
+
+

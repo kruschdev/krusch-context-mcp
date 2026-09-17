@@ -9,8 +9,9 @@
  *   - Tier 3: Function (tool-level parameter corrections & error recovery patterns)
  */
 
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
+
 import { getProjectDb, cosineSimilarity } from './sqlite-engine.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 

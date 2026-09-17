@@ -2,9 +2,10 @@ import dotenv from 'dotenv';
 import { chat } from './llm.js';
 import { searchMemory } from './memory-engine.js';
 import { getEmbedding, PRIORITY } from './embedding-helper.js';
-import { searchBlobs } from 'pg-git-mcp/server/git-engine.js';
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { searchBlobs } from './git-engine.js';
+import { pool } from '../db/pool.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+
 
 // Ensure environment variables are loaded
 dotenv.config();

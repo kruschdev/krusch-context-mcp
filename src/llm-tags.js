@@ -5,8 +5,9 @@
  * to eliminate ARCH/01 duplication.
  */
 
-import { ollamaQueue, PRIORITY } from 'pg-git-mcp/lib/embedding.js';
+import { ollamaQueue, PRIORITY } from './embedding-helper.js';
 import { chat } from './llm.js';
+
 
 /**
  * Generates semantic tags from text content using a local LLM via the shared Ollama queue or custom completions.

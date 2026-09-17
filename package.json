@@ -10,6 +10,8 @@
     "test:smoke": "node --env-file=.env tests/test_client.js && node --env-file=.env tests/test_v2_memory.js && node --env-file=.env tests/test_v2_lens_graph.js && node --env-file=.env tests/test_v2_action_memory.js && node --env-file=.env tests/test_proactive.js && node --env-file=.env tests/test_ai_watch_integrations.js",
     "test:aiwatch": "node --env-file=.env tests/test_ai_watch_integrations.js",
     "test:cloud": "node --env-file=.env tests/test_cloud_integration.js",
+    "snapshot": "node scripts/snapshot.js",
+    "sync-all": "node scripts/sync_all_projects.js",
     "bench:memory": "node --env-file=.env scripts/benchmark_memory_eval.js",
     "export:polygres": "node scripts/export_to_polygres.js",
     "install-hook": "node scripts/install_git_hook.js"
@@ -31,6 +33,6 @@
     "better-sqlite3": "^11.0.0",
     "dotenv": "^16.4.7",
     "ml-pca": "^4.1.1",
-    "pg-git-mcp": "^1.0.3"
+    "pg": "^8.20.0"
   }
 }

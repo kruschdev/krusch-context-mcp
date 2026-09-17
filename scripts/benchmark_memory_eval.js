@@ -3,7 +3,7 @@
  * Comprehensive Memory Retrieval, Precision, Setwise Reranking, and Latency Benchmark Suite for krusch-context-mcp.
  */
 
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 import { getEmbedding } from '../src/embedding-helper.js';
 import { searchMemory, addMemory } from '../src/memory-engine.js';
 import { unifiedRetrieve } from '../src/unified-retrieval.js';

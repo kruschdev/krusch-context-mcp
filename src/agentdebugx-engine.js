@@ -4,8 +4,9 @@
  * Based on HF Paper 2607.18754.
  */
 
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
+
 
 /**
  * Initializes the AgentDebugX database table.

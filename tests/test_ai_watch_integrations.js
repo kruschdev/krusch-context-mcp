@@ -3,7 +3,7 @@ import { initDataFlowTables, registerOperator, inspectOperatorRegistry, mutatePi
 import { setwiseRerank, selectMinimalCoveringSet } from '../src/setwise-engine.js';
 import { initArexTable, updateResearchState, auditResearchConstraints } from '../src/arex-engine.js';
 import { initAcmTable, manageContextLifecycle, auditContextBudget } from '../src/acm-engine.js';
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 
 async function runTests() {
     console.log('🧪 Starting AI Watch Integrations Verification Suite...\n');

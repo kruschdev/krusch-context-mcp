@@ -4,7 +4,8 @@
  * Based on HF Paper 2607.16617.
  */
 
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
+
 
 /**
  * Initializes DataFlow-Harness database tables.

@@ -8,7 +8,7 @@
 
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 
 const SERVER = new URL('../src/index.js', import.meta.url).pathname;
 let nextId = 1;

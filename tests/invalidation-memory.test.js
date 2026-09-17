@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { addMemory, searchMemory, supersedeMemory, invalidateMemory } from '../src/memory-engine.js';
 import { getProjectDb } from '../src/sqlite-engine.js';
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 
 const mockEmbedding = new Array(1024).fill(0.1);
 const testProject = 'krusch-nexus';

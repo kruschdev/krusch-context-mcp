@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { writeSessionHandoff, readSessionReview, initSessionEngineTable } from '../src/session-engine.js';
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 
 test('Session Engine Unit Tests', async (t) => {
     await initSessionEngineTable();

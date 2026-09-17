@@ -62,16 +62,16 @@ A single [Model Context Protocol](https://modelcontextprotocol.io/) server expos
 **Prerequisites:** [Node.js 22+](https://nodejs.org/) · [Ollama](https://ollama.com/) with `bge-large` and `qwen2.5-coder:1.5b` (or `llama3.2`) · PostgreSQL with [`pgvector`](https://github.com/pgvector/pgvector)
 
 ```bash
-# 1. Install [PG-Git-MCP](https://github.com/kruschdev/pg-git-mcp) (codebase ingestion engine)
-npm install -g pg-git-mcp
-
-# 2. Clone and install
+# 1. Clone and install (fully native consolidated engine — no external sibling packages required)
 git clone https://github.com/kruschdev/krusch-context-mcp.git
 cd krusch-context-mcp
 npm install
-cp .env.example .env  # Configure your database connection
+cp .env.example .env  # Configure your PostgreSQL connection
 
-# 3. Start
+# 2. Ingest codebase (optional but recommended)
+npm run snapshot -- .
+
+# 3. Start MCP Server
 npm start
 ```
 
@@ -347,7 +347,7 @@ node scripts/eval_accuracy.js           # Precision/recall
 
 | Project / Service | Role |
 |-------------------|------|
-| [PG-Git-MCP](https://github.com/kruschdev/pg-git-mcp) | Semantic codebase search engine (sibling dependency) |
+| [PG-Git-MCP](https://github.com/kruschdev/pg-git-mcp) | Standalone codebase search engine (sibling project sharing schema) |
 | [Polygres.com](https://polygres.com) | AI-native PostgreSQL cloud platform by Evokoa (`pgContext` & `pgGraph` native) |
 | [OpenRouter.ai](https://openrouter.ai) | Unified cloud LLM & embedding API (`baai/bge-large-en-v1.5`) |
 | [AgentDebugX](https://github.com/AgentDebugX/AgentDebugX) | Open-source failure observability, attribution, and recovery toolkit |

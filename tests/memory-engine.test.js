@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { getRepoRootTree, getTreeEntries, getBlob } from 'pg-git-mcp/server/git-engine.js';
+import { getRepoRootTree, getTreeEntries, getBlob } from '../src/git-engine.js';
 import { consolidateMemories } from '../src/memory-engine.js';
 import { writeState, resolveConflict } from '../src/v2-engine.js';
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
 
 test('Integration Test Suite for krusch-context-mcp tools', async (t) => {
     

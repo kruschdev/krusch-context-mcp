@@ -5,7 +5,8 @@ import { nuggetNudges } from './nuggets-engine.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { writeState } from './v2-engine.js';
-import { pool } from 'pg-git-mcp/db/pool.js';
+import { pool } from '../db/pool.js';
+
 
 // Ensure environment variables are loaded
 dotenv.config();

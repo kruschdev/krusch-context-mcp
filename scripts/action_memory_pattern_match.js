@@ -1,5 +1,5 @@
-import { pool } from 'pg-git-mcp/db/pool.js';
-import { getEmbedding } from 'pg-git-mcp/lib/embedding.js';
+import { pool } from '../db/pool.js';
+import { getEmbedding } from '../src/embedding-helper.js';
 
 async function runPatternMatch() {
     console.log("🔍 Running Action Memory Pattern Matching...");
