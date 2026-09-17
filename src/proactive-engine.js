@@ -8,8 +8,11 @@ import { writeState } from './v2-engine.js';
 import { pool } from '../db/pool.js';
 
 
-// Ensure environment variables are loaded
-dotenv.config();
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, '..', '.env'), quiet: true });
 
 /**
  * Multi-Agent Resilience Gate Evaluation (arXiv: 2609.17320).
