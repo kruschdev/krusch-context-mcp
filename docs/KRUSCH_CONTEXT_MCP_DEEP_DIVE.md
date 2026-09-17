@@ -29,7 +29,7 @@ Traditional RAG tools (Pinecone, Qdrant, naive vector search) failed to solve th
 
 ## 🏗️ 2. How Local & Remote Agents Use the MCP Server
 
-`krusch-context-mcp` exposes **59 standardized Model Context Protocol (MCP) tools** over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
+`krusch-context-mcp` exposes **64 standardized Model Context Protocol (MCP) tools** over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
 
 ![5 Unified Memory Subsystems Architecture](assets/krusch_context_mcp_5_subsystems_diagram.png)
 
@@ -85,7 +85,7 @@ Integrates cutting-edge AI research subsystems:
 
 | Feature | Generic Vector DBs | Naive MCP Memory | `krusch-context-mcp` |
 | :--- | :---: | :---: | :---: |
-| **Protocol Support** | Proprietary REST | MCP | **Native 59-Tool MCP Surface** |
+| **Protocol Support** | Proprietary REST | MCP | **Native 64-Tool MCP Surface** |
 | **Code RAG & AST Indexing** | ❌ No | ❌ No | **✅ Native Git DAG + AST Symbols + Hybrid RRF** |
 | **Temporal Recency Decay** | ❌ No | ❌ No | **✅ Exponential Decay ($e^{-0.01t}$)** |
 | **Micro-Steering (Nuggets)** | ❌ No | ❌ No | **✅ Holographic Steering Facts** |
@@ -98,10 +98,10 @@ Integrates cutting-edge AI research subsystems:
 
 ## ⚙️ 5. Deployment & Configuration
 
-`krusch-context-mcp` supports 100% local, 100% cloud, or hybrid deployment:
+`krusch-context-mcp` supports 100% local, 100% cloud, or hybrid deployment. Defaults out-of-the-box to Polygres Cloud native in-engine embeddings:
 
 ```env
-# --- Polygres.com Cloud Database & Runtime API ---
+# --- Polygres.com Cloud Database & Runtime API (Default Out-of-the-Box) ---
 POLYGRES_PROJECT_ID="YOUR_POLYGRES_PROJECT_ID"
 POLYGRES_RUNTIME_URL="https://YOUR_POLYGRES_PROJECT_ID.api.db.polygres.com/v1"
 POLYGRES_API_KEY="poly_live_YOUR_POLYGRES_API_KEY"
@@ -109,10 +109,10 @@ POLYGRES_API_KEY="poly_live_YOUR_POLYGRES_API_KEY"
 # Native PostgreSQL Connection
 DATABASE_URL="postgresql://username:password@app.polygres.com:5432/your_database?sslmode=require"
 
-# --- OpenRouter Cloud Embeddings (baai/bge-large-en-v1.5) ---
-EMBEDDING_URL="https://openrouter.ai/api/v1/embeddings"
-EMBEDDING_API_KEY="sk-or-v1-YOUR_OPENROUTER_API_KEY"
-EMBED_MODEL="baai/bge-large-en-v1.5"
+# --- Optional: Bring Your Own External Embeddings (e.g. OpenRouter BGE-large) ---
+# EMBEDDING_URL="https://openrouter.ai/api/v1/embeddings"
+# EMBEDDING_API_KEY="sk-or-v1-YOUR_OPENROUTER_API_KEY"
+# EMBED_MODEL="baai/bge-large-en-v1.5"
 ```
 
 ---
@@ -135,7 +135,7 @@ How Local & Remote Agents Use the MCP Server
 
 [INSERT IMAGE: docs/assets/krusch_context_mcp_5_subsystems_diagram.png]
 
-krusch-context-mcp exposes 59 standardized Model Context Protocol (MCP) tools over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
+krusch-context-mcp exposes 64 standardized Model Context Protocol (MCP) tools over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
 
 • Local Agent Support: Local agents get instant sub-5ms zero-latency reads from the project-scoped SQLite cache. No internet connection required.
 

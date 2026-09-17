@@ -38,8 +38,8 @@ By pairing **[Polygres.com](https://polygres.com)** (Evokoa's AI-native PostgreS
 * **Cost Efficiency**: Priced at ~$0.01 per 1 million tokens (~1 to 2 cents per month of heavy active development).
 * **Benefit**: Zero local Ollama process overhead, zero VRAM allocation on the laptop, sub-100ms vector generation, and 100% uptime while traveling.
 
-### 3. Unified Agent Surface: `krusch-context-mcp` (59 MCP Tools)
-* **Unified Tooling**: Exposes 59 Model Context Protocol (MCP) tools across Episodic Memory (v1), Company Brain v2 Substrate, Holographic Nuggets, Native PG-Git Codebase & AST Search, and AI Watch Research Engines (AgentDebugX, DataFlow-Harness, Rubric4Setwise, AREX, Teacher Distillation, DSR, Resilience Gate).
+### 3. Unified Agent Surface: `krusch-context-mcp` (64 MCP Tools)
+* **Unified Tooling**: Exposes 64 Model Context Protocol (MCP) tools across Polygres Cloud Runtime (v0.5.0), Episodic Memory (v1), Company Brain v2 Substrate, Holographic Nuggets, Native PG-Git Codebase & AST Search, and AI Watch Research Engines (AgentDebugX, DataFlow-Harness, Rubric4Setwise, AREX, Teacher Distillation, DSR, Resilience Gate).
 * **Local Compute Cache + Cloud Sync**: Per-project SQLite caches (`.agent/memory.db`) provide instant local reads, while write-behind sync automatically pushes updates to Polygres.com.
 
 ---
@@ -48,8 +48,8 @@ By pairing **[Polygres.com](https://polygres.com)** (Evokoa's AI-native PostgreS
 
 * **Data Migration**: Successfully exported and migrated **12,398 episodic memories**, **149 holographic steering nuggets**, **756 interaction memory states**, and AI Watch failure bundles via automated migration tooling (`npm run export:polygres`).
 * **Test Suite Verification**:
-  * `npm test`: **22/22 unit tests passed** (100% success rate).
-  * `npm run test:cloud`: **3/3 cloud integration tests passed** verifying live OpenRouter vector generation and Polygres Runtime API client readiness (`RetrievalReadiness`).
+  * `npm test`: **40/40 unit tests passed** (100% success rate).
+  * `npm run test:cloud`: **7/7 cloud integration tests passed** verifying OpenRouter vector generation, Polygres Runtime API readiness, live 500M microcredit quota inspection, model discovery, and pgContext capabilities.
 
 ---
 
@@ -121,15 +121,15 @@ The 100% Cloud Stack Architecture
 
 • Benefit: Zero local Ollama process overhead, zero VRAM allocation on the laptop, sub-100ms vector generation, and 100% uptime while traveling.
 
-3. Unified Agent Surface: krusch-context-mcp (59 MCP Tools)
+3. Unified Agent Surface: krusch-context-mcp (64 MCP Tools)
 
-Exposes 59 Model Context Protocol (MCP) tools across Episodic Memory, Company Brain v2 Substrate, Holographic Nuggets, Native PG-Git Codebase & AST Symbol Search, and AI Watch Research Engines.
+Exposes 64 Model Context Protocol (MCP) tools across Polygres Cloud Runtime (v0.5.0), Episodic Memory, Company Brain v2 Substrate, Holographic Nuggets, Native PG-Git Codebase & AST Symbol Search, and AI Watch Research Engines.
 
 Migration & Live Verification Results
 
 • Data Migration: Successfully exported and migrated 12,398 episodic memories, 149 holographic steering nuggets, 756 interaction memory states, and AI Watch failure bundles.
 
-• Test Suite Verification: 22/22 unit tests passed and 3/3 cloud integration tests passed verifying live OpenRouter vector generation and Polygres Runtime API client readiness.
+• Test Suite Verification: 40/40 unit tests passed and 7/7 cloud integration tests passed verifying live vector generation, Polygres 0.5.0 Runtime API readiness, live 500M microcredit quota inspection, and pgContext capabilities.
 
 Links & Resources
 

@@ -51,7 +51,7 @@ graph LR
 
 To enable semantic search, every memory must be vectorized.
 
-- **Embedding Vector:** All memories are embedded using the `bge-large` model (1024 dimensions) dispatched via a shared, fleet load-balanced Ollama queue.
+- **Embedding Vector:** All memories are embedded using either Polygres in-engine native embeddings (default out-of-the-box), local Ollama (`bge-large` @ 1024 dims), or custom OpenRouter cloud endpoints.
 - **Hybrid Keyword/Tag Extraction:** Pure cosine similarity can suffer from failure modes on exact search terms (like specific ports or numeric constants) or negated concepts. To prevent this, every memory is processed by `llama3.2` to extract key topics and tags.
 - **Storage:** Tags are stored as a JSON array (`tags` column) alongside the content and vector embedding, enabling both semantic vector search and exact keyword/tag filters.
 
@@ -79,7 +79,7 @@ To prevent semantic cross-contamination (e.g., a bug memory polluting a list of 
 |---|---|---|
 | 📌 **`priorities`** | Active goals, roadmap, task state, and milestones. | `Implement SQLite pull/push sync engine for Krusch Context.` |
 | 🐛 **`bugs`** | Identified issues, root causes, symptoms, and fixes. | `Port 5441 conflicts with PostgreSQL. Switched container to 5442.` |
-| 🎯 **`outcomes`** | Results of completed sessions, deployments, or tests. | `Verified all 59 tools pass smoke tests on production host.` |
+| 🎯 **`outcomes`** | Results of completed sessions, deployments, or tests. | `Verified all 64 tools pass smoke tests on production host.` |
 | 🎓 **`lessons`** | Pattern discoveries, architectural decisions, and conventions. | `Avoid circular imports in index.js by exporting DB pools from pool.js.` |
 | 🕒 **`activity`** | Chronological log of steps taken during the session. | `Created test suite, migrated schema, verified connections.` |
 

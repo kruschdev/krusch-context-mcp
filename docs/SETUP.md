@@ -16,17 +16,20 @@ cp .env.example .env
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string (e.g., `postgresql://user:pass@host:port/your_database`) | *(required)* |
-| `OLLAMA_URL` | Primary Ollama endpoint (Default completion & embedding engine) | `http://localhost:11434` |
+| `POLYGRES_PROJECT_ID` | Polygres Cloud project identifier (auto-configures runtime & usage tools) | *(none)* |
+| `POLYGRES_RUNTIME_URL` | Polygres Cloud Runtime REST API endpoint (`https://<id>.api.db.polygres.com/v1`) | *(none)* |
+| `POLYGRES_API_KEY` | Polygres Cloud authentication API key | *(none)* |
+| `DATABASE_URL` | PostgreSQL connection string (Polygres Cloud SSL or local PostgreSQL) | *(required)* |
+| `OLLAMA_URL` | Primary Ollama endpoint (Local fallback if cloud embeddings are omitted) | `http://localhost:11434` |
 | `OLLAMA_FLEET_URLS` | Comma-separated additional Ollama endpoints for GPU fleet load balancing | *(none)* |
 | `EMBED_MODEL` | Embedding model identifier | `bge-large` |
 | `TAG_MODEL` | Model for tag extraction | `llama3.2` |
 | `COMPLETION_URL` | Custom OpenAI-compatible completion API URL (e.g., `http://localhost:8080/v1/chat/completions`) | *(none)* |
 | `COMPLETION_API_KEY` | Custom API Key for completions (if required) | *(none)* |
 | `COMPLETION_MODEL` | Custom model identifier to send to custom completion API | *(none)* |
-| `EMBEDDING_URL` | Custom embedding API URL (OpenAI-compatible `/v1/embeddings` or raw `llama.cpp` `/embedding`) | *(none)* |
-| `EMBEDDING_API_KEY` | Custom API Key for embeddings (if required) | *(none)* |
-| `EXTERNAL_DOCS_CONFIG_PATH` | Path to JSON config for ingested manuals | `config/external_docs.json` (or `../pg-git/config/external_docs.json`) |
+| `EMBEDDING_URL` | Custom external embedding API URL (OpenAI-compatible `/v1/embeddings` or OpenRouter) | *(none)* |
+| `EMBEDDING_API_KEY` | Custom API Key for external embeddings (if required) | *(none)* |
+| `EXTERNAL_DOCS_CONFIG_PATH` | Path to JSON config for ingested manuals | `config/external_docs.json` |
 
 ---
 
@@ -174,6 +177,9 @@ Krusch Context MCP enables **infinite session continuity** through four lifecycl
 | Error | Cause | Fix |
 |-------|-------|-----|
 | Ollama API returned 404 | Embedding model not pulled | `ollama pull bge-large && ollama pull llama3.2` |
-| ECONNREFUSED on Ollama URL | Ollama not running | `ollama serve` or verify fleet node availability |
-| Cannot reach PostgreSQL | Database unreachable or `.env` misconfigured | Verify `DATABASE_URL` in `.env` |
+| ECONNREFUSED on Ollama URL | Ollama not running | `ollama serve` or switch to default Polygres in-engine embeddings |
+| Cannot reach PostgreSQL | Database unreachable or `.env` misconfigured | Verify `DATABASE_URL` in `.env` (ensure `sslmode=require` on Polygres) |
 | Column "project" does not exist | Table predates schema migration | Restart the server (idempotent migrations run on boot) |
+| `VECTOR_CONFIGURATION_NOT_FOUND` on Polygres | Collection missing vector configuration | Run `polygres_cloud_models` or create collection config via Polygres console |
+| `MISSING_API_KEY` on `polygres_cloud_*` | Polygres API key not configured in `.env` | Set `POLYGRES_API_KEY` and `POLYGRES_PROJECT_ID` in `.env` |
+

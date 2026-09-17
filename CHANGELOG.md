@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-16
+
+### Added
+- **Polygres Cloud v0.5.0 Runtime Integration (`src/polygres-cloud.js`)**: Direct agent control over cloud collections, in-engine text vectorization, model discovery, and quota monitoring.
+- **Native In-Engine Embeddings Out-of-the-Box**: Configured Polygres native in-engine embeddings (`text-embedding-3-small`, `text-embedding-3-large`) as the zero-config default, eliminating external embedding API keys, local VRAM requirements, and data movement.
+- **5 New Polygres Cloud MCP Tools (64 Tools Total)**:
+  - `polygres_cloud_usage`: Live quota monitoring tracking the 500M monthly free microcredits directly from Cursor & Claude Code.
+  - `polygres_cloud_search`: Pure-text semantic and hybrid search with in-engine vectorization.
+  - `polygres_cloud_models`: Discovers available in-engine embedding models and dimensions.
+  - `polygres_cloud_capabilities`: Inspects server-side pgContext version, HNSW limits, and contract.
+  - `polygres_cloud_embedding_configs`: Lists watched-table automated in-database embedding pipelines.
+- **Dual-Engine Adapter (`@krusch/toolkit/polygres`)**: Seamless switching between direct local PostgreSQL wire pool and Polygres Cloud Runtime API.
+- Automated integration test suite `tests/test_polygres_cloud.js`.
+
+### Changed
+- Expanded total MCP tool count from 59 to **64 tools**.
+- Streamlined `README.md` into 5 core capability pillars, updated mermaid architecture diagram, and clarified dual-path setup.
+- Updated `docs/TOOL_REFERENCE.md`, `docs/POLYGRES_DOCUMENTATION.md`, `docs/SETUP.md`, `docs/EPISODIC_MEMORY.md`, and `docs/KRUSCH_CONTEXT_MCP_DEEP_DIVE.md`.
+- Bumped package version to `1.5.0`.
+
 ## [1.4.0] - 2026-09-16
 
 ### Added
