@@ -26,9 +26,44 @@ cp .env.example .env
 | `COMPLETION_MODEL` | Custom model identifier to send to custom completion API | *(none)* |
 | `EMBEDDING_URL` | Custom embedding API URL (OpenAI-compatible `/v1/embeddings` or raw `llama.cpp` `/embedding`) | *(none)* |
 | `EMBEDDING_API_KEY` | Custom API Key for embeddings (if required) | *(none)* |
-| `EXTERNAL_DOCS_CONFIG_PATH` | Path to JSON config for ingested manuals | `pg-git/config/external_docs.json` |
+| `EXTERNAL_DOCS_CONFIG_PATH` | Path to JSON config for ingested manuals | `config/external_docs.json` (or `../pg-git/config/external_docs.json`) |
 
-### Custom Endpoints & Model Agnosticism
+---
+
+## PG-Git Codebase Ingestion & Fleet Synchronization
+
+Krusch Context MCP natively bundles the complete PG-Git engine, eliminating the need to install external sibling packages or configure complex symlinks.
+
+### Ingestion CLI Options
+
+1. **Snapshot Current Project**:
+   Recursively parses git trees, extracts AST symbols, builds caller/callee dependency edges, generates chunked centroid embeddings, and indexes content into PostgreSQL `blobs`:
+   ```bash
+   npm run snapshot -- .
+   ```
+   Or target any local repository path:
+   ```bash
+   npm run snapshot -- /path/to/another/repo
+   ```
+
+2. **Fleet-Wide Multi-Project Ingestion (`sync-all`)**:
+   Iterates through all registered homelab monorepo projects (23+ repositories) in topological order, performing atomic incremental snapshots into the shared database:
+   ```bash
+   npm run sync-all
+   ```
+
+3. **Automatic Git Post-Commit Hook**:
+   Installs an autonomous post-commit hook in `.git/hooks/post-commit` that triggers a background snapshot after every commit:
+   ```bash
+   node scripts/install_git_hook.js
+   ```
+
+### Sibling Interoperability with Standalone PG-Git
+
+Because Krusch Context MCP and standalone [PG-Git](https://github.com/kruschdev/pg-git) (`pg-git-mcp@1.1.0`) share the exact same PostgreSQL schema (`repositories`, `blobs`, `code_symbols`, `code_symbol_edges`, `trees`, `commits`, `branches`), you can:
+- Ingest repositories using `npm run snapshot` in `krusch-context-mcp`.
+- Query those same repositories using standalone `pg-git` tools (`pg_git_search_code`, `pg_git_search_symbols`, `pg_git_dependency_graph`) in single-purpose IDE setups.
+- Use Krusch Context MCP for comprehensive, unified context orchestration (episodic memory + codebase search + AST symbols + holographic steering + AI Watch research engines) in full pair-programming agents.
 
 While Ollama is the default choice to minimize setup friction (it manages model caching, GPU VRAM offloading, and on-demand model concurrency/swapping), you can route requests to any OpenAI-compatible API or local server (like `llama.cpp`'s `llama-server`, LM Studio, or vLLM).
 

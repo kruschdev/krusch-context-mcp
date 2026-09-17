@@ -76,3 +76,33 @@ response = agent.run(context_payload.markdown)
 ### Platform & Deployment Options
 * **Self-Hosted Mode**: Run local PostgreSQL + `pgvector` / `pgGraph` with open-source `polygres-sdk` (Apache-2.0).
 * **Managed Polygres Cloud**: Hosted zero-maintenance cloud database platform at [app.polygres.com](https://app.polygres.com).
+
+---
+
+## 5. Krusch Context MCP & PG-Git Integration
+
+`krusch-context-mcp` serves as the flagship implementation of Polygres working memory principles for AI coding agents, natively unifying **Episodic Memory**, **Holographic Steering**, and the **[PG-Git](https://github.com/kruschdev/pg-git)** codebase engine into a single PostgreSQL substrate.
+
+### Three-Layer Agent Memory Map
+| Polygres Layer | Krusch Context & PG-Git Implementation | Storage Tables |
+|----------------|----------------------------------------|----------------|
+| **1. Structured Records** | Git DAG, commits, branches, repository metadata, steering facts | `repositories`, `commits`, `branches`, `ide_agent_nuggets` |
+| **2. Connected Relationships (`pgGraph`)** | Multi-hop AST symbol calls/imports, memory-to-blob edges, version ancestry | `code_symbol_edges`, `memory_to_blob_edges`, `interaction_memory(parent_id)` |
+| **3. Semantic Recall (`pgvector` / `pgContext`)** | HNSW index vector matching with exponential temporal decay ($e^{-0.01t}$) | `blobs(embedding)`, `code_symbols`, `ide_agent_memory` |
+
+### Unified Hybrid Retrieval (`krusch_context_retrieve`)
+Implements the `polygres.retrieve()` paradigm as an MCP tool:
+```javascript
+// Single-call hybrid retrieval over episodic memory + PG-Git codebase DAG
+krusch_context_retrieve({
+  query: "How does the connection pool handle transaction rollbacks?",
+  project: "krusch-context-mcp",
+  graph_hops: 2,       // Walk memory -> blob -> AST callers/callees
+  limit_tokens: 4000,  // Server-side context packing
+  include_code: true   // Include PG-Git blobs and symbols
+});
+```
+
+### Shared Schema Synergy with Standalone PG-Git
+Both `krusch-context-mcp` and the standalone [PG-Git](https://github.com/kruschdev/pg-git) (`pg-git-mcp@1.1.0`) package share this identical PostgreSQL data layer. Whether running locally or deployed on managed **Polygres Cloud** (`app.polygres.com`), the same database instance simultaneously powers single-purpose codebase RAG and full multi-agent context orchestration without data duplication.
+

@@ -2,7 +2,44 @@
 
 > Every tool, every parameter, every default — everything an agent needs to call these tools correctly.
 >
-> For a quick overview, see the [Tool Quick-Reference](../README.md#tool-quick-reference) in the README. For configuration and troubleshooting, see the [Setup Guide](SETUP.md).
+> For a high-level overview, see the [README](../README.md). For configuration and operational setups, see the [Setup Guide](SETUP.md).
+
+---
+
+## 🏛️ Architecture & PG-Git Engine Integration
+
+Krusch Context MCP unifies **59 tools** into a single Model Context Protocol server. It natively incorporates the complete codebase indexing and retrieval engine from **[PG-Git](https://github.com/kruschdev/pg-git)** (`pg-git-mcp@1.1.0`):
+- **Native Git DAG Storage**: Stores Git trees, blobs, commits, and branches in PostgreSQL without requiring external file-system loose object scanning.
+- **AST Symbol Extraction**: Parses multi-language code files (JS, TS, Python, Go, Rust, Shell) to populate `code_symbols` and dependency edges in `code_symbol_edges`.
+- **Hybrid RRF Search**: Merges dense pgvector cosine similarity with full-text lexical BM25 (`tsv` GIN index) using Reciprocal Rank Fusion and exponential temporal decay ($e^{-0.01t}$).
+- **Shared Schema & Dual-Surface Aliases**: Shares identical PostgreSQL tables (`repositories`, `blobs`, `code_symbols`, `code_symbol_edges`, `trees`, `commits`, `branches`) with standalone PG-Git. Exposes first-class `pg_git_*` aliases (`pg_git_search_symbols`, `pg_git_file_symbols`, `pg_git_dependency_graph`) so standalone PG-Git workflows run seamlessly without reconfiguring agent prompts.
+
+---
+
+## Unified Hybrid Retrieval (Polygres-Inspired)
+
+### `krusch_context_retrieve`
+
+**Polygres-Inspired Unified Context Retrieval**: Single-query hybrid retrieval engine that combines dense HNSW vector search, multi-hop graph walks (`graph_hops`), stage-aware context pruning, and server-side token budget packing (`limit_tokens`) into a single Markdown context payload. Cross-references episodic memory and objective PG-Git codebase blobs and AST symbols in a single call.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | `string` | ✅ | — | Natural language retrieval query |
+| `project` | `string` | ❌ | `null` | Target project or repository filter |
+| `graph_hops` | `number` | ❌ | `1` | Graph traversal depth (hops) across `code_symbol_edges` and `memory_to_blob_edges` |
+| `limit_tokens` | `number` | ❌ | `4000` | Hard token budget limit for packed context payload |
+| `include_code` | `boolean` | ❌ | `true` | Whether to include matching PG-Git codebase blobs and symbols alongside episodic memory |
+
+**Example call:**
+```json
+{
+  "query": "how does the auth session engine handle JWT validation",
+  "project": "krusch-context-mcp",
+  "graph_hops": 2,
+  "limit_tokens": 3500,
+  "include_code": true
+}
+```
 
 ---
 
@@ -87,6 +124,25 @@
 ```json
 {
   "memory_id": "9aea1850-834e-4fff-9893-19e352f497d1"
+}
+```
+
+---
+
+### `krusch_context_think`
+
+**Context Synthesis & Gap Analysis**: Performs cited context synthesis, conflict detection, and gap analysis across both subjective episodic memory and objective PG-Git codebase blobs. It queries memories and code in parallel, formats a combined context block, and dispatches to the completion model to answer complex architectural questions with explicit citations.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | `string` | ✅ | — | The query or architectural question to think about |
+| `project` | `string` | ❌ | `null` | Optional project name/filter to restrict search scope |
+
+**Example call:**
+```json
+{
+  "query": "What are the differences between our local SQLite cache and durable PostgreSQL push-sync?",
+  "project": "krusch-context-mcp"
 }
 ```
 
@@ -418,17 +474,35 @@ Link a Company Brain v2 memory state to a codebase file (blob) to build the orga
 
 ---
 
-## Codebase Search Tools
+## Codebase Search Tools (Native PG-Git Engine)
+
+The Codebase Search subsystem in Krusch Context MCP natively incorporates the complete Git DAG, AST symbol parsing, and hybrid RRF search engine from **[PG-Git](https://github.com/kruschdev/pg-git)** (`pg-git-mcp@1.1.0`).
+
+### Shared Database Schema & Interoperability
+Both `krusch-context-mcp` and standalone `pg-git` share the identical PostgreSQL schema:
+- `repositories`: Registered repository catalogs, remote origins, and default branches.
+- `blobs`: Content-addressed file blobs, deduplicated by SHA hash, with stored `tsv` TSVECTOR columns, GIN full-text indexes, and 1024-dim `pgvector` embeddings.
+- `code_symbols`: Multi-language AST symbols (functions, classes, interfaces, methods, routes, variables) with line ranges and signatures.
+- `code_symbol_edges`: Directed caller, callee, import, and export dependency graph relationships.
+- `trees`, `commits`, `branches`: Complete Git Directed Acyclic Graph.
+
+### Dual-Surface Tool Aliases
+To ensure 100% interoperability with tools or agent workflows expecting standalone PG-Git nomenclature, the server registers both native names and direct aliases:
+- `krusch_context_search_symbols` ↔ `pg_git_search_symbols`
+- `krusch_context_file_symbols` ↔ `pg_git_file_symbols`
+- `krusch_context_symbol_graph` ↔ `pg_git_dependency_graph`
+
+---
 
 ### `krusch_context_search_code`
 
-Semantic search over all files indexed in PG-Git (`blobs`). Results are ranked by embedding similarity.
+**Native Hybrid Code Search**: Searches all source code files indexed in the native Git DAG (`blobs`). Combines dense pgvector cosine similarity and lexical BM25 full-text rank (`tsv` GIN index) via Reciprocal Rank Fusion (RRF), multiplied by exponential temporal decay ($e^{-0.01t}$).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `query` | `string` | ✅ | — | Natural language search query (e.g., "how does the scheduler work") |
+| `query` | `string` | ✅ | — | Natural language or keyword search query (e.g., "how does the scheduler work", "createDbosClient") |
 | `limit` | `number` | ❌ | `5` | Maximum results to return |
-| `project` | `string` | ❌ | `null` | Filter results to a specific project/repository name. If provided, it must exactly match a known repository name, or the tool will throw an error to prevent cross-project hallucination. |
+| `project` | `string` | ❌ | `null` | Filter results to a specific project/repository name. If provided, it must strictly match a known repository name, or the tool will throw an error to prevent cross-project hallucination. |
 | `repository_id` | `number` | ❌ | `null` | Filter by exact repository ID (overrides `project` name lookup) |
 
 **Example call:**
@@ -442,9 +516,75 @@ Semantic search over all files indexed in PG-Git (`blobs`). Results are ranked b
 
 ---
 
+### `krusch_context_search_symbols` / `pg_git_search_symbols`
+
+**Structural AST Symbol Search**: Search extracted code symbols (`code_symbols`) across indexed repositories without scanning entire file contents. Powered by a multi-language zero-dependency AST parser supporting JavaScript, TypeScript, Python, Go, Rust, and Shell.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | `string` | ✅ | — | Symbol name or substring to search (e.g., "verifyToken", "OrderService", "handleSearch") |
+| `limit` | `number` | ❌ | `20` | Maximum symbols to return |
+| `project` | `string` | ❌ | `null` | Filter by project name |
+| `repository_id` | `number` | ❌ | `null` | Filter by repository ID |
+
+**Example call:**
+```json
+{
+  "query": "createDbosClient",
+  "limit": 10
+}
+```
+
+**Returned Metadata:**
+- `symbol_name`: Exact identifier
+- `symbol_type`: `function`, `class`, `method`, `route`, `interface`, `variable`
+- `signature`: Parameter signature or route path
+- `file_path`: Relative file path
+- `start_line` / `end_line`: Precise 1-indexed source line range
+
+---
+
+### `krusch_context_file_symbols` / `pg_git_file_symbols`
+
+**File Symbol Listing**: Retrieve all AST symbols declared within a specific file blob SHA.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `blob_id` | `string` | ✅ | — | The SHA hash of the blob to inspect |
+
+**Example call:**
+```json
+{
+  "blob_id": "53473d51cfbe37d102507725fb259892abef6462"
+}
+```
+
+---
+
+### `krusch_context_symbol_graph` / `pg_git_dependency_graph`
+
+**Symbol Dependency Graph Walk**: Traverses outbound imports and inbound dependent callers for an AST symbol or file path up to $N$ hops (`code_symbol_edges`).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `symbol_name` | `string` | ✅ | — | The symbol identifier or file path to traverse |
+| `depth` | `number` | ❌ | `2` | Traversal depth (hops) |
+| `project` | `string` | ❌ | `null` | Filter by project name |
+| `repository_id` | `number` | ❌ | `null` | Filter by repository ID |
+
+**Example call:**
+```json
+{
+  "symbol_name": "git-engine.js",
+  "depth": 2
+}
+```
+
+---
+
 ### `krusch_context_list_repos`
 
-List all repositories indexed in PG-Git. No parameters required.
+List all repositories indexed in PostgreSQL. No parameters required.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -616,7 +756,7 @@ Semantically search a specific external manual by name.
 
 Verify that the server is alive, connected to the database, and functioning. No parameters required.
 
-Returns memory count, nugget count, repo count, DB status, and version.
+Returns episodic memory count, active v2 states, nugget count, indexed repo count, extracted code symbols count, DB engine status, and version.
 
 ---
 
@@ -859,5 +999,67 @@ Returns memory count, nugget count, repo count, DB status, and version.
 | `handoffs` | `object[]` | ✅ | — | Array of handoff trace events (`{ senderId, recipientId, message, status, error }`) |
 | `max_cascade_depth` | `number` | ❌ | `2` | Maximum allowed consecutive error cascade depth |
 
+---
 
+### `krusch_context_list_skills`
 
+**List Available Agent Skills**: Browse all specialized agent skills (TDD, Diagnose, Handoff, Caveman, Cloudflare Tunnel, Container Update, etc.) registered in the homelab skill directory.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| *(none)* | — | — | — | Returns array of skill names, descriptions, and file paths |
+
+---
+
+### `krusch_context_get_skill`
+
+**Retrieve Agent Skill Prompt**: Fetch the full markdown prompt instructions, procedures, and guardrails for a specific homelab agent skill by name.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | ✅ | — | The exact name of the skill to retrieve (e.g. `'tdd'`, `'diagnose'`, `'caveman'`, `'grill-with-docs'`) |
+
+**Example call:**
+```json
+{
+  "name": "diagnose"
+}
+```
+
+---
+
+## Session Bridge Tools (IDE ↔ Persistent SRE Scouts)
+
+### `krusch_context_write_session_handoff`
+
+**Session Bridge Close Handler**: Write the active IDE development session summary, calculate modified files, insert the durable handoff record into PostgreSQL, and notify or spawn the Jean SRE companion scout for automated background audit and telemetry correlation. Call this tool during the `/close` workflow.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `project` | `string` | ✅ | — | Project name or repository identifier |
+| `summary` | `string` | ✅ | — | Detailed summary of session accomplishments, unresolved edge cases, and in-flight tasks |
+
+**Example call:**
+```json
+{
+  "project": "krusch-context-mcp",
+  "summary": "Completed native PG-Git engine consolidation and updated full documentation suite."
+}
+```
+
+---
+
+### `krusch_context_read_session_review`
+
+**Session Bridge Review Consumer**: Fetch the latest background session review compiled by persistent SRE companions (e.g., Jean SRE). This operation is atomically idempotent — reading the review marks it as acknowledged/consumed so agents don't receive duplicate review prompts. Call this tool during the `/continue` or `/open` workflow.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `project` | `string` | ✅ | — | Project name or repository identifier to read review for |
+
+**Example call:**
+```json
+{
+  "project": "krusch-context-mcp"
+}
+```

@@ -79,7 +79,7 @@ To prevent semantic cross-contamination (e.g., a bug memory polluting a list of 
 |---|---|---|
 | 📌 **`priorities`** | Active goals, roadmap, task state, and milestones. | `Implement SQLite pull/push sync engine for Krusch Context.` |
 | 🐛 **`bugs`** | Identified issues, root causes, symptoms, and fixes. | `Port 5441 conflicts with PostgreSQL. Switched container to 5442.` |
-| 🎯 **`outcomes`** | Results of completed sessions, deployments, or tests. | `Verified all 32 tools pass smoke tests on production host.` |
+| 🎯 **`outcomes`** | Results of completed sessions, deployments, or tests. | `Verified all 59 tools pass smoke tests on production host.` |
 | 🎓 **`lessons`** | Pattern discoveries, architectural decisions, and conventions. | `Avoid circular imports in index.js by exporting DB pools from pool.js.` |
 | 🕒 **`activity`** | Chronological log of steps taken during the session. | `Created test suite, migrated schema, verified connections.` |
 
@@ -145,6 +145,17 @@ krusch_context_consolidate({
 });
 ```
 This reduces noise in the memory footprint without losing historical provenance.
+
+### Workflow 5: Anchoring Memories to PG-Git Codebase Blobs
+To ground episodic memory directly into code reality, agents establish explicit graph edges between memories and Git blobs indexed in the shared PostgreSQL schema:
+```javascript
+krusch_context_link_blob({
+  memory_id: "9aea1850-834e-4fff-9893-19e352f497d1",
+  blob_id: "53473d51cfbe37d102507725fb259892abef6462",
+  relationship: "fixes_bug_in"
+});
+```
+This enables multi-hop relational graph walks (`krusch_context_retrieve` with `graph_hops: 2`) to seamlessly trace from a past bug report to the exact source code blob and its dependent AST caller symbols.
 
 ---
 

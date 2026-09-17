@@ -29,7 +29,7 @@ Traditional RAG tools (Pinecone, Qdrant, naive vector search) failed to solve th
 
 ## 🏗️ 2. How Local & Remote Agents Use the MCP Server
 
-`krusch-context-mcp` exposes **42 standardized Model Context Protocol (MCP) tools** over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
+`krusch-context-mcp` exposes **59 standardized Model Context Protocol (MCP) tools** over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
 
 ![5 Unified Memory Subsystems Architecture](assets/krusch_context_mcp_5_subsystems_diagram.png)
 
@@ -62,17 +62,22 @@ Designed for team collaboration and multi-agent coordination (`interaction_memor
 * **Conflict Resolution**: `krusch_context_resolve_conflict({ conflict_ids, resolution_content })` allows agents to reach consensus when two memories contradict each other.
 * **Role-Based Access Lenses**: `krusch_context_search_lens({ query, roles })` enforces read/write role authorization (`read_roles`, `write_roles`).
 
-### Subsystem 4: Codebase Search & External Documentation Engine
-* **Semantic Code Search**: Direct integration with `pg-git` indexes all source code blobs, git trees, commits, and branches into PostgreSQL.
+### Subsystem 4: Consolidated Codebase Search & Native Git RAG Engine
+* **Native Git DAG & Hybrid Search**: Fully consolidated codebase engine directly in PostgreSQL. Indexes source blobs, trees, commits, branches, and full-text `tsv` GIN indexes. Combines dense pgvector cosine similarity with lexical BM25 via Reciprocal Rank Fusion (RRF) and exponential temporal decay.
+* **AST Symbol & Graph Architecture**: Zero-dependency structural parser extracting classes, functions, methods, and routes (`code_symbols`) with multi-hop relational dependency graph walks (`code_symbol_edges`).
+* **Sibling Synergy with PG-Git**: Shares identical PostgreSQL schema with the standalone [PG-Git](https://github.com/kruschdev/pg-git) (`pg-git-mcp@1.1.0`), enabling lightweight single-purpose codebase search or full flagship context orchestration without code duplication.
 * **External Manuals**: Ingests external documentation manuals (e.g. `polygres-docs`, `openrouter-docs`) so agents can query external specs via `krusch_docs_search`.
 
 ### Subsystem 5: Proactive Trajectory Auditor & AI Watch Research Engines
-Integrates 4 cutting-edge AI research subsystems:
+Integrates cutting-edge AI research subsystems:
 * **Proactive Auditor (`proactive_nudge`)**: Background auditor that inspects agent trajectories against past rules and failure patterns (OPD/PUST feedback loops).
 * **AgentDebugX**: Real-time trajectory pattern matching against historical agent failure bundles (`agent_failure_bundles`).
 * **DataFlow-Harness**: Pipeline DAG operator registries (`dataflow_operator_registry`).
 * **Rubric4Setwise**: Setwise LLM-based reranking (`setwiseRerank`).
 * **AREX**: Autonomous research constraint auditing and state tracking (`arex_research_states`).
+* **Teacher Distillation**: Multi-tier trajectory distillation (workflow, subtask, function) for student agent learning.
+* **Diverse Skill Routing (DSR)**: Determinantal Point Process (DPP) skill routing.
+* **Multi-Agent Resilience Gate**: Emergence World cascade and credential safety evaluation.
 
 ---
 
@@ -80,11 +85,12 @@ Integrates 4 cutting-edge AI research subsystems:
 
 | Feature | Generic Vector DBs | Naive MCP Memory | `krusch-context-mcp` |
 | :--- | :---: | :---: | :---: |
-| **Protocol Support** | Proprietary REST | MCP | **Native 42-Tool MCP Surface** |
+| **Protocol Support** | Proprietary REST | MCP | **Native 59-Tool MCP Surface** |
+| **Code RAG & AST Indexing** | ❌ No | ❌ No | **✅ Native Git DAG + AST Symbols + Hybrid RRF** |
 | **Temporal Recency Decay** | ❌ No | ❌ No | **✅ Exponential Decay ($e^{-0.01t}$)** |
 | **Micro-Steering (Nuggets)** | ❌ No | ❌ No | **✅ Holographic Steering Facts** |
 | **Multi-Agent Consensus** | ❌ No | ❌ No | **✅ Company Brain v2 Substrate** |
-| **Graph-Vector Fusion** | Separate DB | ❌ No | **✅ Native `pgGraph` Multi-Hop Walks** |
+| **Graph-Vector Fusion** | Separate DB | ❌ No | **✅ Native `pgGraph` & Symbol Dependency Walks** |
 | **Offline Cache + Cloud Sync** | ❌ No | Local Only | **✅ SQLite Cache + Polygres.com Sync** |
 | **Failure Pattern Matching** | ❌ No | ❌ No | **✅ Native AgentDebugX Integration** |
 
@@ -129,7 +135,7 @@ How Local & Remote Agents Use the MCP Server
 
 [INSERT IMAGE: docs/assets/krusch_context_mcp_5_subsystems_diagram.png]
 
-krusch-context-mcp exposes 42 standardized Model Context Protocol (MCP) tools over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
+krusch-context-mcp exposes 59 standardized Model Context Protocol (MCP) tools over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
 
 • Local Agent Support: Local agents get instant sub-5ms zero-latency reads from the project-scoped SQLite cache. No internet connection required.
 
@@ -145,13 +151,14 @@ Deep Dive into the 5 Core Subsystems
 
 3. Company Brain v2: Multi-agent consensus, parent-child versioning, conflict resolution, and role-based access lenses.
 
-4. Codebase & Docs Search: Indexes source code blobs, git trees, commits, and external documentation manuals.
+4. Consolidated Codebase Search & Native PG-Git RAG: Natively incorporates PG-Git's Git DAG, AST symbol parsing, caller/callee dependency graphs, and hybrid BM25 + pgvector RRF search sharing PostgreSQL schema with standalone PG-Git.
 
 5. AI Watch Research Engines: Integrates AgentDebugX failure pattern matching, DataFlow DAG operator registries, Rubric4Setwise reranking, and AREX constraint auditing.
 
 Links & Resources
 
 • GitHub Repository: https://github.com/kruschdev/krusch-context-mcp
+• Standalone PG-Git: https://github.com/kruschdev/pg-git
 • Tool Reference: https://github.com/kruschdev/krusch-context-mcp/blob/main/docs/TOOL_REFERENCE.md
 • Polygres Platform: https://polygres.com
 • OpenRouter Embeddings: https://openrouter.ai

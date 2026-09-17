@@ -38,8 +38,8 @@ By pairing **[Polygres.com](https://polygres.com)** (Evokoa's AI-native PostgreS
 * **Cost Efficiency**: Priced at ~$0.01 per 1 million tokens (~1 to 2 cents per month of heavy active development).
 * **Benefit**: Zero local Ollama process overhead, zero VRAM allocation on the laptop, sub-100ms vector generation, and 100% uptime while traveling.
 
-### 3. Unified Agent Surface: `krusch-context-mcp` (42 MCP Tools)
-* **Unified Tooling**: Exposes 42 Model Context Protocol (MCP) tools across Episodic Memory (v1), Company Brain v2 Substrate, Holographic Nuggets, Codebase Search, and AI Watch Research Engines (AgentDebugX, DataFlow-Harness, Rubric4Setwise, AREX).
+### 3. Unified Agent Surface: `krusch-context-mcp` (59 MCP Tools)
+* **Unified Tooling**: Exposes 59 Model Context Protocol (MCP) tools across Episodic Memory (v1), Company Brain v2 Substrate, Holographic Nuggets, Native PG-Git Codebase & AST Search, and AI Watch Research Engines (AgentDebugX, DataFlow-Harness, Rubric4Setwise, AREX, Teacher Distillation, DSR, Resilience Gate).
 * **Local Compute Cache + Cloud Sync**: Per-project SQLite caches (`.agent/memory.db`) provide instant local reads, while write-behind sync automatically pushes updates to Polygres.com.
 
 ---
@@ -121,9 +121,9 @@ The 100% Cloud Stack Architecture
 
 • Benefit: Zero local Ollama process overhead, zero VRAM allocation on the laptop, sub-100ms vector generation, and 100% uptime while traveling.
 
-3. Unified Agent Surface: krusch-context-mcp (42 MCP Tools)
+3. Unified Agent Surface: krusch-context-mcp (59 MCP Tools)
 
-Exposes 42 Model Context Protocol (MCP) tools across Episodic Memory, Company Brain v2 Substrate, Holographic Nuggets, Codebase Search, and AI Watch Research Engines.
+Exposes 59 Model Context Protocol (MCP) tools across Episodic Memory, Company Brain v2 Substrate, Holographic Nuggets, Native PG-Git Codebase & AST Symbol Search, and AI Watch Research Engines.
 
 Migration & Live Verification Results
 
@@ -134,5 +134,6 @@ Migration & Live Verification Results
 Links & Resources
 
 • GitHub Repository: https://github.com/kruschdev/krusch-context-mcp
+• Standalone PG-Git: https://github.com/kruschdev/pg-git
 • Polygres Platform: https://polygres.com
 • OpenRouter Embeddings: https://openrouter.ai

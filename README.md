@@ -22,11 +22,14 @@ Every time you start a new AI coding session, your agent starts from zero. It do
 
 ## What It Does
 
-A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **53 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
+A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **59 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
 
 | Capability | What It Provides |
 |-----------|-----------------|
 | ⚡ **Unified Hybrid Retrieval** | Polygres-inspired single-call retrieval combining vector search, multi-hop graph walks (`graph_hops`), server-side token packing (`limit_tokens`), and optional **Rubric4Setwise** minimal cover reranking. |
+| 🧩 **Native AST Symbol Search & Chunking** | Built-in multi-language AST extractor (`code_symbols`) for JS, TS, Python, Go, Rust, and Shell. Search classes, functions, routes, and methods directly without scanning whole files (`krusch_context_search_symbols`). |
+| 🕸️ **Symbol Dependency Graph** | Relational graph walks (`code_symbol_edges`) tracing inbound callers, outbound imports, and dependencies up to $N$ hops (`krusch_context_symbol_graph`). |
+| 🔀 **Hybrid BM25 + pgvector RRF** | Combines dense cosine similarity with lexical full-text BM25 search (`tsv` GIN index) via Reciprocal Rank Fusion, with exponential recency decay. |
 | 🎯 **Diverse Skill Routing (DSR)** | Determinantal Point Process (DPP) skill routing (`krusch_context_route_skills`) for non-redundant orthogonal tool selection without prompt bloat ([arXiv: 2609.05824](https://arxiv.org/abs/2609.05824)). |
 | 🛡️ **Multi-Agent Resilience Gate** | Emergence World stress-testing (`krusch_context_evaluate_resilience`) for error cascades, circular deadlocks, and credential leakage across agent handoffs ([arXiv: 2609.17320](https://arxiv.org/abs/2609.17320)). |
 | 🎓 **Hierarchical Teacher Memory** | Workflow, subtask, and function-tier trajectory distillation (`krusch_context_distill_teacher_memory`, `krusch_context_distill_function_memory`) for cross-model student learning ([arXiv: 2608.07169](https://arxiv.org/abs/2608.07169)). |
@@ -49,11 +52,13 @@ A single [Model Context Protocol](https://modelcontextprotocol.io/) server expos
 
 **🛡️ Everything stays on your hardware** — All embeddings via local [Ollama](https://ollama.com/) (`bge-large` + `qwen2.5-coder:1.5b` or `llama3.2`). Storage is PostgreSQL + pgvector + SQLite. Zero API costs, full data sovereignty.
 
+**🚀 Fully Consolidated Native Engine** — Codebase ingestion, Git DAG tracking, AST chunking, symbol indexing, hybrid RRF search, episodic memory, and steering nuggets operate natively in a single, zero-dependency process (`pg` driver directly). No external sibling npm packages or node_modules symlinks needed.
+
+**🤝 Sibling Synergy with Standalone [PG-Git](https://github.com/kruschdev/pg-git)** — While Krusch Context MCP includes the complete native codebase engine, [PG-Git](https://github.com/kruschdev/pg-git) (`pg-git-mcp@1.1.0`) is actively maintained as an independent, standalone codebase RAG package. Both share identical PostgreSQL schemas (`repositories`, `blobs`, `code_symbols`, `code_symbol_edges`, `trees`, `commits`, `branches`), enabling interoperability across single-purpose tools and full context orchestrators.
+
 **🔄 Switch models without losing context** — Memory is decoupled from the reasoning engine. Swap between Gemini, Claude, GPT-4o, or local models mid-project — every model inherits the same context.
 
 **🔌 Model-Provider & Cloud Agnostic (OpenRouter & Polygres.com)** — While local Ollama and local Postgres are supported out-of-the-box, `krusch-context-mcp` is fully provider-agnostic. You can host your database on [Polygres.com](https://polygres.com) (`DATABASE_URL`) and generate cloud `bge-large` embeddings via [OpenRouter](https://openrouter.ai) (`EMBEDDING_URL="https://openrouter.ai/api/v1/embeddings"`, `EMBED_MODEL="baai/bge-large-en-v1.5"`), or use any OpenAI-compatible endpoint (LM Studio, `llama-server`, vLLM).
-
-**⚡ One server, not three** — Codebase search, episodic memory, and steering nuggets in a single process with shared connection pool and embedding pipeline.
 
 ---
 
@@ -88,7 +93,7 @@ Add to your IDE MCP settings (e.g., `.cursor/mcp.json`, `claude_desktop_config.j
 }
 ```
 
-Restart your IDE — your agent now has access to all 53 tools.
+Restart your IDE — your agent now has access to all 59 tools.
 
 > **Upgrading?** `git pull origin main && npm install && npm start` — idempotent migrations run on startup.
 
@@ -99,9 +104,9 @@ Restart your IDE — your agent now has access to all 53 tools.
 ```mermaid
 graph TD;
     A[Agent Tool Call] --> B{Krusch Context MCP};
-    B -- Semantic Code Search --> C[(PG-Git: blobs)];
+    B -- Native Code RAG & Git DAG --> C[(PostgreSQL: blobs, symbols, edges)];
     B -- Read/Write --> D[(SQLite Compute Cache)];
-    B -- Read/Write --> E[(Postgres Object Storage)];
+    B -- Read/Write --> E[(PostgreSQL: memory & nuggets)];
     D -. Async Pull/Push .-> E;
     B -- Deep Search --> C;
     B -- Deep Search --> D;
@@ -166,10 +171,14 @@ For a detailed technical guide on categories, architecture, sync mechanics, and 
 * **Codebase Edge Resolution:** Fetch and append linked git blob references (`memory_to_blob_edges`):
   `search_memory({ category: "bugs", query: "VRAM leak", include_linked_blobs: true })`
 
-### Codebase Search
+### Codebase Search (Native Hybrid RAG & AST Symbols)
 
 > **You:** "How does our auth middleware work?"  
-> **Agent:** *[`search_code`]* Found 3 files — here's the implementation in `lib/auth.js`...
+> **Agent:** *[`search_code`]* Found 3 files (Hybrid RRF dense cosine + lexical BM25) — here's the implementation in `lib/auth.js`...
+
+> **You:** "Where is the `verifyToken` function declared and what calls it?"  
+> **Agent:** *[`search_symbols`]* Found function `verifyToken(req, res, next)` at `lib/auth.js:42-88`.  
+> **Agent:** *[`symbol_graph`]* Traced 4 inbound callers in `routes/api.js` and outbound import to `db/pool.js`.
 
 ### Zero-Trust Verification
 
@@ -255,10 +264,13 @@ For a detailed technical guide on categories, architecture, sync mechanics, and 
 | `traverse_graph` | **Company Brain v2** | Navigate parent/child state lineage and linked codebase blobs |
 | `update_ontology` | **Company Brain v2** | Manage project tags, ontology nodes, and domain categories |
 | `link_blob` | **Company Brain v2** | Create explicit graph edges between episodic memories and git code blobs |
-| `search_code` | **Codebase Search** | Semantic search over indexed git blobs matching natural language intent |
-| `deep_search` | **Codebase Search** | Composite zero-trust search cross-referencing subjective memory and objective codebase reality |
-| `list_repos` | **Codebase Search** | Browse indexed repositories registered in PG-Git |
-| `read_tree` | **Codebase Search** | Inspect repository file hierarchy and directory trees |
+| `search_code` | **Codebase Search** | Native PG-Git hybrid semantic + BM25 RRF search over indexed git blobs matching natural language intent |
+| `search_symbols` / `pg_git_search_symbols` | **Codebase Search** | Search extracted AST code symbols (functions, classes, interfaces, methods, routes) across repositories |
+| `file_symbols` / `pg_git_file_symbols` | **Codebase Search** | Retrieve all AST code symbols declared in a specific file or blob SHA |
+| `symbol_graph` / `pg_git_dependency_graph` | **Codebase Search** | Traverse dependency, call, and import edges for a symbol or file up to $N$ hops |
+| `deep_search` | **Codebase Search** | Composite zero-trust search cross-referencing subjective memory and objective PG-Git codebase reality |
+| `list_repos` | **Codebase Search** | Browse indexed PG-Git repositories registered in PostgreSQL |
+| `read_tree` | **Codebase Search** | Inspect repository file hierarchy and Git DAG directory trees |
 | `read_blob` | **Codebase Search** | Retrieve full file content by blob hash or file path |
 | `nugget_remember` | **Steering Nuggets** | Store key-value steering fact (conventions, coding style, preferences) |
 | `nugget_nudges` | **Steering Nuggets** | Retrieve steering facts semantically relevant to current task or project |
@@ -298,8 +310,14 @@ For a detailed technical guide on categories, architecture, sync mechanics, and 
 
 ```
 krusch-context-mcp/
+├── db/
+│   ├── pool.js                      # Native zero-dependency PostgreSQL connection pool
+│   └── schema.sql                   # Complete unified PostgreSQL + pgvector schema
 ├── src/
-│   ├── index.js                     # MCP server entry — tool registration & dispatch (53 tools)
+│   ├── index.js                     # MCP server entry — tool registration & dispatch (59 tools)
+│   ├── git-engine.js                # Native Git DAG, Hybrid RRF code search, symbols & graph walks
+│   ├── ast-chunker.js               # Zero-dependency multi-language AST symbol extractor
+│   ├── llm-queue.js                 # Native Ollama priority queue & fleet circuit breaker
 │   ├── memory-engine.js             # Episodic memory CRUD, temporal superseding & consolidation
 │   ├── v2-engine.js                 # Company Brain v2 substrate (factual/interaction/action memory)
 │   ├── nuggets-engine.js            # Holographic Nuggets steering facts CRUD
@@ -316,11 +334,15 @@ krusch-context-mcp/
 │   ├── pgcontext-helper.js          # pgContext extension detection & HNSW index setup
 │   ├── proactive-engine.js          # Proactive trajectory auditor & Multi-Agent Resilience Gate
 │   ├── think-engine.js              # Cited synthesis, conflict detection & gap analysis
+│   ├── embedding-helper.js          # Centroid chunking, Ollama/OpenRouter routing & embeddability filter
 │   └── llm-tags.js                  # Shared LLM tag generation (qwen2.5-coder:1.5b)
-├── scripts/                         # Benchmarking, evaluation, and maintenance
-├── tests/                           # *.test.js = automated, test_*.js = smoke
+├── scripts/
+│   ├── snapshot.js                  # Native Git codebase ingestion & symbol extractor CLI
+│   ├── sync_all_projects.js         # Fleet-wide multi-project ingestion sync
+│   └── ...                          # Benchmarking, evaluation, and maintenance scripts
+├── tests/                           # 40 automated tests (*.test.js) + 7 stdio smoke tests (test_*.js)
 ├── docs/
-│   ├── TOOL_REFERENCE.md            # Full parameter reference for all 53 tools
+│   ├── TOOL_REFERENCE.md            # Full parameter reference for all 59 tools
 │   ├── SETUP.md                     # Configuration, storage routing, troubleshooting
 │   └── research/                    # Sentra Company Brain research essays
 └── package.json
@@ -331,10 +353,10 @@ krusch-context-mcp/
 ## Testing
 
 ```bash
-npm test                                # Automated (node:test, *.test.js)
-npm run test:smoke                      # JSON-RPC stdio smoke tests
-node tests/test_client.js               # All 53 tools against live DB
-node tests/test_ai_watch_integrations.js # AI Watch paper integration suite
+npm test                                # Automated suite: 40/40 tests passing (node:test, *.test.js)
+npm run test:smoke                      # Full JSON-RPC stdio smoke tests across all subsystems
+npm run test:aiwatch                    # AI Watch paper integration suite (AgentDebugX, DataFlow, AREX, ACM)
+node tests/test_client.js               # All 59 tools against live DB over stdio
 node scripts/benchmark_latency.js       # End-to-end latency
 node scripts/eval_accuracy.js           # Precision/recall
 ```
@@ -347,7 +369,7 @@ node scripts/eval_accuracy.js           # Precision/recall
 
 | Project / Service | Role |
 |-------------------|------|
-| [PG-Git-MCP](https://github.com/kruschdev/pg-git-mcp) | Standalone codebase search engine (sibling project sharing schema) |
+| [PG-Git (pg-git-mcp)](https://github.com/kruschdev/pg-git) | Standalone codebase search engine (sibling project sharing schema & AST symbols) |
 | [Polygres.com](https://polygres.com) | AI-native PostgreSQL cloud platform by Evokoa (`pgContext` & `pgGraph` native) |
 | [OpenRouter.ai](https://openrouter.ai) | Unified cloud LLM & embedding API (`baai/bge-large-en-v1.5`) |
 | [AgentDebugX](https://github.com/AgentDebugX/AgentDebugX) | Open-source failure observability, attribution, and recovery toolkit |
