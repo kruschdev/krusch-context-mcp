@@ -8,7 +8,7 @@
 
 ## 🏛️ Architecture & PG-Git Engine Integration
 
-Krusch Context MCP unifies **59 tools** into a single Model Context Protocol server. It natively incorporates the complete codebase indexing and retrieval engine from **[PG-Git](https://github.com/kruschdev/pg-git)** (`pg-git-mcp@1.1.0`):
+Krusch Context MCP unifies **64 tools** into a single Model Context Protocol server. It natively incorporates the complete codebase indexing and retrieval engine from **[PG-Git](https://github.com/kruschdev/pg-git)** (`pg-git-mcp@1.1.0`):
 - **Native Git DAG Storage**: Stores Git trees, blobs, commits, and branches in PostgreSQL without requiring external file-system loose object scanning.
 - **AST Symbol Extraction**: Parses multi-language code files (JS, TS, Python, Go, Rust, Shell) to populate `code_symbols` and dependency edges in `code_symbol_edges`.
 - **Hybrid RRF Search**: Merges dense pgvector cosine similarity with full-text lexical BM25 (`tsv` GIN index) using Reciprocal Rank Fusion and exponential temporal decay ($e^{-0.01t}$).
@@ -1063,3 +1063,87 @@ Returns episodic memory count, active v2 states, nugget count, indexed repo coun
   "project": "krusch-context-mcp"
 }
 ```
+
+---
+
+## ⚡ Polygres Cloud v0.5.0 Runtime Tools
+
+### `polygres_cloud_usage`
+
+**Polygres Cloud Quota Monitor**: Fetch live monthly microcredit allowance, generation/query usage, and remaining free quota for the active Polygres project. Enables agents and developers inside Cursor and Claude Code to monitor free tier consumption without navigating to the web console.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| *(none)* | — | — | — | Automatically resolves active project credentials from environment |
+
+**Example call:**
+```json
+{}
+```
+
+---
+
+### `polygres_cloud_search`
+
+**Polygres Cloud In-Engine Search**: Perform semantic or hybrid search over a cloud pgContext collection using pure text input. Vector embeddings are generated 100% in-engine by Polygres—eliminating local Ollama queue overhead, external embedding API hops, and client-side vector handling.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `text` | `string` | ✅ | — | Raw text query to search and embed in-engine |
+| `collection` | `string` | ❌ | `null` | Target pgContext collection name (optional) |
+| `limit` | `number` | ❌ | `10` | Maximum number of results to return |
+| `filters` | `object` | ❌ | `null` | Optional metadata key-value filters |
+
+**Example call:**
+```json
+{
+  "text": "how do background embedding pipelines work on watched tables",
+  "limit": 5
+}
+```
+
+---
+
+### `polygres_cloud_models`
+
+**Polygres Cloud Model Catalog**: Discover available in-engine embedding models, supported vector dimensions, and microcredit pricing for the connected project.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| *(none)* | — | — | — | Returns array of supported embedding models and available dimensions |
+
+**Example call:**
+```json
+{}
+```
+
+---
+
+### `polygres_cloud_capabilities`
+
+**Polygres Cloud Engine Capabilities**: Inspect server-side pgContext version, HNSW limits (maximum record bytes, M factor), and compatibility matrix.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| *(none)* | — | — | — | Returns server engine capabilities and pgContext metadata |
+
+**Example call:**
+```json
+{}
+```
+
+---
+
+### `polygres_cloud_embedding_configs`
+
+**Polygres Cloud Watched Tables**: List automated in-database embedding pipelines configured on database tables, including source columns, target embedding tables, and active status.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| *(none)* | — | — | — | Returns array of configured automated table embedding pipelines |
+
+**Example call:**
+```json
+{}
+```
+

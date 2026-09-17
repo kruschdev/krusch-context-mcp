@@ -22,10 +22,11 @@ Every time you start a new AI coding session, your agent starts from zero. It do
 
 ## What It Does
 
-A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **59 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
+A single [Model Context Protocol](https://modelcontextprotocol.io/) server exposing **64 tools** to any MCP-compatible IDE agent (Cursor, Claude Code, Windsurf, Gemini CLI, etc.):
 
 | Capability | What It Provides |
 |-----------|-----------------|
+| ⚡ **Polygres Cloud Runtime (v0.5.0)** | Direct agent integration with Polygres Cloud: live 500M credit quota monitoring (`polygres_cloud_usage`), zero-client-embedding text search (`polygres_cloud_search`), model discovery, and watched table embedding pipelines. |
 | ⚡ **Unified Hybrid Retrieval** | Polygres-inspired single-call retrieval combining vector search, multi-hop graph walks (`graph_hops`), server-side token packing (`limit_tokens`), and optional **Rubric4Setwise** minimal cover reranking. |
 | 🧩 **Native AST Symbol Search & Chunking** | Built-in multi-language AST extractor (`code_symbols`) for JS, TS, Python, Go, Rust, and Shell. Search classes, functions, routes, and methods directly without scanning whole files (`krusch_context_search_symbols`). |
 | 🕸️ **Symbol Dependency Graph** | Relational graph walks (`code_symbol_edges`) tracing inbound callers, outbound imports, and dependencies up to $N$ hops (`krusch_context_symbol_graph`). |
@@ -58,20 +59,20 @@ A single [Model Context Protocol](https://modelcontextprotocol.io/) server expos
 
 **🔄 Switch models without losing context** — Memory is decoupled from the reasoning engine. Swap between Gemini, Claude, GPT-4o, or local models mid-project — every model inherits the same context.
 
-**🔌 Model-Provider & Cloud Agnostic (OpenRouter & Polygres.com)** — While local Ollama and local Postgres are supported out-of-the-box, `krusch-context-mcp` is fully provider-agnostic. You can host your database on [Polygres.com](https://polygres.com) (`DATABASE_URL`) and generate cloud `bge-large` embeddings via [OpenRouter](https://openrouter.ai) (`EMBEDDING_URL="https://openrouter.ai/api/v1/embeddings"`, `EMBED_MODEL="baai/bge-large-en-v1.5"`), or use any OpenAI-compatible endpoint (LM Studio, `llama-server`, vLLM).
+**🔌 Zero-Config Polygres Native Embeddings (Default) + BYO-Model (OpenRouter & Ollama)** — `krusch-context-mcp` defaults out of the gate to Polygres native in-engine embeddings (`POLYGRES_RUNTIME_URL`, `POLYGRES_API_KEY`). You can store, embed, and search directly inside Polygres with zero extra embedding APIs or keys. For users who prefer bringing their own models (such as BAAI `bge-large`), you can seamlessly configure [OpenRouter](https://openrouter.ai) (`EMBEDDING_URL="https://openrouter.ai/api/v1/embeddings"`, `EMBED_MODEL="baai/bge-large-en-v1.5"`), local Ollama (`bge-large`), or any OpenAI-compatible endpoint.
 
 ---
 
 ## Quick Start
 
-**Prerequisites:** [Node.js 22+](https://nodejs.org/) · [Ollama](https://ollama.com/) with `bge-large` and `qwen2.5-coder:1.5b` (or `llama3.2`) · PostgreSQL with [`pgvector`](https://github.com/pgvector/pgvector)
+**Prerequisites:** [Node.js 22+](https://nodejs.org/) · [Polygres](https://polygres.com) Cloud Database (Default out-of-the-box) *or* local PostgreSQL with [`pgvector`](https://github.com/pgvector/pgvector) & [Ollama](https://ollama.com/)
 
 ```bash
 # 1. Clone and install (fully native consolidated engine — no external sibling packages required)
 git clone https://github.com/kruschdev/krusch-context-mcp.git
 cd krusch-context-mcp
 npm install
-cp .env.example .env  # Configure your PostgreSQL connection
+cp .env.example .env  # Configure your PostgreSQL / Polygres connection
 
 # 2. Ingest codebase (optional but recommended)
 npm run snapshot -- .
@@ -93,7 +94,7 @@ Add to your IDE MCP settings (e.g., `.cursor/mcp.json`, `claude_desktop_config.j
 }
 ```
 
-Restart your IDE — your agent now has access to all 59 tools.
+Restart your IDE — your agent now has access to all 64 tools.
 
 > **Upgrading?** `git pull origin main && npm install && npm start` — idempotent migrations run on startup.
 
@@ -303,6 +304,11 @@ For a detailed technical guide on categories, architecture, sync mechanics, and 
 | `docs_list` | **External Docs** | List all ingested external documentation manuals |
 | `docs_search` | **External Docs** | Search within a specific documentation manual using vector similarity |
 | `health_check` | **System** | Verify MCP server status, database connection pool, and model connectivity |
+| `polygres_cloud_usage` | **Polygres Cloud** | Fetch live monthly microcredit allowance, generation/query usage, and remaining free quota |
+| `polygres_cloud_search` | **Polygres Cloud** | Semantic or hybrid search over cloud collections using pure text input (in-engine embeddings) |
+| `polygres_cloud_models` | **Polygres Cloud** | Discover available in-engine embedding models, dimensions, and microcredit pricing |
+| `polygres_cloud_capabilities` | **Polygres Cloud** | Inspect server-side pgContext version, HNSW limits (max record bytes, M factor), and compatibility |
+| `polygres_cloud_embedding_configs` | **Polygres Cloud** | List automated in-database embedding pipelines configured on database tables |
 
 ---
 
@@ -314,7 +320,7 @@ krusch-context-mcp/
 │   ├── pool.js                      # Native zero-dependency PostgreSQL connection pool
 │   └── schema.sql                   # Complete unified PostgreSQL + pgvector schema
 ├── src/
-│   ├── index.js                     # MCP server entry — tool registration & dispatch (59 tools)
+│   ├── index.js                     # MCP server entry — tool registration & dispatch (64 tools)
 │   ├── git-engine.js                # Native Git DAG, Hybrid RRF code search, symbols & graph walks
 │   ├── ast-chunker.js               # Zero-dependency multi-language AST symbol extractor
 │   ├── llm-queue.js                 # Native Ollama priority queue & fleet circuit breaker
@@ -322,6 +328,7 @@ krusch-context-mcp/
 │   ├── v2-engine.js                 # Company Brain v2 substrate (factual/interaction/action memory)
 │   ├── nuggets-engine.js            # Holographic Nuggets steering facts CRUD
 │   ├── unified-retrieval.js         # Unified Hybrid Retrieval engine (Stage-Aware Pruning)
+│   ├── polygres-cloud.js            # Polygres Cloud v0.5.0 Runtime REST client, quota monitor & search
 │   ├── acm-engine.js                # Agentic Context Management (ACM) & token budget auditing
 │   ├── agentdebugx-engine.js        # AgentDebugX Error Hub & failure observability
 │   ├── dataflow-engine.js           # DataFlow-Harness grounded pipeline registry & DAG mutations
@@ -342,7 +349,7 @@ krusch-context-mcp/
 │   └── ...                          # Benchmarking, evaluation, and maintenance scripts
 ├── tests/                           # 40 automated tests (*.test.js) + 7 stdio smoke tests (test_*.js)
 ├── docs/
-│   ├── TOOL_REFERENCE.md            # Full parameter reference for all 59 tools
+│   ├── TOOL_REFERENCE.md            # Full parameter reference for all 64 tools
 │   ├── SETUP.md                     # Configuration, storage routing, troubleshooting
 │   └── research/                    # Sentra Company Brain research essays
 └── package.json
@@ -355,8 +362,9 @@ krusch-context-mcp/
 ```bash
 npm test                                # Automated suite: 40/40 tests passing (node:test, *.test.js)
 npm run test:smoke                      # Full JSON-RPC stdio smoke tests across all subsystems
+npm run test:cloud                      # Polygres Cloud integration tests (quota, search, capabilities)
 npm run test:aiwatch                    # AI Watch paper integration suite (AgentDebugX, DataFlow, AREX, ACM)
-node tests/test_client.js               # All 59 tools against live DB over stdio
+node tests/test_client.js               # All 64 tools against live DB over stdio
 node scripts/benchmark_latency.js       # End-to-end latency
 node scripts/eval_accuracy.js           # Precision/recall
 ```

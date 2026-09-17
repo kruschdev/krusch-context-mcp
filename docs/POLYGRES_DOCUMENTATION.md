@@ -73,9 +73,15 @@ response = agent.run(context_payload.markdown)
 * Ranks results using `FinalScore = (Similarity * RecencyDecay) + GraphProximityBonus`.
 * Iteratively packs items until hitting `limit_tokens` ceiling to prevent context window overflow.
 
+### Native In-Database Embeddings (New in Sep 2026)
+* **Zero External API / Zero ETL**: Embedding models run directly inside the Polygres engine (`text → embed → store → search`).
+* **No Data Movement**: Eliminates external network roundtrips to OpenAI, OpenRouter, or external embedding microservices. Data is vectorized directly where it is stored.
+* **Streamlined Agent Infrastructure**: Removes the need for client-side embedding queue managers, rate limit backoffs, and external embedding API keys.
+* **Covered Inference**: Polygres absorbs embedding computation costs during promotional tiering.
+
 ### Platform & Deployment Options
 * **Self-Hosted Mode**: Run local PostgreSQL + `pgvector` / `pgGraph` with open-source `polygres-sdk` (Apache-2.0).
-* **Managed Polygres Cloud**: Hosted zero-maintenance cloud database platform at [app.polygres.com](https://app.polygres.com).
+* **Managed Polygres Cloud**: Hosted zero-maintenance cloud database platform at [app.polygres.com](https://app.polygres.com) with native in-engine embeddings.
 
 ---
 
@@ -105,4 +111,44 @@ krusch_context_retrieve({
 
 ### Shared Schema Synergy with Standalone PG-Git
 Both `krusch-context-mcp` and the standalone [PG-Git](https://github.com/kruschdev/pg-git) (`pg-git-mcp@1.1.0`) package share this identical PostgreSQL data layer. Whether running locally or deployed on managed **Polygres Cloud** (`app.polygres.com`), the same database instance simultaneously powers single-purpose codebase RAG and full multi-agent context orchestration without data duplication.
+
+---
+
+## 6. Polygres Cloud v0.5.0 Runtime & MCP Tools
+
+`krusch-context-mcp` and `@krusch/toolkit/polygres` natively integrate the Polygres 0.5.0 Runtime REST API, providing direct agent control over cloud collections, in-engine text search, and quota monitoring.
+
+### Dedicated MCP Cloud Tools
+| MCP Tool | Purpose | Key Parameters |
+| :--- | :--- | :--- |
+| `polygres_cloud_usage` | Inspects live monthly microcredit allowance (generation & query). | None (auto-detects project) |
+| `polygres_cloud_search` | Pure text-in semantic or hybrid search with in-engine embeddings. | `text`, `collection` (optional), `limit`, `filters` |
+| `polygres_cloud_models` | Discovers available in-engine embedding models and dimensions. | None |
+| `polygres_cloud_capabilities` | Inspects server-side pgContext version, HNSW limits, and contract. | None |
+| `polygres_cloud_embedding_configs` | Lists watched table automated background embedding jobs. | None |
+
+### `@krusch/toolkit/polygres` Client Adapter (v0.5.0 Methods)
+```javascript
+import { createPolygresClient } from '@krusch/toolkit/polygres';
+
+const client = createPolygresClient({
+  runtimeUrl: process.env.POLYGRES_RUNTIME_URL,
+  apiKey: process.env.POLYGRES_API_KEY
+});
+
+// 1. Check live free credit usage
+const usage = await client.getUsage();
+console.log('Remaining Generation:', usage.generation.remaining_microcredits);
+
+// 2. Pure text-in search (in-engine vectorization)
+const results = await client.contextSearch('my_collection', {
+  text: 'How does connection pooling work?',
+  limit: 5
+});
+
+// 3. Inspect active models & dimensions
+const models = await client.getEmbeddingModels();
+// => text-embedding-3-small (dims: [256, 512, 1024, 1536])
+// => text-embedding-3-large (dims: [256, 512, 1024, 1536, 3072])
+```
 

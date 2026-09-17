@@ -1,6 +1,6 @@
 {
   "name": "krusch-context-mcp",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "description": "Unified MCP server merging semantic codebase search, episodic memory, holographic steering nuggets, proactive trajectory auditor, and AI Watch research engines (AgentDebugX, DataFlow, Rubric4Setwise, AREX, TeacherDistillation, DSR, ResilienceGate).",
   "main": "src/index.js",
@@ -9,7 +9,7 @@
     "test": "node --env-file=.env --test tests/*.test.js",
     "test:smoke": "node --env-file=.env tests/test_client.js && node --env-file=.env tests/test_v2_memory.js && node --env-file=.env tests/test_v2_lens_graph.js && node --env-file=.env tests/test_v2_action_memory.js && node --env-file=.env tests/test_proactive.js && node --env-file=.env tests/test_ai_watch_integrations.js",
     "test:aiwatch": "node --env-file=.env tests/test_ai_watch_integrations.js",
-    "test:cloud": "node --env-file=.env tests/test_cloud_integration.js",
+    "test:cloud": "node --env-file=.env tests/test_cloud_integration.js && node --env-file=.env tests/test_polygres_cloud.js",
     "snapshot": "node scripts/snapshot.js",
     "sync-all": "node scripts/sync_all_projects.js",
     "bench:memory": "node --env-file=.env scripts/benchmark_memory_eval.js",
