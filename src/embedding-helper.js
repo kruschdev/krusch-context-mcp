@@ -43,6 +43,24 @@ export async function getOllamaEmbedding(text, priority = PRIORITY.LOW) {
 }
 
 
+// Blocked hosts/ranges to prevent SSRF against internal services and cloud metadata endpoints.
+const BLOCKED_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '169.254.169.254']);
+function isPrivateHost(hostname) {
+    const h = hostname.toLowerCase();
+    if (BLOCKED_HOSTS.has(h)) return true;
+    return /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
+}
+function isSafeEmbeddingUrl(rawUrl) {
+    try {
+        const parsed = new URL(rawUrl);
+        if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+        if (isPrivateHost(parsed.hostname)) return false;
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 /**
  * Custom local wrapper for getEmbedding to support custom embedding endpoints (e.g., OpenAI-compatible, llama.cpp, etc.)
  */
@@ -50,6 +68,11 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
     const customUrl = process.env.EMBEDDING_URL;
     const apiKey = process.env.EMBEDDING_API_KEY || null;
     const model = process.env.EMBED_MODEL || 'bge-large';
+
+    if (customUrl && !isSafeEmbeddingUrl(customUrl)) {
+        console.error('[Custom Embed] Error: EMBEDDING_URL is invalid or points to a disallowed host, falling back to local Ollama');
+        return getOllamaEmbedding(text, priority);
+    }
 
     if (customUrl) {
         try {
