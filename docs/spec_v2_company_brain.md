@@ -9,7 +9,7 @@ Instead of agents repeatedly discovering the company state via search tools and 
 
 ## 2. Infrastructure Primitives (Data Model)
 
-To support this transition, the underlying `kruschdb` schema for `homelab_memory` must be expanded to serve as a state machine.
+To support this transition, the underlying database schema for `homelab_memory` must be expanded to serve as a state machine.
 
 ### Extended `homelab_memory` Schema
 
@@ -98,5 +98,5 @@ Allows administrative agents to bind or rename tags across the graph.
 
 ## 5. Next Steps
 1. Review schema changes.
-2. Write knex/pg migration scripts for `kruschdb`.
+2. Write knex/pg migration scripts for the PostgreSQL database.
 3. Implement `krusch_context_write_state` in `krusch-context-mcp` with full transaction support.

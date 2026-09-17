@@ -37,7 +37,7 @@ graph LR
    - Zero-latency reads and writes for project-specific operations.
    - Resilient to network disruptions and PostgreSQL latency spikes.
 2. **Object Storage (PostgreSQL + pgContext Acceleration):**
-   - Stored in `kruschdb` inside the `ide_agent_memory` table.
+   - Stored in PostgreSQL inside the `ide_agent_memory` table.
    - Serves as the fleet-wide, durable persistent store.
    - Accelerated via **[Evokoa pgContext](https://github.com/evokoa/pgContext)** (PostgreSQL 17 extension) when active, using page-native `pgcontext_hnsw` indexes and single-pass metadata filtering (`pgcontext.search`).
 
@@ -79,7 +79,7 @@ To prevent semantic cross-contamination (e.g., a bug memory polluting a list of 
 |---|---|---|
 | 📌 **`priorities`** | Active goals, roadmap, task state, and milestones. | `Implement SQLite pull/push sync engine for Krusch Context.` |
 | 🐛 **`bugs`** | Identified issues, root causes, symptoms, and fixes. | `Port 5441 conflicts with PostgreSQL. Switched container to 5442.` |
-| 🎯 **`outcomes`** | Results of completed sessions, deployments, or tests. | `Verified all 32 tools pass smoke tests on kruschserv.` |
+| 🎯 **`outcomes`** | Results of completed sessions, deployments, or tests. | `Verified all 32 tools pass smoke tests on production host.` |
 | 🎓 **`lessons`** | Pattern discoveries, architectural decisions, and conventions. | `Avoid circular imports in index.js by exporting DB pools from pool.js.` |
 | 🕒 **`activity`** | Chronological log of steps taken during the session. | `Created test suite, migrated schema, verified connections.` |
 
@@ -123,7 +123,7 @@ When pausing or ending a development session, the agent logs a summary of outcom
 krusch_context_add_memory({
   category: "outcomes",
   project: "krusch-context-mcp",
-  content: "Completed implementation of Lakebase SQLite compute cache. All integration tests passing. Pending deployment to kruschgame node."
+  content: "Completed implementation of Lakebase SQLite compute cache. All integration tests passing. Pending deployment to staging worker node."
 });
 
 // 2. Add activity summary

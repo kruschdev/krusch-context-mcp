@@ -4,7 +4,34 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
 import { generateTagsFromLLM } from './llm-tags.js';
 import { isPgContextEnabled, syncPgContextPoints } from './pgcontext-helper.js';
-import { filterActiveMemories, supersedeMemoryRecord, buildMemoryLineage, MemoryInvalidationEngine } from '../../../lib/memory-invalidation.js';
+
+/**
+ * Filter memory records to return only valid, non-superseded, non-invalidated records.
+ * (MobileMem - arXiv: 2608.13606).
+ */
+export function filterActiveMemories(memories = [], options = {}) {
+    if (!Array.isArray(memories)) return [];
+
+    const strictLineage = options.strictLineage !== false;
+    const supersededIds = new Set();
+    const invalidatedIds = new Set();
+
+    for (const mem of memories) {
+        if (mem.supersedesId != null) supersededIds.add(mem.supersedesId);
+        if (mem.supersedes_id != null) supersededIds.add(mem.supersedes_id);
+        if (Array.isArray(mem.supersedesIds)) mem.supersedesIds.forEach(id => supersededIds.add(id));
+        if (Array.isArray(mem.supersedes_ids)) mem.supersedes_ids.forEach(id => supersededIds.add(id));
+        if (mem.status === 'SUPERSEDED') supersededIds.add(mem.id);
+        if (mem.status === 'INVALIDATED') invalidatedIds.add(mem.id);
+    }
+
+    return memories.filter(mem => {
+        if (mem.status === 'INVALIDATED' || mem.status === 'SUPERSEDED') return false;
+        if (strictLineage && supersededIds.has(mem.id)) return false;
+        if (invalidatedIds.has(mem.id)) return false;
+        return true;
+    });
+}
 
 const DECAY_RATE = 0.01;
 const AUTO_TAG = true; // Hardcoded for context MCP

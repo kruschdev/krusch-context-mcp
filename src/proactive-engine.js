@@ -6,10 +6,129 @@ import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { writeState } from './v2-engine.js';
 import { pool } from 'pg-git-mcp/db/pool.js';
-import { evaluateMultiAgentResilience } from '../../../lib/trajectory-guard.js';
 
 // Ensure environment variables are loaded
 dotenv.config();
+
+/**
+ * Multi-Agent Resilience Gate Evaluation (arXiv: 2609.17320).
+ * Audits inter-agent handoff traces for error cascades, circular deadlocks, and credential leakage.
+ */
+export function evaluateMultiAgentResilience(handoffs = [], options = {}) {
+    const {
+        maxCascadeDepth = 2,
+        sensitivePatterns = [
+            /(?:api[_-]?key|bearer\s+[a-zA-Z0-9_\-\.]{12,}|password|secret_key|private[_-]?key)/i,
+            /(?:BEGIN\s+PRIVATE\s+KEY|ssh-rsa\s+[A-Za-z0-9+/=]{20,})/i,
+            /(?:auth_token|access_token|secret_token|database_password)/i
+        ]
+    } = options;
+
+    const issues = [];
+    let currentCascadeDepth = 0;
+    let maxObservedCascade = 0;
+    const leakedItems = [];
+
+    const delegationGraph = new Map();
+
+    for (let i = 0; i < handoffs.length; i++) {
+        const step = handoffs[i];
+        const { senderId, recipientId, message, error, status } = step;
+
+        // 1. Error Cascade Tracking
+        const isErrorStep = !!error || status === 'ERROR' || status === 'FAILED';
+        if (isErrorStep) {
+            currentCascadeDepth++;
+            if (currentCascadeDepth > maxObservedCascade) {
+                maxObservedCascade = currentCascadeDepth;
+            }
+            if (currentCascadeDepth > maxCascadeDepth) {
+                issues.push(`Error cascade depth ${currentCascadeDepth} exceeds limit ${maxCascadeDepth} between [${senderId}] -> [${recipientId}].`);
+            }
+        } else {
+            currentCascadeDepth = 0;
+        }
+
+        // 2. Circular Delegation / Deadlock Detection
+        const isResolution = status === 'SUCCESS' || status === 'RESOLVED';
+        if (senderId && recipientId && !isResolution) {
+            if (!delegationGraph.has(senderId)) {
+                delegationGraph.set(senderId, new Set());
+            }
+            delegationGraph.get(senderId).add(recipientId);
+
+            if (delegationGraph.get(recipientId)?.has(senderId) && i > 0 && handoffs[i - 1].senderId === recipientId) {
+                issues.push(`Coordinated delegation deadlock detected: direct ping-pong bounce between [${senderId}] and [${recipientId}].`);
+            }
+        }
+
+        // 3. Private Memory Leakage Detection
+        if (message) {
+            const rawText = typeof message === 'string' ? message : JSON.stringify(message);
+            for (const pattern of sensitivePatterns) {
+                if (pattern instanceof RegExp ? pattern.test(rawText) : rawText.includes(pattern)) {
+                    const matchSnippet = pattern instanceof RegExp ? (rawText.match(pattern)?.[0] || 'pattern_match') : pattern;
+                    leakedItems.push({
+                        senderId,
+                        recipientId,
+                        snippet: matchSnippet.slice(0, 8) + '...'
+                    });
+                    issues.push(`Private memory leakage detected in message from [${senderId}] to [${recipientId}]: matched sensitive credential pattern.`);
+                    break;
+                }
+            }
+        }
+    }
+
+    const visited = new Set();
+    const recStack = new Set();
+    function hasCycle(node) {
+        visited.add(node);
+        recStack.add(node);
+        const neighbors = delegationGraph.get(node) || [];
+        for (const neighbor of neighbors) {
+            if (!visited.has(neighbor)) {
+                if (hasCycle(neighbor)) return true;
+            } else if (recStack.has(neighbor)) {
+                return true;
+            }
+        }
+        recStack.delete(node);
+        return false;
+    }
+
+    let detectedCycle = false;
+    for (const node of delegationGraph.keys()) {
+        if (!visited.has(node) && hasCycle(node)) {
+            detectedCycle = true;
+            issues.push(`Circular multi-agent dependency cycle detected across: ${Array.from(recStack).join(' -> ')}.`);
+            break;
+        }
+    }
+
+    let score = 1.0;
+    if (maxObservedCascade > maxCascadeDepth) score -= 0.35;
+    if (detectedCycle) score -= 0.35;
+    if (leakedItems.length > 0) score -= 0.40;
+    score = Math.max(0.0, Math.min(1.0, Math.round(score * 100) / 100));
+
+    const resilient = issues.length === 0;
+    const verdict = resilient ? 'PASS' : (score >= 0.5 ? 'WARN' : 'FAIL');
+
+    return {
+        resilient,
+        resilienceScore: score,
+        verdict,
+        issues,
+        metrics: {
+            totalHandoffs: handoffs.length,
+            maxObservedCascade,
+            circularDeadlock: detectedCycle,
+            memoryLeakCount: leakedItems.length,
+            leakedItems
+        }
+    };
+}
 
 /**
  * Proactively audits current agent trajectory against historical lessons, bugs, and rules.

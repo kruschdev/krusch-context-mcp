@@ -4,7 +4,7 @@
 > **Date**: July 26, 2026  
 > **Tags**: `#AI` `#MCP` `#PostgreSQL` `#Polygres` `#OpenRouter` `#DeveloperTools` `#AgenticRAG`
 
-![AI Cloud Database & Working Memory Architecture](/home/krusch/homelab/projects/krusch-context-mcp/docs/assets/cloud_database_header.png)
+![AI Cloud Database & Working Memory Architecture](assets/cloud_database_header.png)
 
 > 💡 **Social Caption (247 chars)**:  
 > *🚀 Shifted my AI agent working memory 100% to the cloud! Powered by @Evokoa Polygres.com (Postgres + pgGraph + HNSW) & @OpenRouterAI (bge-large @ 1024-dim), krusch-context-mcp delivers infinite context to Cursor & Claude Code with zero local VRAM load! 🐘⚡*
@@ -13,7 +13,7 @@
 
 ## 💡 Overview & Motivation
 
-As I prepare for an upcoming physical location move, I needed to ensure that my AI coding assistants (Cursor, Claude Code, Windsurf, Gemini CLI) retain complete, uninterrupted access to their long-term working memory without relying on local homelab hardware (`kruschserv` / `kruschgame`).
+As I prepare for an upcoming physical location move, I needed to ensure that my AI coding assistants (Cursor, Claude Code, Windsurf, Gemini CLI) retain complete, uninterrupted access to their long-term working memory without relying on local hardware.
 
 Today, **[`krusch-context-mcp`](https://github.com/kruschdev/krusch-context-mcp)** is officially running **100% cloud-native**!
 
@@ -23,11 +23,11 @@ By pairing **[Polygres.com](https://polygres.com)** (Evokoa's AI-native PostgreS
 
 ## 🏗️ The 100% Cloud Stack Architecture
 
-![100% Cloud-Native AI Memory Architecture](/home/krusch/homelab/projects/krusch-context-mcp/docs/assets/cloud_architecture_diagram.png)
+![100% Cloud-Native AI Memory Architecture](assets/cloud_architecture_diagram.png)
 
 ### 1. Storage & Graph-Vector Engine: [Polygres.com](https://polygres.com)
 * **What it is**: "Postgres for the Agent Era" by Evokoa — a managed PostgreSQL platform fusing relational tables, `pgGraph` multi-hop relationship walks, and `pgContext` page-native HNSW vector indexes into a unified database.
-* **Why it matters**: Eliminates multi-database ETL pipelines. Episodic memories, holographic steering facts, parent-child provenance lineages, and codebase graph edges all reside inside a single cloud PostgreSQL instance (`p4b2ef196c33edbd8be43174`).
+* **Why it matters**: Eliminates multi-database ETL pipelines. Episodic memories, holographic steering facts, parent-child provenance lineages, and codebase graph edges all reside inside a single cloud PostgreSQL instance.
 * **Feature Highlights**:
   * **Single-Pass Metadata Filtering**: Prevents vector recall collapse under selective category/project filters.
   * **Multi-Hop Graph Walks (`graph_hops`)**: Dynamically traverses relationships (e.g., `Memory -> Referenced Git Blob -> Related Test Suite`).
@@ -59,12 +59,12 @@ Switching an agent to the 100% cloud stack requires just a few environment varia
 
 ```env
 # --- Polygres.com Cloud Database & Runtime API ---
-POLYGRES_PROJECT_ID="p4b2ef196c33edbd8be43174"
-POLYGRES_RUNTIME_URL="https://p4b2ef196c33edbd8be43174.api.db.polygres.com/v1"
+POLYGRES_PROJECT_ID="your_polygres_project_id"
+POLYGRES_RUNTIME_URL="https://your_polygres_project_id.api.db.polygres.com/v1"
 POLYGRES_API_KEY="poly_live_YOUR_POLYGRES_API_KEY"
 
 # Direct Native PostgreSQL Connection
-DATABASE_URL="postgresql://username:password@app.polygres.com:5432/kruschdb?sslmode=require"
+DATABASE_URL="postgresql://username:password@app.polygres.com:5432/your_database?sslmode=require"
 
 # --- OpenRouter Cloud Embeddings (baai/bge-large-en-v1.5) ---
 EMBEDDING_URL="https://openrouter.ai/api/v1/embeddings"
@@ -103,7 +103,7 @@ By pairing Polygres.com (Evokoa's AI-native PostgreSQL platform) with OpenRouter
 
 The 100% Cloud Stack Architecture
 
-[INSERT IMAGE: /home/krusch/Pictures/cloud_architecture_diagram.png]
+[INSERT IMAGE: docs/assets/cloud_architecture_diagram.png]
 
 1. Storage & Graph-Vector Engine: Polygres.com
 

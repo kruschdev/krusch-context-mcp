@@ -107,7 +107,7 @@ Store a new episodic memory. Automatically generates a vector embedding and sema
 
 **Storage routing:**
 - `project` provided → writes to `<project>/.agent/memory.db` (SQLite), async pushes to Postgres
-- `project` omitted → writes directly to global `kruschdb.ide_agent_memory` (Postgres)
+- `project` omitted → writes directly to global `ide_agent_memory` (Postgres)
 
 **Example call:**
 ```json
@@ -300,8 +300,8 @@ Merge branching states when multiple agents write conflicting updates to the sam
     "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "b2c3d4e5-f6a7-8901-bcde-f12345678901"
   ],
-  "resolution_content": "Final decision: Use port 5442 for kruschdb (not 5441 or 5443). Both previous entries were partially correct.",
-  "author_id": "human:krusch"
+  "resolution_content": "Final decision: Use port 5442 for PostgreSQL (not 5441 or 5443). Both previous entries were partially correct.",
+  "author_id": "human:developer"
 }
 ```
 
@@ -422,7 +422,7 @@ Link a Company Brain v2 memory state to a codebase file (blob) to build the orga
 
 ### `krusch_context_search_code`
 
-Semantic search over all files indexed in PG-Git (`kruschdb.blobs`). Results are ranked by embedding similarity.
+Semantic search over all files indexed in PG-Git (`blobs`). Results are ranked by embedding similarity.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -493,7 +493,7 @@ Read the full content of a file by its blob SHA hash. Get blob IDs from `krusch_
 | `project` | `string` | ❌ | `null` | Optional project name to boost/filter results. If provided, it must strictly match a PG-Git repository name to prevent cross-project context bleeding. |
 
 **What it searches (in parallel):**
-1. `kruschdb.blobs` — codebase files (top 3)
+1. `blobs` — codebase files (top 3)
 2. `ide_agent_memory` — all 5 categories (`lessons`, `bugs`, `priorities`, `outcomes`, `activity`) (top 2 per category)
 
 **Performance:** One embedding call shared across all 6 queries. This is the most efficient way to get comprehensive context.

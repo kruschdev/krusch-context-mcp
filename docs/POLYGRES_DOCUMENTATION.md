@@ -40,7 +40,7 @@ from polygres import PolygresClient
 
 # Initialize client with Polygres Cloud or Self-Hosted connection string
 client = PolygresClient(
-    connection_string="postgresql://user:password@app.polygres.com:5432/krusch_nexus_db",
+    connection_string="postgresql://user:password@app.polygres.com:5432/your_database",
     api_key="your_polygres_api_key"
 )
 ```

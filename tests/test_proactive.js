@@ -18,7 +18,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const SERVER = new URL('../src/index.js', import.meta.url).pathname;
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://10.0.0.85:11434';
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
 
 let nextId = 1;
 const pending = new Map();
@@ -54,7 +54,7 @@ async function run() {
     const client = await pool.connect();
 
     const lesson1 = "Lesson: The postgres ide_agent_memory table embedding column is constrained to 1024 dimensions. qwen2.5-coder:1.5b embeddings have 1536 dimensions and will fail. Always use bge-large:latest embeddings (1024 dimensions) for this table.";
-    const lesson2 = "Lesson: The GEMINI_API_KEY in the homelab .env file is invalid and returns HTTP 400. Always route queries through OpenRouter (google/gemini-2.5-flash via openai provider) using OPENROUTER_API_KEY.";
+    const lesson2 = "Lesson: The test API key in the environment returns HTTP 400. Always route queries through OpenRouter (google/gemini-2.5-flash via openai provider) using OPENROUTER_API_KEY.";
 
     let seededIds = [];
 

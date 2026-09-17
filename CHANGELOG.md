@@ -18,8 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Missing `session_handoffs` Migration**: Added `initSessionEngineTable()` in `src/session-engine.js` and wired into `src/index.js` database startup, resolving `relation "session_handoffs" does not exist` errors on fresh databases.
-- **Ollama 404 Tag Model Fallback**: Updated default `TAG_MODEL` in `src/llm-tags.js` to `qwen2.5-coder:1.5b` (matching installed local models), eliminating HTTP 404 retries and tag generation warnings.
-- **Homelab Path Portability**: Generalized `HOMELAB_ROOT` in `src/session-engine.js` to dynamically resolve `process.env.HOMELAB_ROOT || '/home/krusch/homelab'`.
+- **Homelab Path & Standalone Portability**: Generalized `HOMELAB_ROOT` in `src/session-engine.js` to dynamically resolve `process.env.HOMELAB_ROOT || (process.env.HOME ? path.join(process.env.HOME, 'homelab') : process.cwd())`. Embedded self-contained algorithms (`routeDiverseSkills`, `evaluateMultiAgentResilience`, `filterActiveMemories`, `prune-helper.js`) ensuring 100% standalone execution without monorepo dependencies.
+- **Privacy & Secrets Sanitization**: Audited and scrubbed all private homelab IP addresses, real database passwords, internal node names, and internal configurations from git tracking and documentation.
 - **Test Runner Environment**: Updated `npm test` script in `package.json` to load `--env-file=.env`, preventing PostgreSQL connection timeouts.
 - **Defensive Repository Queries**: Updated `tests/memory-engine.test.js` to gracefully skip if the Git repository table has not been initialized.
 

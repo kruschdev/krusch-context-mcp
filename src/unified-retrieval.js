@@ -13,7 +13,7 @@ import { getEmbedding } from './embedding-helper.js';
 import { isPgContextEnabled } from './pgcontext-helper.js';
 import { searchBlobs } from 'pg-git-mcp/server/git-engine.js';
 import { selectMinimalCoveringSet } from './setwise-engine.js';
-import { prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from '../../../lib/prune.js';
+import { prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from './prune-helper.js';
 
 const DECAY_RATE = 0.01; // Exponential time decay rate per day
 

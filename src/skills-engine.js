@@ -2,9 +2,133 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { routeDiverseSkills } from '../../../lib/skiller.js';
 
 const SKILLS_DIR = process.env.SKILLS_DIR || path.join(os.homedir(), 'homelab', 'skills');
+
+/**
+ * Computes word-vector overlap similarity between two text snippets (Jaccard / Token-Set).
+ */
+function computeTextSimilarity(textA = '', textB = '') {
+    const setA = new Set(textA.toLowerCase().replace(/[^a-z0-9\s_-]/g, ' ').split(/\s+/).filter(w => w.length > 2));
+    const setB = new Set(textB.toLowerCase().replace(/[^a-z0-9\s_-]/g, ' ').split(/\s+/).filter(w => w.length > 2));
+
+    if (setA.size === 0 || setB.size === 0) return 0.0;
+    let intersection = 0;
+    for (const w of setA) {
+        if (setB.has(w)) intersection++;
+    }
+    const union = new Set([...setA, ...setB]).size;
+    return union === 0 ? 0.0 : intersection / union;
+}
+
+/**
+ * Diverse Skill Routing (DSR - arXiv: 2609.05824).
+ * Balances query relevance and pairwise non-redundancy to construct a complementary skill set.
+ */
+export function routeDiverseSkills(query, availableSkills = [], options = {}) {
+    const {
+        maxSkills = 5,
+        maxTokenBudget = 4000,
+        diversityLambda = 0.6,
+        similarityFn = computeTextSimilarity
+    } = options;
+
+    if (!Array.isArray(availableSkills) || availableSkills.length === 0) {
+        return { selectedSkills: [], totalTokens: 0, diversityScore: 1.0, rejectedOverlap: [] };
+    }
+
+    const candidates = availableSkills.map(skill => {
+        const fullSkillText = `${skill.name} ${skill.description || ''} ${(skill.tags || []).join(' ')}`;
+        const relevance = similarityFn(query, fullSkillText);
+        const tokens = skill.tokens || Math.max(100, Math.round(fullSkillText.length / 4));
+        return {
+            ...skill,
+            fullSkillText,
+            relevance,
+            tokens
+        };
+    });
+
+    candidates.sort((a, b) => b.relevance - a.relevance);
+
+    const selectedSkills = [];
+    const rejectedOverlap = [];
+    let currentTokens = 0;
+
+    const remaining = [...candidates];
+
+    while (remaining.length > 0 && selectedSkills.length < maxSkills) {
+        let bestIndex = -1;
+        let bestScore = -Infinity;
+
+        for (let i = 0; i < remaining.length; i++) {
+            const candidate = remaining[i];
+
+            if (currentTokens + candidate.tokens > maxTokenBudget) {
+                continue;
+            }
+
+            let maxRedundancy = 0;
+            for (const sel of selectedSkills) {
+                const redundancy = similarityFn(candidate.fullSkillText, sel.fullSkillText);
+                if (redundancy > maxRedundancy) {
+                    maxRedundancy = redundancy;
+                }
+            }
+
+            const dsrScore = (diversityLambda * candidate.relevance) - ((1 - diversityLambda) * maxRedundancy);
+
+            if (dsrScore > bestScore) {
+                bestScore = dsrScore;
+                bestIndex = i;
+            }
+        }
+
+        if (bestIndex === -1) break;
+
+        const chosen = remaining.splice(bestIndex, 1)[0];
+
+        let maxOverlap = 0;
+        let overlappingSkill = null;
+        for (const sel of selectedSkills) {
+            const sim = similarityFn(chosen.fullSkillText, sel.fullSkillText);
+            if (sim > maxOverlap) {
+                maxOverlap = sim;
+                overlappingSkill = sel.name;
+            }
+        }
+
+        if (maxOverlap > 0.85 && selectedSkills.length > 0) {
+            rejectedOverlap.push({
+                name: chosen.name,
+                overlappingWith: overlappingSkill,
+                overlap: Math.round(maxOverlap * 100) / 100
+            });
+            continue;
+        }
+
+        selectedSkills.push(chosen);
+        currentTokens += chosen.tokens;
+    }
+
+    let totalPairwiseSim = 0;
+    let pairsCount = 0;
+    for (let i = 0; i < selectedSkills.length; i++) {
+        for (let j = i + 1; j < selectedSkills.length; j++) {
+            totalPairwiseSim += similarityFn(selectedSkills[i].fullSkillText, selectedSkills[j].fullSkillText);
+            pairsCount++;
+        }
+    }
+    const avgOverlap = pairsCount > 0 ? totalPairwiseSim / pairsCount : 0.0;
+    const diversityScore = Math.round((1.0 - avgOverlap) * 100) / 100;
+
+    return {
+        selectedSkills: selectedSkills.map(({ fullSkillText, ...rest }) => rest),
+        totalTokens: currentTokens,
+        diversityScore,
+        rejectedOverlap
+    };
+}
 
 // Regex to parse frontmatter and body
 function parseSkillFile(content) {

@@ -1,5 +1,4 @@
-import { getEmbedding } from '../../pg-git/lib/embedding.js';
-import { PRIORITY } from '../../../lib/llm-queue.js';
+import { getEmbedding, PRIORITY } from '../src/embedding-helper.js';
 
 async function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));

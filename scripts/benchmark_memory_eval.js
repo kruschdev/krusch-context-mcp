@@ -15,7 +15,7 @@ const NEEDLE_DATASET = [
     {
         needle_id: "NEEDLE_01",
         category: "bugs",
-        content: "CRITICAL_BUG_9941: Database deadlock occurs when concurrent WAL checkpoint runs simultaneously with sqlite push on kruschserv:5434. Solution: wrap sqlite-engine push in explicit transaction lock.",
+        content: "CRITICAL_BUG_9941: Database deadlock occurs when concurrent WAL checkpoint runs simultaneously with sqlite push on primary-db:5432. Solution: wrap sqlite-engine push in explicit transaction lock.",
         query: "database deadlock WAL checkpoint sqlite push transaction lock",
         expected_needle: "CRITICAL_BUG_9941"
     },
@@ -29,27 +29,27 @@ const NEEDLE_DATASET = [
     {
         needle_id: "NEEDLE_03",
         category: "priorities",
-        content: "PRIORITY_1109: Upgrade krusch-nexus Company Brain ingestion workers to use pgContext HNSW index on port 5433 for single-pass metadata filtering.",
-        query: "company brain ingestion workers pgContext HNSW port 5433 filtering",
+        content: "PRIORITY_1109: Upgrade Company Brain ingestion workers to use pgContext HNSW index on port 5432 for single-pass metadata filtering.",
+        query: "company brain ingestion workers pgContext HNSW port 5432 filtering",
         expected_needle: "PRIORITY_1109"
     },
     {
         needle_id: "NEEDLE_04",
         category: "outcomes",
-        content: "OUTCOME_5520: Jellyfin media server hardware acceleration enabled via Intel VAAPI on i5-4690K hardware, reducing CPU load from 98% to 14%.",
-        query: "jellyfin media server hardware acceleration VAAPI CPU load reduction",
+        content: "OUTCOME_5520: Media server hardware acceleration enabled via GPU VAAPI, reducing CPU load from 98% to 14%.",
+        query: "media server hardware acceleration VAAPI CPU load reduction",
         expected_needle: "OUTCOME_5520"
     }
 ];
 
 // Noise memories to create a realistic haystack
 const HAYSTACK_NOISE = [
-    "Routine backup completed for kruschserv Postgres cluster at 03:00 UTC.",
-    "Updated Tailwind color tokens in FTF assistant frontend interface.",
-    "Cleaned up stale Docker containers on kruschgame sandbox node.",
-    "Configured Tailscale mesh network routing between kruschdev and kruschserv.",
-    "Validated JSON schema parsing for Pocket Lawyer form submission endpoints.",
-    "Optimized SQLite WAL mode page size for First Things First database."
+    "Routine backup completed for primary Postgres cluster at 03:00 UTC.",
+    "Updated Tailwind color tokens in assistant frontend interface.",
+    "Cleaned up stale Docker containers on staging sandbox node.",
+    "Configured wireguard mesh network routing between compute and database nodes.",
+    "Validated JSON schema parsing for form submission endpoints.",
+    "Optimized SQLite WAL mode page size for local database cache."
 ];
 
 async function runBenchmark() {
@@ -152,8 +152,8 @@ async function runBenchmark() {
         const noisyCandidates = [
             { id: "1", title: "DB Lock Rules", content: "Database deadlock occurs when concurrent WAL checkpoint runs simultaneously with sqlite push. Solution: wrap sqlite-engine push in explicit transaction lock.", score: 0.96 },
             { id: "2", title: "DB Lock Duplicate", content: "Database deadlock occurs when concurrent WAL checkpoint runs simultaneously with sqlite push. Solution: wrap sqlite-engine push in explicit transaction lock.", score: 0.94 }, // Exact duplicate
-            { id: "3", title: "Postgres Connection", content: "Postgres connection pool settings on kruschserv should use idle timeout of 10s to prevent exhaustion.", score: 0.88 },
-            { id: "4", title: "Tailwind Styling", content: "FTF assistant UI uses custom dark glassmorphism styling tokens.", score: 0.80 }
+            { id: "3", title: "Postgres Connection", content: "Postgres connection pool settings on primary server should use idle timeout of 10s to prevent exhaustion.", score: 0.88 },
+            { id: "4", title: "Tailwind Styling", content: "Assistant UI uses custom dark glassmorphism styling tokens.", score: 0.80 }
         ];
 
         const initialTokenCount = noisyCandidates.reduce((acc, c) => acc + Math.ceil(c.content.length / 4), 0);

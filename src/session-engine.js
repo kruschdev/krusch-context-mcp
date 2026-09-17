@@ -4,7 +4,7 @@ import { execSync, spawn } from 'child_process';
 import { pool } from 'pg-git-mcp/db/pool.js';
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
-const HOMELAB_ROOT = process.env.HOMELAB_ROOT || (fs.existsSync('/home/krusch/homelab') ? '/home/krusch/homelab' : '/home/kruschdev/homelab');
+const HOMELAB_ROOT = process.env.HOMELAB_ROOT || (process.env.HOME ? path.join(process.env.HOME, 'homelab') : process.cwd());
 
 /**
  * Ensures session_handoffs table exists in PostgreSQL.

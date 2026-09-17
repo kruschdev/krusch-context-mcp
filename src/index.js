@@ -501,8 +501,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "krusch_context_health_check",
-        description: "Verify that the Krusch Context MCP server is alive, connected to kruschdb, and functioning.",
+        name: "krusch_context_health",
+        description: "Verify that the Krusch Context MCP server is alive, connected to the database, and functioning.",
         inputSchema: {
           type: "object",
           properties: {}
@@ -1133,21 +1133,25 @@ async function handleHealthCheck() {
   const nuggetCount = nuggetCheck.rows[0].count;
   const v2Count = v2Check.rows[0].count;
   const engineStatus = isPgContextEnabled() ? 'pgContext (HNSW + Single-Pass Filter)' : 'pgvector (Standard)';
-  return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Company Brain states (v2): ${v2Count}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Vector Engine: ${engineStatus}\n- Database: kruschdb\n- Version: 1.2.0` }] };
+  return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Company Brain states (v2): ${v2Count}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Vector Engine: ${engineStatus}\n- Database: Connected\n- Version: 1.4.0` }] };
 }
 
 async function handleDocsList() {
-  const configPath = process.env.EXTERNAL_DOCS_CONFIG_PATH || path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../pg-git/config/external_docs.json');
-  const fileContent = await fs.readFile(configPath, 'utf-8');
-  const configData = JSON.parse(fileContent);
-  if (configData.length === 0) {
-      return { content: [{ type: "text", text: "No manuals available." }] };
+  const configPath = process.env.EXTERNAL_DOCS_CONFIG_PATH || path.resolve(path.dirname(new URL(import.meta.url).pathname), '../config/external_docs.json');
+  try {
+    const fileContent = await fs.readFile(configPath, 'utf-8');
+    const configData = JSON.parse(fileContent);
+    if (!Array.isArray(configData) || configData.length === 0) {
+        return { content: [{ type: "text", text: "No manuals available." }] };
+    }
+    let output = `=== 📚 Available External Manuals ===\n`;
+    for (const doc of configData) {
+        output += `\n- ${doc.name} (Source: ${doc.url})`;
+    }
+    return { content: [{ type: "text", text: output }] };
+  } catch (e) {
+    return { content: [{ type: "text", text: "No external manuals configured." }] };
   }
-  let output = `=== 📚 Available External Manuals ===\n`;
-  for (const doc of configData) {
-      output += `\n- ${doc.name} (Source: ${doc.url})`;
-  }
-  return { content: [{ type: "text", text: output }] };
 }
 
 async function handleDocsSearch(args) {
@@ -1203,6 +1207,7 @@ const TOOL_HANDLERS = new Map([
   ['krusch_context_read_tree',   (args) => handleReadTree(args)],
   ['krusch_context_read_blob',   (args) => handleReadBlob(args)],
   ['krusch_context_health_check',() => handleHealthCheck()],
+  ['krusch_context_health',      () => handleHealthCheck()],
   // Docs
   ['krusch_docs_list',   () => handleDocsList()],
   ['krusch_docs_search', (args) => handleDocsSearch(args)],

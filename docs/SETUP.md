@@ -16,7 +16,7 @@ cp .env.example .env
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string (e.g., `postgresql://user:pass@host:port/kruschdb`) | *(required)* |
+| `DATABASE_URL` | PostgreSQL connection string (e.g., `postgresql://user:pass@host:port/your_database`) | *(required)* |
 | `OLLAMA_URL` | Primary Ollama endpoint (Default completion & embedding engine) | `http://localhost:11434` |
 | `OLLAMA_FLEET_URLS` | Comma-separated additional Ollama endpoints for GPU fleet load balancing | *(none)* |
 | `EMBED_MODEL` | Embedding model identifier | `bge-large` |
@@ -98,7 +98,7 @@ Krusch Context MCP enables **infinite session continuity** through four lifecycl
 3. Verify codebase understanding via `search_code`
 
 ### `/close` — Pause Work
-1. Snapshot the codebase into `kruschdb.blobs`
+1. Snapshot the codebase into database `blobs`
 2. Save session state to `INFLIGHT.md`
 3. Commit decisions to long-term memory via `add_memory`
 4. Persist behavioral patterns via `nugget_remember`
@@ -140,5 +140,5 @@ Krusch Context MCP enables **infinite session continuity** through four lifecycl
 |-------|-------|-----|
 | Ollama API returned 404 | Embedding model not pulled | `ollama pull bge-large && ollama pull llama3.2` |
 | ECONNREFUSED on Ollama URL | Ollama not running | `ollama serve` or verify fleet node availability |
-| Cannot reach PostgreSQL | `kruschdb` unreachable or `.env` misconfigured | Verify `DATABASE_URL` in `.env` |
+| Cannot reach PostgreSQL | Database unreachable or `.env` misconfigured | Verify `DATABASE_URL` in `.env` |
 | Column "project" does not exist | Table predates schema migration | Restart the server (idempotent migrations run on boot) |

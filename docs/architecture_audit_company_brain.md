@@ -4,7 +4,7 @@
 This document evaluates the existing `krusch-context-mcp` architecture against the infrastructure primitives outlined in the "Company Brain" research by Sentra. The goal is to identify the gaps between our current query-time RAG approach and a robust, stateful organizational substrate.
 
 ## 2. Current Architecture Baseline
-The current `spec.md` outlines two primary tables in `kruschdb`:
+The current architecture outlines two primary tables in the PostgreSQL database:
 1. **Episodic Memory (`homelab_memory`)**: `id`, `category`, `content`, `embedding`, `created_at`
 2. **Semantic Codebase (`blobs`)**: `id`, `project`, `filepath`, `content`, `embedding`, `updated_at`
 

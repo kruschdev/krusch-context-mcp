@@ -1,6 +1,5 @@
-import { pool } from '../../pg-git/db/pool.js';
-import { getEmbedding } from '../../pg-git/lib/embedding.js';
-import { PRIORITY } from '../../../lib/llm-queue.js';
+import { pool } from 'pg-git-mcp/db/pool.js';
+import { getEmbedding, PRIORITY } from '../src/embedding-helper.js';
 import { PCA } from 'ml-pca';
 
 const QUERIES = [

@@ -74,7 +74,7 @@ async function runTests() {
             task_id: 'research_task_99',
             verified_evidence: ['AREX improves deep research by 15%', 'DataFlow cuts latency by 49.9%'],
             unresolved_constraints: ['Verify GPU VRAM allocation under batch load'],
-            next_action_hints: ['Run vLLM benchmark on kruschdev']
+            next_action_hints: ['Run vLLM benchmark on compute worker']
         });
         console.log('AREX Update Result:', arexUpdateRes.content[0].text);
 
