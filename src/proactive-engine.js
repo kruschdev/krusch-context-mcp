@@ -240,7 +240,7 @@ export async function handleProactiveNudge({ history, project }) {
     }
 
     // 5. Setup prompt and local LLM
-    const systemPrompt = `You are the Proactive Context Auditor for the Krusch homelab.
+    const systemPrompt = `You are the Proactive Context Auditor for the workspace.
 Your job is to examine the current user prompt / action trajectory and audit it against the retrieved facts, lessons, bugs, priorities, and nuggets.
 You must determine if there is any critical lesson, user preference, bug history, or project constraint that the user or agent might be ignoring or violating.
 

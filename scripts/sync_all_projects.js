@@ -14,48 +14,32 @@ import { query, pool } from '../db/pool.js';
 import { snapshot } from './snapshot.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MONOREPO_ROOT = path.resolve(__dirname, '../../..');
-const HOMELAB_ROOT = path.join(MONOREPO_ROOT, 'projects');
+const MONOREPO_ROOT = process.env.WORKSPACE_ROOT || path.resolve(__dirname, '../../..');
+const PROJECTS_DIR = process.env.PROJECTS_DIR || (fs.existsSync(path.join(MONOREPO_ROOT, 'projects')) ? path.join(MONOREPO_ROOT, 'projects') : MONOREPO_ROOT);
 
-const PROJECTS = [
-    'annotated',
-    'agent-toolkit-for-aws',
-    'berean',
-    'caren',
-    'first-things-first',
-    'heyjb',
-    'hivemind-companion-ext',
-    'home-ai',
-    'krusch-dbos-mcp',
-    'krusch-agentic-mcp',
-    'krusch-context-mcp',
-    'krusch-infra-mcp',
-    'krusch-ide',
-    'lightmind',
-    'money-machine',
-    'perkins_snow_removal',
-    'pg-git',
-    'pocket-lawyer',
-    'pocket-lawyer-marketing',
-    'roughin-suite',
-    'signet',
-    'spark',
-    'vllm',
-];
+// Dynamically discover subdirectories or accept explicit comma-separated list
+const PROJECTS = process.env.SYNC_PROJECTS
+    ? process.env.SYNC_PROJECTS.split(',').map(s => s.trim()).filter(Boolean)
+    : (fs.existsSync(PROJECTS_DIR)
+        ? fs.readdirSync(PROJECTS_DIR).filter(f => {
+            try {
+                return fs.statSync(path.join(PROJECTS_DIR, f)).isDirectory() && !f.startsWith('.') && f !== 'node_modules';
+            } catch {
+                return false;
+            }
+        })
+        : []);
 
-const ROOT_DIRS = [
-    { name: 'scripts', path: path.join(MONOREPO_ROOT, 'scripts') },
-    { name: 'lib', path: path.join(MONOREPO_ROOT, 'lib') },
-    { name: 'lib-py', path: path.join(MONOREPO_ROOT, 'lib-py') },
-    { name: '.agent', path: path.join(MONOREPO_ROOT, '.agent') },
-];
+const ROOT_DIRS = (process.env.EXTRA_SYNC_DIRS ? process.env.EXTRA_SYNC_DIRS.split(',') : ['scripts', 'lib', 'lib-py'])
+    .map(d => ({ name: path.basename(d.trim()), path: path.isAbsolute(d.trim()) ? d.trim() : path.join(MONOREPO_ROOT, d.trim()) }))
+    .filter(d => fs.existsSync(d.path));
 
 async function main() {
     console.log('🚀 Starting Fleet-wide Native Codebase Sync...');
     
-    // Sync homelab projects
+    // Sync projects
     for (const proj of PROJECTS) {
-        const projPath = path.join(HOMELAB_ROOT, proj);
+        const projPath = path.join(PROJECTS_DIR, proj);
         if (fs.existsSync(projPath)) {
             try {
                 await snapshot(projPath);

@@ -103,14 +103,14 @@ export async function handleThink({ query, project }) {
         temperature: 0.1
     };
 
-    const systemPrompt = `You are the Krusch Fleet Central Reasoning Engine (GBrain Synthesis Service).
-Your task is to synthesize the search results from the subjective homelab memory database and objective PG-Git codebase files to answer the user's query.
+    const systemPrompt = `You are the Central Reasoning & Synthesis Engine.
+Your task is to synthesize the search results from the subjective memory database and objective PG-Git codebase files to answer the user's query.
 
 You MUST format your output exactly as standard Markdown with the following three headers:
 
 ### Cited Synthesis
 Provide a clear, detailed, and directly cited response answering the user's query based on the retrieved context.
-Every claim, status, credential, host IP, or fact you assert MUST be explicitly cited.
+Every claim, status, or fact you assert MUST be explicitly cited.
 Use the format:
 - For subjective memory matches: [Memory #ID] (e.g. "[Memory #123]")
 - For objective codebase matches: [file_name](file:///path/to/file) or [file_name]

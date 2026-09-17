@@ -4,17 +4,23 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const HOMELAB_ROOT = path.resolve(__dirname, '../../../');
-const PROJECTS = [
-    'annotated', 'berean', 'caren', 'first-things-first', 'heyjb',
-    'hivemind-companion-ext', 'home-ai', 'krusch-dbos-mcp', 'krusch-agentic-mcp',
-    'krusch-infra-mcp', 'krusch-ide', 'lightmind', 'money-machine',
-    'perkins_snow_removal', 'pg-git', 'pocket-lawyer', 'pocket-lawyer-marketing',
-    'roughin-suite', 'signet', 'spark'
-];
+const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || path.resolve(__dirname, '../../../');
+const PROJECTS_DIR = process.env.PROJECTS_DIR || (fs.existsSync(path.join(WORKSPACE_ROOT, 'projects')) ? path.join(WORKSPACE_ROOT, 'projects') : WORKSPACE_ROOT);
+
+const PROJECTS = process.env.SYNC_PROJECTS
+    ? process.env.SYNC_PROJECTS.split(',').map(s => s.trim()).filter(Boolean)
+    : (fs.existsSync(PROJECTS_DIR)
+        ? fs.readdirSync(PROJECTS_DIR).filter(f => {
+            try {
+                return fs.statSync(path.join(PROJECTS_DIR, f)).isDirectory() && !f.startsWith('.');
+            } catch {
+                return false;
+            }
+        })
+        : []);
 
 function clearProjectDb(project) {
-    const dbPath = path.join(HOMELAB_ROOT, project, '.agent', 'memory.db');
+    const dbPath = path.join(PROJECTS_DIR, project, '.agent', 'memory.db');
     if (fs.existsSync(dbPath)) {
         try {
             const db = new Database(dbPath);

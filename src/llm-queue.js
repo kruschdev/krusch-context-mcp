@@ -27,15 +27,12 @@ class PriorityQueue {
     }
 
     initEndpoints() {
-        const FLEET_NODES = [
-            'http://localhost:11434',
-            'http://kruschserv:11434',
-            'http://kruschgame:11434'
-        ];
-        const confUrl = process.env.OLLAMA_URL;
-        return process.env.OLLAMA_NODES 
-            ? process.env.OLLAMA_NODES.split(',') 
-            : (confUrl ? [confUrl, ...FLEET_NODES.filter(n => n !== confUrl)] : FLEET_NODES);
+        const fleetUrls = process.env.OLLAMA_FLEET_URLS || process.env.OLLAMA_NODES;
+        if (fleetUrls) {
+            return fleetUrls.split(',').map(n => n.trim()).filter(Boolean);
+        }
+        const confUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
+        return [confUrl];
     }
 
     /**
