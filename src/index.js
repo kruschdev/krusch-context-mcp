@@ -198,14 +198,7 @@ export function getRequestedExtensions() {
     return ['all'];
   }
 
-  const disablePolygres = process.argv.includes('--no-polygres') || rawList.includes('none') || rawList.includes('no-polygres');
   const exts = new Set(rawList.filter(e => e !== 'none' && e !== 'no-polygres'));
-
-  // Default to enabling polygres-cloud companion extension whenever POLYGRES_API_KEY is configured
-  if (process.env.POLYGRES_API_KEY && !disablePolygres) {
-    exts.add('polygres-cloud');
-  }
-
   return Array.from(exts);
 }
 

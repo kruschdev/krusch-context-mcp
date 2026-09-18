@@ -5,19 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.6.0] - 2026-09-18
 
 ### Added
-- **Curated Tool Profiles (`KRUSCH_PROFILE`)**: Configurable profile tiers to prevent agent tool bloat and reduce system prompt token overhead by ~75%:
-  - `core` (Default, 11 tools): Daily driver context engine (`retrieve`, `add_memory`, `search_memory`, `compile_state`, `nugget_remember`, `nugget_nudges`, `search_symbols`, `symbol_graph`, `search_code`, `health`, `proactive_nudge`).
-  - `extended` (31 tools): Core + memory lifecycle, Git DAG inspection, skills registry, external docs, and session handoffs.
-  - `full` (64 tools): Complete research engine suite including Company Brain v2, AI Watch modules, and Polygres Cloud tools.
-- CLI argument `--profile=<tier>` support alongside `KRUSCH_PROFILE` environment variable.
+- **Decoupled Architecture (Core + 5 Modular Companion Extensions)**:
+  - Reorganized monolith into a 13-tool Sovereign Core Engine with 5 independent companion extensions under `src/extensions/` (`company-brain`, `research`, `polygres-cloud`, `session-bridge`, `skills-docs`).
+  - Added standalone runnable MCP servers for all 5 companion extensions (`npm run start:research`, `npm run start:company-brain`, `npm run start:cloud`, `npm run start:session`, `npm run start:skills`).
+  - Dynamic extension loader in `src/extensions/index.js` supporting `--extensions=...` and `KRUSCH_EXTENSIONS=...`.
+- **Memory Hygiene Promoted to Core**:
+  - Promoted `krusch_context_supersede_memory` and `krusch_context_invalidate_memory` into the Sovereign Core profile (13 tools default), enabling active knowledge deprecation out-of-the-box.
+- **Accuracy Benchmark**:
+  - Added `scripts/eval_accuracy.js` (`npm run eval:accuracy`) evaluating retrieval Recall@k and publishing empirical evaluations.
 
 ### Changed
-- **Local-First Positioning**: Reordered `README.md` and `.env.example` so self-hosted PostgreSQL + Ollama is the celebrated sovereign default; Polygres Cloud positioned as turnkey zero-GPU cloud alternative.
-- **Documentation & Nomenclature**: Clarified structural regex and brace-matching parser architecture in `ast-chunker.js` and restructured research paper citations into an honest foundations section.
-- **Test Harness**: Enhanced `tests/test_client.js` with default `KRUSCH_PROFILE: 'full'` and validated profile filtering.
+- **Sovereign Local-First Identity**:
+  - Reaffirmed local PostgreSQL + Ollama (`bge-large`, 1024 dims) as the primary sovereign default (13 tools, ~900 prompt tokens).
+  - Polygres Cloud cleanly decoupled as an optional high-throughput turnkey cloud runtime and companion extension (`npm run start:cloud`), eliminating automatic vendor push.
+- **Accurate Profile Tiers**:
+  - `core` (13 tools, default)
+  - `extended` (25 tools: Core + memory lifecycle, Git DAG inspection, cited thinking)
+  - Companion Extensions (35 tools across 5 extensions: `research` [15], `company-brain` [8], `polygres-cloud` [5], `skills-docs` [5], `session-bridge` [2])
+  - `full` (61 tools: Core + Extended + all 5 companion extensions in-process)
+- **Backward-Compatibility Re-Exports**: Retained lightweight re-exports in `src/` (`v2-engine.js`, `agentdebugx-engine.js`, `session-engine.js`, etc.) pointing to `src/extensions/` to maintain 100% compatibility for external consumers.
+- **Clean Server Startup**: Stripped unneeded experimental and v2 table migrations from core startup (`verifyDatabase()` now strictly checks only core memory and git tables).
+
+### Fixed
+- **Secrets and Configuration Hygiene**: Scrubbed all internal IPs, hostnames, and database credentials from `README.md`, `spec.md`, and sample configuration files.
+- **Smoke Test Profiles Consistency**: Aligned standalone JSON-RPC test runners (`test_v2_memory.js`, `test_v2_lens_graph.js`, `test_v2_action_memory.js`, `test_teacher_distillation.js`, `test_think.js`, `test_feedback.js`) to default `KRUSCH_PROFILE` to `full` when executed individually.
 
 ## [1.5.0] - 2026-09-16
 
