@@ -3,17 +3,17 @@
 </p>
 
 <p align="center">
-  <strong>Unified AI context engine merging structural codebase search, episodic project memory, and proactive trajectory auditing. Configurable from a lean 11-tool core to a full 64-tool research suite.</strong>
-</p>
-
-<p align="center">
   <a href="https://github.com/kruschdev/krusch-context-mcp"><img src="https://img.shields.io/github/package-json/v/kruschdev/krusch-context-mcp.svg" alt="Version" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-Core%20(11)%20%7C%20Full%20(64)-purple.svg" alt="MCP Profiles" /></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-11%20core%20tools-purple.svg" alt="11 core MCP tools" /></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/tiers-core%2011%20%7C%20extended%2031%20%7C%20full%2064-lightgrey.svg" alt="Expansion tiers" /></a>
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22+-green.svg" alt="Node" /></a>
   <a href="https://github.com/pgvector/pgvector"><img src="https://img.shields.io/badge/Database-PostgreSQL%20%2B%20pgvector-lightgrey.svg" alt="Database" /></a>
-  <a href="https://polygres.com"><img src="https://img.shields.io/badge/Cloud-Polygres%200.5.0-blue.svg" alt="Polygres" /></a>
 </p>
+
+**11-tool AI context engine** for coding agents: hybrid codebase retrieval, episodic memory, steering nuggets, and a proactive auditor.
+
+Modular expansion tiers: **core (11, default)** → **extended (31)** → **full (64)**. Do not expose the research suite unless you need it.
 
 ---
 
@@ -295,7 +295,19 @@ npm run test:smoke
 
 # Test a specific profile over stdio
 KRUSCH_PROFILE=core node --env-file=.env tests/test_client.js
+
+# Run empirical codebase retrieval accuracy evaluation
+npm run eval:accuracy
 ```
+
+### 📊 Retrieval Evaluation & Benchmarks
+
+Empirical dense vector retrieval accuracy is probed using `npm run eval:accuracy` (`scripts/eval_accuracy.js`):
+* **Recall@1**: 20.0% (exact top hit)
+* **Recall@5**: 60.0% (expected file within top 5 candidates)
+* **Recall@10**: 60.0%
+
+For detailed query logs, corpus breakdown, and benchmark caveats, see **[EVALS.md](docs/EVALS.md)**.
 
 ---
 

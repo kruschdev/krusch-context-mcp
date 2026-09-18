@@ -16,6 +16,7 @@ cp .env.example .env
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `KRUSCH_PROFILE` | Tool exposure profile (`core`, `extended`, `full`) | `core` |
 | `POLYGRES_PROJECT_ID` | Polygres Cloud project identifier (auto-configures runtime & usage tools) | *(none)* |
 | `POLYGRES_RUNTIME_URL` | Polygres Cloud Runtime REST API endpoint (`https://<id>.api.db.polygres.com/v1`) | *(none)* |
 | `POLYGRES_API_KEY` | Polygres Cloud authentication API key | *(none)* |
@@ -23,6 +24,7 @@ cp .env.example .env
 | `OLLAMA_URL` | Primary Ollama endpoint (Local fallback if cloud embeddings are omitted) | `http://localhost:11434` |
 | `OLLAMA_FLEET_URLS` | Comma-separated additional Ollama endpoints for GPU fleet load balancing | *(none)* |
 | `EMBED_MODEL` | Embedding model identifier | `bge-large` |
+| `EMBED_DIMS` | Embedding vector dimensions (must match Postgres schema) | `1024` |
 | `TAG_MODEL` | Model for tag extraction | `llama3.2` |
 | `COMPLETION_URL` | Custom OpenAI-compatible completion API URL (e.g., `http://localhost:8080/v1/chat/completions`) | *(none)* |
 | `COMPLETION_API_KEY` | Custom API Key for completions (if required) | *(none)* |
@@ -30,6 +32,24 @@ cp .env.example .env
 | `EMBEDDING_URL` | Custom external embedding API URL (OpenAI-compatible `/v1/embeddings` or OpenRouter) | *(none)* |
 | `EMBEDDING_API_KEY` | Custom API Key for external embeddings (if required) | *(none)* |
 | `EXTERNAL_DOCS_CONFIG_PATH` | Path to JSON config for ingested manuals | `config/external_docs.json` |
+
+---
+
+## Embedding dimensions
+
+All first-party tables (`ide_agent_memory`, `interaction_memory`,
+`ide_agent_nuggets`, `blobs`) are created as `VECTOR(1024)`.
+
+| Backend | Model | Dims | Compatible with default schema? |
+|---|---|---|---|
+| Ollama (default) | `bge-large` | 1024 | Yes |
+| OpenRouter / local | `baai/bge-large-en-v1.5` | 1024 | Yes |
+| OpenAI / Polygres in-engine | `text-embedding-3-small` | 1536 | No — migrate column + reindex |
+| OpenAI / Polygres in-engine | `text-embedding-3-large` | 3072 (default) | No — set `dimensions=1024` if the API allows, or migrate |
+
+Polygres “zero-client” embeddings are convenient, not dimension-compatible
+with the local 1024-d schema unless you pin a 1024-d model or recreate
+vector columns. Never mix models in one table.
 
 ---
 
