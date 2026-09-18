@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added compound single-turn retrieval (`unifiedRetrieve` with `include_state=true`) packing real-time git status, active episodic memories, and structural symbols into a single MCP turn.
   - Added core agent protocol prompts (`session_start`, `pre_commit`) for Cursor and Claude Code.
 - **Zero-VRAM Inference & OpenRouter Auto-Routing**:
-  - Added zero-VRAM cloud inference support with automatic OpenRouter routing for embeddings (`text-embedding-3-small`, 1536-d) and chat completions (`google/gemini-2.5-flash`).
+  - Added zero-VRAM cloud inference support with automatic OpenRouter routing for embeddings (`baai/bge-large-en-v1.5`, 1024-d drop-in matching sovereign schema) and chat completions (`google/gemini-2.5-flash`).
   - Added zero-dependency regex heuristic fallback tagger for keyword extraction when no local LLM or API keys are present.
 - **Automated Tool Contract Invariants (`tests/tool-contract.test.js`)**:
   - Added CI contract tests enforcing tool counts (13 Core, 26 Extended Core, 35 Companion Extensions, 61 Full Suite), zero naming collisions, and documentation synchrony.

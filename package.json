@@ -20,6 +20,7 @@
     "sync-all": "node scripts/sync_all_projects.js",
     "bench:memory": "node --env-file=.env scripts/benchmark_memory_eval.js",
     "eval:accuracy": "node --env-file=.env scripts/eval_accuracy.js",
+    "eval:foreign": "node --env-file=.env scripts/eval_accuracy.js evals/fixtures/express_benchmark_10.json express",
     "export:polygres": "node scripts/export_to_polygres.js",
     "install-hook": "node scripts/install_git_hook.js"
   },

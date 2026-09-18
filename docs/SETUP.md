@@ -49,8 +49,17 @@ All first-party tables (`ide_agent_memory`, `interaction_memory`,
 | OpenAI / Polygres in-engine | `text-embedding-3-large` | 3072 (default) | No — set `dimensions=1024` if the API allows, or migrate |
 
 Polygres “zero-client” embeddings are convenient, not dimension-compatible
-with the local 1024-d schema unless you pin a 1024-d model or recreate
-vector columns. Never mix models in one table.
+with the local 1024-d schema unless you pin a 1024-d model or migrate
+vector columns. Never mix models in one table. To migrate your database between 1024-d and 1536-d:
+```bash
+# 1. Run the migration script
+psql "$DATABASE_URL" -v target_dim=1536 -f db/migrate_dimensions.sql
+# 2. Update .env
+echo "EMBED_DIMS=1536" >> .env
+# 3. Re-embed files
+npm run snapshot -- .
+```
+`krusch_context_health` actively validates that your database vector column dimensions match your configured `EMBED_DIMS` setting on every check.
 
 > [!NOTE]
 > **Polygres Cloud + OpenRouter Tagging**: Polygres handles in-engine vectorization and database persistence, but does not provide LLM text generation. For automated episodic memory tagging in a cloud-backed zero-GPU setup, configure `OPENROUTER_API_KEY="sk-or-v1-..."` (defaults to `meta-llama/llama-3.2-3b-instruct`). Without an LLM key, Krusch Context uses deterministic heuristic keyword extraction.

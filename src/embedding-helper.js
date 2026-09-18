@@ -9,6 +9,9 @@ export { PRIORITY, ollamaQueue };
  * Standard local Ollama embedding with queueing and retry.
  */
 export async function getOllamaEmbedding(text, priority = PRIORITY.LOW) {
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        return null;
+    }
     try {
         return await ollamaQueue.enqueue(async (endpoint) => {
             const controller = new AbortController();
@@ -44,26 +47,47 @@ export async function getOllamaEmbedding(text, priority = PRIORITY.LOW) {
 
 
 /**
+ * Canonical single source of truth for embedding vector dimension.
+ * Defaults to 1024 (matching bge-large / baai/bge-large-en-v1.5 and sovereign db schema).
+ */
+export function getConfiguredEmbeddingDim() {
+    if (process.env.EMBED_DIMS) {
+        const parsed = parseInt(process.env.EMBED_DIMS, 10);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    if (process.env.EMBEDDING_DIM) {
+        const parsed = parseInt(process.env.EMBEDDING_DIM, 10);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    return 1024;
+}
+
+/**
  * Detect active embedding provider metadata.
  */
 export function getEmbeddingProvider() {
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     const customUrl = process.env.EMBEDDING_URL;
+    const dimensions = getConfiguredEmbeddingDim();
     if (openrouterKey || (customUrl && customUrl.includes('openrouter.ai'))) {
         const model = process.env.EMBED_MODEL || 'baai/bge-large-en-v1.5';
-        return { provider: 'openrouter', model, name: `OpenRouter Cloud (${model}, 1024d)` };
+        return { provider: 'openrouter', model, dimensions, name: `OpenRouter Cloud (${model}, ${dimensions}d)` };
     }
     if (customUrl) {
         const model = process.env.EMBED_MODEL || 'custom';
-        return { provider: 'custom', model, name: `Custom Endpoint (${model})` };
+        return { provider: 'custom', model, dimensions, name: `Custom Endpoint (${model}, ${dimensions}d)` };
     }
-    return { provider: 'ollama', model: process.env.EMBED_MODEL || 'bge-large', name: `Local Ollama (${process.env.EMBED_MODEL || 'bge-large'}, 1024d)` };
+    const model = process.env.EMBED_MODEL || 'bge-large';
+    return { provider: 'ollama', model, dimensions, name: `Local Ollama (${model}, ${dimensions}d)` };
 }
 
 /**
  * Custom local wrapper for getEmbedding to support custom embedding endpoints (OpenRouter, OpenAI-compatible, llama.cpp, etc.)
  */
 export async function getEmbedding(text, priority = PRIORITY.LOW) {
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        return null;
+    }
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     const customUrl = process.env.EMBEDDING_URL || (openrouterKey ? 'https://openrouter.ai/api/v1/embeddings' : null);
     const apiKey = process.env.EMBEDDING_API_KEY || openrouterKey || null;
@@ -189,8 +213,8 @@ function calculateCentroid(vectors) {
 }
 
 export async function getChunkedCentroidEmbedding(text, priority = PRIORITY.LOW) {
-    const CHUNK_SIZE = 950;
-    const OVERLAP = 150;
+    const CHUNK_SIZE = 700;
+    const OVERLAP = 100;
     const BATCH_SIZE = ollamaQueue.concurrency || 2;
     
     if (text.length <= CHUNK_SIZE) {

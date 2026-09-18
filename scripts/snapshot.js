@@ -21,12 +21,23 @@ const MAX_EMBEDDABLE_SIZE = 500 * 1024;
 
 let syncProgress = { processed: 0, total: 0, embedded: 0, skipped: 0, symbols: 0, edges: 0 };
 
-async function generateInlineSummary(text, fileName) {
-    const defaultSummary = text.substring(0, 500);
-    if (process.env.SKIP_LLM_SUMMARY === 'true') {
-        return defaultSummary;
+async function generateInlineSummary(text, fileName, symbols = []) {
+    // Strip leading block comments (licenses, file headers) to reach substantive code
+    let stripped = text.replace(/^\s*\/\*[\s\S]*?\*\//, '').trim();
+    if (stripped.length < 50) stripped = text;
+
+    let defaultSummary = stripped.substring(0, 1000);
+    if (symbols && symbols.length > 0) {
+        const symbolList = symbols.map(s => s.name).filter(n => n && n !== 'anonymous').slice(0, 25).join(', ');
+        if (symbolList) {
+            defaultSummary = `Symbols: ${symbolList}\n${defaultSummary}`;
+        }
     }
-    if (text.length < 50) return defaultSummary;
+
+    if (process.env.SKIP_LLM_SUMMARY === 'true') {
+        return defaultSummary.substring(0, 1500);
+    }
+    if (text.length < 50) return defaultSummary.substring(0, 1500);
 
     if (process.env.OPENROUTER_API_KEY || process.env.COMPLETION_URL) {
         try {
@@ -36,10 +47,13 @@ async function generateInlineSummary(text, fileName) {
                 { maxTokens: 80 }
             );
             if (summary && summary.trim().length > 5) {
-                return summary.trim().substring(0, 500);
+                const combined = symbols && symbols.length > 0
+                    ? `${summary.trim()}\nSymbols: ${symbols.map(s => s.name).filter(n => n && n !== 'anonymous').slice(0, 25).join(', ')}`
+                    : summary.trim();
+                return combined.substring(0, 1500);
             }
         } catch (_) {}
-        return defaultSummary;
+        return defaultSummary.substring(0, 1500);
     }
     try {
         const prompt = `Provide a concise 1-line summary of what this code does. Respond ONLY with the summary.\n\nFile: ${fileName}\n\nCode:\n${text.substring(0, 3000)}`;
@@ -136,6 +150,17 @@ async function insertBlob(repoId, buffer, filePath, rootDir) {
         }
 
         if (existing.rows[0].embedding !== null) {
+            if (process.env.REFRESH_SUMMARIES === 'true' && isEmbeddable(ext)) {
+                const text = buffer.toString('utf-8');
+                let syms = [];
+                try {
+                    const extracted = extractSymbolsAndImports(text, relativePath);
+                    syms = extracted.symbols || [];
+                } catch (_) {}
+                const sum = await generateInlineSummary(text, fileName, syms);
+                await query(`UPDATE blobs SET summary = $2 WHERE id = $1`, [sha, sum]);
+                await populateSymbolsAndEdges(sha, repoId, buffer, relativePath, ext);
+            }
             return sha;
         }
     }
@@ -144,7 +169,12 @@ async function insertBlob(repoId, buffer, filePath, rootDir) {
     let summary = null;
     if (isEmbeddable(ext)) {
         const text = buffer.toString('utf-8');
-        summary = await generateInlineSummary(text, fileName);
+        let symbols = [];
+        try {
+            const extracted = extractSymbolsAndImports(text, relativePath);
+            symbols = extracted.symbols || [];
+        } catch (_) {}
+        summary = await generateInlineSummary(text, fileName, symbols);
         const textToEmbed = text.substring(0, 30000);
         const vector = await getChunkedCentroidEmbedding(textToEmbed);
         if (vector && vector.length > 0) {
@@ -154,13 +184,13 @@ async function insertBlob(repoId, buffer, filePath, rootDir) {
 
     if (embeddingStr) {
         await query(
-            `INSERT INTO blobs (id, repository_id, size, embedding, file_name, file_path, summary, storage_mode) VALUES ($1, $2, $3, $4::vector, $5, $6, $7, 'pointer') ON CONFLICT (id) DO UPDATE SET embedding = EXCLUDED.embedding`,
+            `INSERT INTO blobs (id, repository_id, size, embedding, file_name, file_path, summary, storage_mode) VALUES ($1, $2, $3, $4::vector, $5, $6, $7, 'pointer') ON CONFLICT (id) DO UPDATE SET embedding = COALESCE(EXCLUDED.embedding, blobs.embedding), summary = COALESCE(EXCLUDED.summary, blobs.summary), file_name = EXCLUDED.file_name, file_path = EXCLUDED.file_path`,
             [sha, repoId, buffer.length, embeddingStr, fileName, relativePath, summary]
         );
         syncProgress.embedded++;
     } else {
         await query(
-            `INSERT INTO blobs (id, repository_id, size, file_name, file_path, summary, storage_mode) VALUES ($1, $2, $3, $4, $5, $6, 'pointer') ON CONFLICT (id) DO NOTHING`,
+            `INSERT INTO blobs (id, repository_id, size, file_name, file_path, summary, storage_mode) VALUES ($1, $2, $3, $4, $5, $6, 'pointer') ON CONFLICT (id) DO UPDATE SET summary = COALESCE(EXCLUDED.summary, blobs.summary), file_name = EXCLUDED.file_name, file_path = EXCLUDED.file_path`,
             [sha, repoId, buffer.length, fileName, relativePath, summary]
         );
     }
@@ -270,9 +300,9 @@ async function processDirectory(dirPath, repoId, rootDir) {
     return treeSha;
 }
 
-export async function snapshot(targetDir = process.cwd()) {
+export async function snapshot(targetDir = process.cwd(), customRepoName = null) {
     const resolvedDir = path.resolve(targetDir);
-    const repoName = path.basename(resolvedDir);
+    const repoName = customRepoName || path.basename(resolvedDir);
     
     syncProgress = { processed: 0, total: 0, embedded: 0, skipped: 0, symbols: 0, edges: 0 };
     console.log(`[krusch-context-mcp] Starting native snapshot for: ${repoName}`);
@@ -330,7 +360,8 @@ export async function snapshot(targetDir = process.cwd()) {
 // Run CLI if invoked directly
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
     const target = process.argv[2] || process.cwd();
-    snapshot(target)
+    const repoName = process.argv[3] || null;
+    snapshot(target, repoName)
         .catch(err => {
             console.error('[Snapshot Fatal]', err);
             process.exit(1);

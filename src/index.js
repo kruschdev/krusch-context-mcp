@@ -43,7 +43,7 @@ import {
 import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
 import { handleThink } from './think-engine.js';
 import { handleProactiveNudge, handleNudgeFeedback } from './proactive-engine.js';
-import { getEmbedding, getEmbeddingProvider } from './embedding-helper.js';
+import { getEmbedding, getEmbeddingProvider, getConfiguredEmbeddingDim } from './embedding-helper.js';
 import {
   searchBlobs,
   getRepositories,
@@ -766,8 +766,42 @@ async function handleHealthCheck() {
   const symbolCount = symbolCheck.rows[0]?.count || 0;
   const engineStatus = isPgContextEnabled() ? 'pgContext (HNSW + Single-Pass Filter)' : 'pgvector (Standard)';
   const embedProvider = getEmbeddingProvider();
-  
-  let text = `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Extracted symbols: ${symbolCount}\n- Embedding Provider: ${embedProvider.name}\n- Vector Engine: ${engineStatus}\n- Database: Connected\n- Version: ${VERSION}`;
+  const expectedDim = getConfiguredEmbeddingDim();
+
+  let dimensionStatus = { ok: true, details: [] };
+  try {
+    const dimCheck = await pool.query(`
+      SELECT c.relname, a.attname, a.atttypmod 
+      FROM pg_attribute a 
+      JOIN pg_class c ON a.attrelid = c.oid 
+      WHERE c.relname IN ('ide_agent_memory', 'ide_agent_nuggets', 'blobs') 
+        AND a.attname = 'embedding'
+    `);
+    for (const row of dimCheck.rows) {
+      const colDim = row.atttypmod;
+      if (colDim !== -1 && colDim !== expectedDim) {
+        dimensionStatus.ok = false;
+        dimensionStatus.details.push(`${row.relname} is vector(${colDim})`);
+      }
+    }
+  } catch (err) {
+    dimensionStatus.ok = false;
+    dimensionStatus.details.push(`Could not query column dimensions: ${err.message}`);
+  }
+
+  const isHealthy = dimensionStatus.ok;
+  const statusHeader = isHealthy ? '[krusch-context-mcp] 🟢 Server is healthy.' : '[krusch-context-mcp] ⚠️ Server is degraded (Dimension Mismatch).';
+
+  let text = `${statusHeader}\n- Episodic memories (v1): ${memoryCount}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Extracted symbols: ${symbolCount}\n- Embedding Provider: ${embedProvider.name}\n- Vector Engine: ${engineStatus}`;
+
+  if (dimensionStatus.ok) {
+    text += `\n- Vector Dimensions: 🟢 ${expectedDim}d (verified: ide_agent_memory, ide_agent_nuggets, blobs)`;
+  } else {
+    text += `\n- Vector Dimensions: ⚠️ MISMATCH — ${dimensionStatus.details.join('; ')} (config expects ${expectedDim}d)`;
+    text += `\n- Dimension Remediation: Set EMBED_DIMS in .env to match DB, or run: psql $DATABASE_URL -v target_dim=${expectedDim} -f db/migrate_dimensions.sql`;
+  }
+
+  text += `\n- Database: Connected\n- Version: ${VERSION}`;
   if (v2Count > 0) {
     text += `\n- Company Brain states (v2): ${v2Count}`;
   }

@@ -1,0 +1,114 @@
+{
+  "name": "in-corpus-14-ablation",
+  "version": "1.0.0",
+  "date": "2026-09-18",
+  "description": "Frozen 14-query ablation benchmark comparing BM25 Lexical vs Dense Vector vs Hybrid RRF retrieval across local Sovereign Core repositories (pg-git, krusch-context-mcp, krusch-cascade-router).",
+  "corpus": {
+    "repositories": ["pg-git", "krusch-context-mcp", "krusch-cascade-router"],
+    "total_blobs": 190
+  },
+  "tiers": {
+    "tier1_semantic": "Natural language conceptual architecture and cross-cutting workflow queries",
+    "tier2_symbolic": "Exact identifier, CVE security patch, and configuration flag queries"
+  },
+  "queries": [
+    {
+      "id": "sem-01",
+      "type": "semantic",
+      "query": "priority queue for ollama inference fleet",
+      "expectedMatches": ["llm-queue.js"],
+      "description": "Multi-priority queue managing Ollama embedding and tag concurrency"
+    },
+    {
+      "id": "sem-02",
+      "type": "semantic",
+      "query": "database connection pool setup",
+      "expectedMatches": ["SETUP.md", "pool.js", "db.js"],
+      "description": "PostgreSQL connection pool initialization and health checks"
+    },
+    {
+      "id": "sem-03",
+      "type": "semantic",
+      "query": "episodic memory superseding and invalidation lifecycle",
+      "expectedMatches": ["EPISODIC_MEMORY.md", "memory-engine.js"],
+      "description": "MobileMem lifecycle: active -> superseded -> invalidated state transitions"
+    },
+    {
+      "id": "sem-04",
+      "type": "semantic",
+      "query": "proactive threat auditor and trajectory guardrails",
+      "expectedMatches": ["proactive-engine.js", "README.md"],
+      "description": "Autonomous trajectory auditing and proactive agent nudges"
+    },
+    {
+      "id": "sem-05",
+      "type": "semantic",
+      "query": "single-turn hybrid retrieval with token budget packing",
+      "expectedMatches": ["unified-retrieval.js", "EVALS.md"],
+      "description": "Polygres-style unified retrieve packing code, memory, and symbol graph hops"
+    },
+    {
+      "id": "sem-06",
+      "type": "semantic",
+      "query": "lakebase sqlite write-behind push sync",
+      "expectedMatches": ["sqlite-engine.js", "lakebase.test.js"],
+      "description": "Lakebase compute/storage decoupling: per-project SQLite with PG push sync"
+    },
+    {
+      "id": "sem-07",
+      "type": "semantic",
+      "query": "steering nuggets memory persistence and nudges",
+      "expectedMatches": ["nuggets-engine.js", "EPISODIC_MEMORY.md", "README.md"],
+      "description": "Compact steering nuggets key-value store with proactive keyword nudges"
+    },
+    {
+      "id": "sem-08",
+      "type": "semantic",
+      "query": "postgresql git dag schema with pgvector embeddings",
+      "expectedMatches": ["schema.sql", "002_hybrid_and_symbols.sql", "SETUP.md", "README.md"],
+      "description": "PostgreSQL Git content-addressed DAG schema, GIN indexes, and pgvector HNSW"
+    },
+    {
+      "id": "sym-01",
+      "type": "symbolic",
+      "query": "astChunker balanced brace",
+      "expectedMatches": ["ast-chunker.js"],
+      "description": "Zero-dependency AST tokenizer and balanced-brace symbol extractor"
+    },
+    {
+      "id": "sym-02",
+      "type": "symbolic",
+      "query": "CVE-2026-13676 fast-uri",
+      "expectedMatches": ["package.json", "CHANGELOG.md"],
+      "description": "Security patch override pinning fast-uri to 4.1.3"
+    },
+    {
+      "id": "sym-03",
+      "type": "symbolic",
+      "query": "KRUSCH_PROFILE extended",
+      "expectedMatches": ["index.js", "AGENTS.md", ".env.example"],
+      "description": "Tool exposure profile configuration flag enabling 26 inspection tools"
+    },
+    {
+      "id": "sym-04",
+      "type": "symbolic",
+      "query": "detectCurrentProject git rev-parse",
+      "expectedMatches": ["index.js", "project-helper.js", "memory-engine.js"],
+      "description": "Automatic git worktree detection helper resolving current project"
+    },
+    {
+      "id": "sym-05",
+      "type": "symbolic",
+      "query": "routeSkills diverse skills",
+      "expectedMatches": ["skills-engine.js", "research.test.js"],
+      "description": "Companion skills router performing diversity-aware skill dispatch"
+    },
+    {
+      "id": "sym-06",
+      "type": "symbolic",
+      "query": "evaluateResilience credential leaks",
+      "expectedMatches": ["resilience-gate.js", "research-tools.test.js"],
+      "description": "Resilience gate evaluating agent trajectory cascading errors and leaks"
+    }
+  ]
+}

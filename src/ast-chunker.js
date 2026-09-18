@@ -174,6 +174,28 @@ function parseJavaScriptOrTypeScript(content, filePath) {
         });
     }
 
+    const assignmentRegex = /([a-zA-Z0-9_$.]+)\s*=\s*(?:async\s*)?function(?:\s*\*|\s+)?([a-zA-Z0-9_$]+)?\s*\(([^)]*)\)\s*\{/g;
+    while ((match = assignmentRegex.exec(content)) !== null) {
+        const name = match[1];
+        if (name.startsWith('this.')) continue;
+        const startIdx = match.index;
+        const braceIdx = content.indexOf('{', startIdx);
+        const endIdx = findMatchingBrace(content, braceIdx);
+        const startLine = getLineNumber(content, startIdx);
+        const endLine = endIdx !== -1 ? getLineNumber(content, endIdx) : Math.min(startLine + 20, lines.length);
+        const fullSignature = match[0].replace(/\s*\{$/, '').trim();
+        const symbolContent = endIdx !== -1 ? content.slice(startIdx, endIdx + 1) : lines.slice(startLine - 1, endLine).join('\n');
+
+        symbols.push({
+            name,
+            type: 'function',
+            startLine,
+            endLine,
+            signature: fullSignature,
+            content: symbolContent.slice(0, 3000)
+        });
+    }
+
     const classRegex = /(?:export\s+)?(?:default\s+)?class\s+([a-zA-Z0-9_$]+)(?:\s+extends\s+[a-zA-Z0-9_$]+)?\s*\{/g;
     while ((match = classRegex.exec(content)) !== null) {
         const className = match[1];
