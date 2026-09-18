@@ -404,18 +404,38 @@ npm run test:smoke
 # Test a specific profile over stdio
 KRUSCH_PROFILE=core node --env-file=.env tests/test_client.js
 
-# Run empirical codebase retrieval accuracy evaluation
+# Run foreign codebase benchmark on Express (public third-party repo)
+npm run eval:foreign
+
+# Run in-corpus architecture ablation benchmark
 npm run eval:accuracy
 ```
 
 ### 📊 Retrieval Evaluation & Benchmarks
 
-Empirical dense vector retrieval accuracy is probed using `npm run eval:accuracy` (`scripts/eval_accuracy.js`):
-* **Recall@1**: 20.0% (exact top hit)
-* **Recall@5**: 60.0% (expected file within top 5 candidates)
-* **Recall@10**: 60.0%
+Retrieval accuracy is empirically measured across a 3-way ablation (PostgreSQL BM25 lexical search, 1024-d Dense Cosine embeddings via `bge-large`, and Sovereign Hybrid Reciprocal Rank Fusion via `search_code`). Frozen fixtures are versioned under [`evals/fixtures/`](evals/fixtures/).
 
-For detailed query logs, corpus breakdown, and benchmark caveats, see **[EVALS.md](docs/EVALS.md)**.
+#### 1. Foreign Public Codebase Benchmark: `expressjs/express` (`npm run eval:foreign`)
+Evaluated on [`expressjs/express`](https://github.com/expressjs/express) (206 files, 167 indexed blobs, 3,354 symbols) across 10 benchmark queries (5 semantic concepts + 5 exact code identifiers):
+
+| Method | Recall@1 | Recall@5 | Recall@10 | MRR | Code Identifiers R@1 | Semantic Concepts R@1 |
+|---|---|---|---|---|---|---|
+| **BM25 Lexical** (Postgres `ts_rank_cd`) | 1/10 (10.0%) | 1/10 (10.0%) | 1/10 (10.0%) | 0.100 | 1/5 (20.0%) | 0/5 (0.0%) |
+| **Dense Cosine** (`bge-large` 1024-d) | 6/10 (60.0%) | 9/10 (90.0%) | 9/10 (90.0%) | 0.733 | 2/5 (40.0%) | 4/5 (80.0%) |
+| **Hybrid RRF** (`search_code`) | **7/10 (70.0%)** | **9/10 (90.0%)** | **9/10 (90.0%)** | **0.783** | **3/5 (60.0%)** | **4/5 (80.0%)** |
+
+> **Key Takeaway**: On foreign code, Hybrid RRF yields **+20.0 percentage points (+1 hit) on code identifiers** over dense retrieval alone, resolving exact identifier collisions (`res.clearCookie` vs `res.cookie.js`) while maintaining parity on semantic concepts.
+
+#### 2. In-Corpus Architecture Ablation (`npm run eval:accuracy`)
+Evaluated on the Sovereign Core repository stack (190 content-addressed blobs, 14 benchmark queries):
+
+| Method | Recall@1 | Recall@5 | Recall@10 | MRR | Code Identifiers R@1 | Semantic Concepts R@1 |
+|---|---|---|---|---|---|---|
+| **BM25 Lexical** (Postgres `ts_rank_cd`) | 3/14 (21.4%) | 4/14 (28.6%) | 4/14 (28.6%) | 0.238 | 2/6 (33.3%) | 1/8 (12.5%) |
+| **Dense Cosine** (`bge-large` 1024-d) | 11/14 (78.6%) | **14/14 (100.0%)** | **14/14 (100.0%)** | 0.881 | 4/6 (66.7%) | **7/8 (87.5%)** |
+| **Hybrid RRF** (`search_code`) | **13/14 (92.9%)** | **14/14 (100.0%)** | **14/14 (100.0%)** | **0.964** | **6/6 (100.0%)** | **7/8 (87.5%)** |
+
+For detailed per-query execution logs, published misses, and benchmark methodology caveats (multi-target matching and BM25 tokenization considerations), see **[EVALS.md](docs/EVALS.md)**.
 
 ---
 

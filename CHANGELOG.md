@@ -20,7 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added contract tests in `tests/eval-fixtures.test.js` verifying fixture schema and query invariants.
 - **Public Foreign Codebase Evaluation (`npm run eval:foreign`)**:
   - Validated retrieval generalization on `expressjs/express` (206 files, 167 blobs, 3,354 symbols).
-  - Empirical results show Hybrid RRF delivering **70.0% Recall@1 / 0.783 MRR (60.0% on code identifiers)**, outperforming Dense alone (60.0% R@1 / 0.733 MRR, 40.0% on code identifiers).
+  - Empirical results show Hybrid RRF delivering **70.0% Recall@1 / 0.783 MRR (60.0% on code identifiers)**, outperforming Dense alone (60.0% R@1 / 0.733 MRR, 40.0% on code identifiers):
+    | Method | Recall@1 | Recall@5 | Recall@10 | MRR | Identifiers R@1 | Semantic R@1 |
+    |---|---|---|---|---|---|---|
+    | **BM25 Lexical** | 10.0% (1/10) | 10.0% (1/10) | 10.0% (1/10) | 0.100 | 20.0% (1/5) | 0.0% (0/5) |
+    | **Dense Cosine** (1024-d) | 60.0% (6/10) | 90.0% (9/10) | 90.0% (9/10) | 0.733 | 40.0% (2/5) | 80.0% (4/5) |
+    | **Hybrid RRF** (`search_code`) | **70.0% (7/10)** | **90.0% (9/10)** | **90.0% (9/10)** | **0.783** | **60.0% (3/5)** | **80.0% (4/5)** |
 - **AST Chunker CommonJS Support**:
   - Enhanced `src/ast-chunker.js` to extract CommonJS and prototype method assignments (`exports.foo = function`, `res.format = function`, etc.).
 
