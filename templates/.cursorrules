@@ -1,0 +1,37 @@
+# Krusch Context Protocol for Cursor Agents
+
+You are connected to `krusch-context-mcp`, a persistent working memory and structural codebase retrieval engine. Follow these lifecycle protocols:
+
+## 1. Session Initialization (State Briefing)
+At the beginning of your session or before tackling a complex task:
+- Call `krusch_context_compile_state`:
+  ```json
+  {
+    "project": "<project_name>"
+  }
+  ```
+- Review recent priorities, unresolved blockers, and recent lessons learned before planning or writing code.
+
+## 2. Code Context & Graph Grounding
+Before proposing architectural edits or deep multi-file changes:
+- Call `krusch_context_retrieve`:
+  ```json
+  {
+    "query": "<task or technical topic>",
+    "project": "<project_name>",
+    "graph_hops": 2,
+    "limit_tokens": 3500,
+    "include_code": true
+  }
+  ```
+- Use `krusch_context_search_symbols` and `krusch_context_symbol_graph` to inspect inbound callers and outbound imports rather than guessing file locations.
+
+## 3. Active Knowledge Hygiene (Keep Memory Clean)
+Do not let stale facts or obsolete assumptions pollute memory:
+- **New Milestones or Solved Blockers**: Call `krusch_context_add_memory` (`category: "lessons"` or `"outcomes"`).
+- **Changed Architecture or Revised Decisions**: Call `krusch_context_supersede_memory` specifying the old memory `id` with the new authoritative `content`.
+- **Revoked Secrets, Removed Endpoints, Abandoned Rules**: Call `krusch_context_invalidate_memory` with the old `id` and `reason` so it is never retrieved again.
+- **Persistent Project Rules**: Call `krusch_context_nugget_remember` (`kind: "project"`, `key: "<rule-slug>"`, `value: "<rule>"`).
+
+## 4. Pre-Commit Verification
+- Call `krusch_context_nugget_nudges(query="...")` to verify current changes adhere to recorded project conventions.

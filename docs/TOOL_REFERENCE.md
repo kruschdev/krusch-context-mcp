@@ -10,9 +10,10 @@
 
 To prevent agent context exhaustion and tool selection degradation, tools are organized into three profile tiers and modular companion extensions:
 
-- **`core` (Default — 13 Tools, or 18 Tools with Polygres Cloud)**: The lean, high-signal daily driver context engine. Includes `krusch_context_retrieve`, `add_memory`, `supersede_memory`, `invalidate_memory`, `search_memory`, `compile_state`, `nugget_remember`, `nugget_nudges`, `search_symbols`, `symbol_graph`, `search_code`, `health`, and `proactive_nudge`. When `POLYGRES_API_KEY` is present, the 5 Polygres Cloud tools auto-mount alongside core (18 tools total).
-- **`extended` (26 Tools, or 31 with Polygres Cloud)**: Core plus complete memory administrative lifecycle (`list`, `delete`, `update`, `consolidate`), Git exploration (`list_repos`, `read_tree`, `read_blob`, `file_symbols`), cited thinking (`think`), and proactive alignment feedback (`nudge_feedback`).
-- **`extensions` / `full` (61 Tools total)**: All core and extended tools plus the 5 modular companion extensions (`polygres-cloud`: 5, `company-brain`: 8, `research`: 15, `session-bridge`: 2, `skills-docs`: 5).
+- **`core` (Sovereign Default — 13 Tools)**: The lean, high-signal daily driver context engine (~900 prompt tokens). Includes `krusch_context_retrieve`, `add_memory`, `supersede_memory`, `invalidate_memory`, `search_memory`, `compile_state`, `nugget_remember`, `nugget_nudges`, `search_symbols`, `symbol_graph`, `search_code`, `health`, and `proactive_nudge`.
+- **`extended` (26 Tools Total)**: Core (13) plus complete memory administrative lifecycle (`list`, `delete`, `update`, `consolidate`), Git exploration (`list_repos`, `read_tree`, `read_blob`, `file_symbols`), cited thinking (`think`), and proactive alignment feedback (`nudge_feedback`).
+- **`companion extensions` (35 Tools across 5 standalone servers)**: Run independently as companion MCP servers or load on-demand via `--extensions=...` (`research`: 15, `company-brain`: 8, `polygres-cloud`: 5, `skills-docs`: 5, `session-bridge`: 2).
+- **`full` (61 Tools Total)**: Monolithic development profile mounting all 26 core/extended tools plus all 35 companion extension tools in-process.
 
 Configure via `KRUSCH_PROFILE=core` in your `.env` or IDE MCP configuration, or pass `--profile=core` on the command line. Registered handlers for all tools remain executable on direct invocation regardless of the active profile.
 

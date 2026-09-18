@@ -6,6 +6,9 @@
 
 ---
 
+> [!NOTE]
+> **Architecture Update (v1.6.1)**: As of v1.6.1, `krusch-context-mcp` defaults to a lean **13-tool Sovereign Core** (~900 tokens). The Polygres Cloud tools are encapsulated in a standalone companion server (`npm run start:cloud`) or loaded dynamically via `--extensions=polygres-cloud`. The monolithic full suite comprises 61 tools.
+
 ## 📱 X / Twitter Post (Clean Copy-Paste)
 
 Huge congrats to @daleverett and the @polygres team on launching in-database native embeddings! 🐘⚡
@@ -14,7 +17,7 @@ We just upgraded our open-source agent context server (krusch-context-mcp) to Po
 
 🚀 Native Embeddings Out of the Box: krusch-context-mcp now defaults to Polygres in-engine embeddings! Just connect your database—zero separate embedding APIs, zero extra keys, and zero data movement. Pure text in, vectors generated and searched in-engine.
 
-🔹 5 New Cloud Tools (64 Tools Total): Added direct MCP tools to monitor the 500M monthly free microcredits live from Cursor & Claude Code (polygres_cloud_usage), run pure-text vector search (polygres_cloud_search), and inspect pgContext capabilities.
+🔹 5 New Cloud Tools (Companion Extension / 61 Tools Full Suite): Added direct MCP tools to monitor the 500M monthly free microcredits live from Cursor & Claude Code (polygres_cloud_usage), run pure-text vector search (polygres_cloud_search), and inspect pgContext capabilities.
 
 Postgres as the unified, AI-native working memory substrate for coding agents just got so much simpler. 
 

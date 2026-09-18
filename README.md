@@ -11,9 +11,9 @@
   <a href="https://github.com/pgvector/pgvector"><img src="https://img.shields.io/badge/Database-PostgreSQL%20%2B%20pgvector-lightgrey.svg" alt="Database" /></a>
 </p>
 
-**13-tool sovereign AI context engine** for coding agents: hybrid codebase retrieval, persistent episodic memory with self-healing superseding/invalidation, persistent steering nuggets, and proactive trajectory auditing. 100% local-first on PostgreSQL + Ollama, with optional turnkey Polygres Cloud runtime.
+**The 13-tool Sovereign Context Engine for Coding Agents** (~900 prompt tokens): hybrid codebase retrieval, persistent episodic memory with self-healing superseding/invalidation, persistent steering nuggets, and proactive trajectory auditing. 100% local-first on PostgreSQL + Ollama, with optional cloud runtimes.
 
-Modular architecture: **core (13 tools, sovereign default)** → **extended core (26 tools)** → **modular companion extensions** (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`).
+Architecture: **Sovereign Core (13 tools, default)** → **Extended Core (26 tools)** → **Modular Companion Extensions** (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`).
 
 ---
 
@@ -53,7 +53,7 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 
 ### 2. 🧩 Structural Codebase Engine & Symbol Graphs
 * **Native Git DAG Storage**: Retains Git trees, blobs, commits, and branches in PostgreSQL without requiring loose file scanning.
-* **Zero-Dependency Structural Lexer**: Fast regex and brace-matching symbol parser extracting functions, classes, interfaces, and routes across JS, TS, Python, Go, Rust, and Shell without native C++ compilation bindings.
+* **Zero-Dependency Structural Lexer (Transparent Pragmatism)**: Pure JavaScript balanced-brace scanning and regex parser extracting functions, classes, interfaces, and routes across JS, TS, Python, Go, Rust, and Shell. Intentionally avoids brittle native C++ Tree-sitter bindings and `node-gyp` compile errors, delivering 90%+ AST symbol extraction utility with instant cross-platform startup and zero native install overhead.
 * **Relational Symbol Graphs (`symbol_graph`)**: Walk inbound callers, outbound imports, and transitive dependencies up to $N$ hops.
 * **Hybrid RRF Search (`search_code`)**: Merges dense cosine similarity with lexical BM25 (`tsv` GIN index) using Reciprocal Rank Fusion and exponential temporal decay ($e^{-0.01t}$).
 * **Standalone Synergy**: 100% schema-compatible with [PG-Git](https://github.com/kruschdev/pg-git) (`pg-git-mcp@1.1.0`), supporting dedicated `pg_git_*` aliases.
@@ -69,8 +69,9 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 * **Proactive Auditor (`proactive_nudge`)**: Background threat-auditor that flags rule violations, architectural drift, or known regressions before edits execute.
 * **Closed-Loop Alignment (`nudge_feedback`)**: Automatically captures developer approvals and corrections to refine future proactive guidance.
 
-### 5. ⚡ Modular Companion Extensions & Cloud Support
-* **Modular Companion MCPs**: Run specialized domains as independent companion servers or load dynamically via `--extensions=...` (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`).
+### 5. ⚡ Modular Companion Extensions & AI Watch Research Lab
+* **Modular Companion MCPs**: Run specialized domains as independent companion servers (`npm run start:research`, `npm run start:company-brain`, `npm run start:cloud`, `npm run start:skills`, `npm run start:session`) or load dynamically via `--extensions=...`.
+* **AI Watch Research Lab (Opt-In Companion)**: ArXiv-grounded experimental modules (AgentDebugX failure observability, DataFlow DAG mutations, Setwise minimal covers, AREX recursive research, Teacher Memory Distillation, Resilience Gate) kept cleanly decoupled from the 13-tool daily driver loop.
 * **Turnkey Cloud Option**: Optional support for Polygres Cloud (`polygres_cloud_*`, 5 tools) providing zero-GPU in-engine embeddings, vector search, model catalog, and live microcredit tracking.
 
 ---
@@ -121,7 +122,14 @@ cd krusch-context-mcp
 npm install
 ```
 
-### 2. Configure Your Environment
+### 2. Start PostgreSQL + pgvector (Turnkey 1-Command Setup)
+If you don't already have PostgreSQL with `pgvector` running locally:
+```bash
+docker compose up -d
+```
+*Auto-starts PostgreSQL 16 with `pgvector` and `uuid-ossp` on port 5432, pre-initialized with all required schemas from `db/schema.sql`.*
+
+### 3. Configure Your Environment
 
 ```bash
 cp .env.example .env
@@ -160,13 +168,13 @@ DATABASE_URL="postgresql://postgres:password@localhost:5432/kruschdb"
 OPENROUTER_API_KEY="sk-or-v1-your-openrouter-key"
 ```
 
-### 3. Ingest Your Codebase (Optional but Recommended)
+### 4. Ingest Your Codebase (Optional but Recommended)
 Index the current repository into the PostgreSQL Git DAG:
 ```bash
 npm run snapshot -- .
 ```
 
-### 4. Register in Your IDE
+### 5. Register in Your IDE
 
 Add the server to your IDE's MCP configuration.
 
@@ -293,6 +301,23 @@ await polygres_cloud_search({
   limit: 5
 });
 ```
+
+---
+
+## 🤖 Drop-In Agent Protocols (Cursor & Claude Code)
+
+Context engines only deliver value when coding models actively query and maintain them. Krusch Context includes pre-built protocol instructions ready to copy into your repository:
+
+| Agent / IDE | Template File | Recommended Placement |
+| :--- | :--- | :--- |
+| **Cursor** | [templates/.cursorrules](templates/.cursorrules) | Root `.cursorrules` or `.cursor/rules/context.mdc` |
+| **Claude Code** | [templates/CLAUDE.md](templates/CLAUDE.md) | Root `CLAUDE.md` |
+| **Windsurf / Antigravity** | [AGENTS.md](AGENTS.md) | Root `AGENTS.md` |
+
+### Core Agent Routine:
+1. **Session Start**: Model calls `krusch_context_compile_state` to hydrate active blockers, recent priorities, and lessons.
+2. **Before Edits**: Model calls `krusch_context_retrieve` and `krusch_context_nugget_nudges` to ground context and enforce project rules.
+3. **When Decisions Change**: Model calls `krusch_context_supersede_memory` or `krusch_context_invalidate_memory` to keep the working memory pristine.
 
 ---
 
