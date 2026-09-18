@@ -15,16 +15,17 @@ const VALID_KINDS = new Set(['project', 'user', 'agent']);
  * @param {string} [params.active_project] - Project context for SQLite isolation
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function nuggetRemember({ key, value, kind = 'project', active_project }) {
+export async function nuggetRemember({ key, value, kind = 'project', active_project, project }) {
     if (!key || !value) throw new McpError(ErrorCode.InvalidParams, "Missing key or value");
     if (!VALID_KINDS.has(kind)) throw new McpError(ErrorCode.InvalidParams, `Invalid kind: ${kind}. Must be one of: ${[...VALID_KINDS].join(', ')}`);
 
+    const targetProject = active_project || project || null;
     const embeddingArray = await getEmbedding(value);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 
-    if (kind === 'project' && active_project) {
-        const localDb = await getProjectDb(active_project);
+    if (kind === 'project' && targetProject) {
+        const localDb = await getProjectDb(targetProject);
         if (localDb) {
             localDb.prepare(`
                 INSERT INTO ide_agent_nuggets (key, value, kind, embedding, created_at, updated_at, pg_synced)
@@ -34,11 +35,11 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
             `).run(key, value, kind, embeddingStr);
             
             // Asynchronous write-behind (Compute Cache -> Object Storage)
-            pushProjectMemory(active_project, localDb).catch(e =>
-                console.error(`[nuggets-engine] Async push failed for ${active_project}:`, e)
+            pushProjectMemory(targetProject, localDb).catch(e =>
+                console.error(`[nuggets-engine] Async push failed for ${targetProject}:`, e)
             );
 
-            return { content: [{ type: "text", text: `[krusch-context] 🧠 Nugget remembered natively in SQLite (.agent/memory.db) for project '${active_project}': '${key}'` }] };
+            return { content: [{ type: "text", text: `[krusch-context] 🧠 Nugget remembered natively in SQLite (.agent/memory.db) for project '${targetProject}': '${key}'` }] };
         }
     }
 
@@ -69,11 +70,13 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
  * @param {string[]} [params.kinds] - Filter by kind ('project', 'user', 'agent')
  * @param {number} [params.limit=3] - Max results to return
  * @param {string} [params.active_project] - Project context for SQLite isolation
+ * @param {string} [params.project] - Optional alias for active_project
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function nuggetNudges({ query, kinds, limit = 3, active_project, _embedding }) {
+export async function nuggetNudges({ query, kinds, limit = 3, active_project, project, _embedding }) {
     if (!query && !_embedding) throw new McpError(ErrorCode.InvalidParams, "Missing query or embedding");
 
+    const targetProject = active_project || project || null;
     const embeddingArray = _embedding || await getEmbedding(query);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
 
@@ -141,8 +144,8 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project, _e
     }
 
     // 2. Fetch from Local SQLite if project is provided and 'project' kind is allowed
-    if (active_project && (!kinds || kinds.includes('project'))) {
-        const localDb = await getProjectDb(active_project);
+    if (targetProject && (!kinds || kinds.includes('project'))) {
+        const localDb = await getProjectDb(targetProject);
         if (localDb) {
             let sql = `SELECT key, value, kind, created_at, embedding FROM ide_agent_nuggets WHERE embedding IS NOT NULL`;
             if (kinds && kinds.length > 0) {
@@ -164,7 +167,7 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project, _e
                         kind: row.kind,
                         created_at: row.created_at,
                         distance: distance,
-                        source: `sqlite:${active_project}`
+                        source: `sqlite:${targetProject}`
                     });
                 } catch (e) {
                     console.warn(`[krusch-context] Warning: Failed to parse JSON embedding for nugget key '${row.key}'`);
@@ -193,14 +196,16 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project, _e
  * @param {object} params
  * @param {string} params.key - The nugget key to delete
  * @param {string} [params.active_project] - Project context for SQLite isolation
+ * @param {string} [params.project] - Optional alias for active_project
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function nuggetForget({ key, active_project }) {
+export async function nuggetForget({ key, active_project, project }) {
     if (!key) throw new McpError(ErrorCode.InvalidParams, "Missing key");
 
-    // Try SQLite first if active_project is provided
-    if (active_project) {
-        const localDb = await getProjectDb(active_project);
+    const targetProject = active_project || project || null;
+    // Try SQLite first if targetProject is provided
+    if (targetProject) {
+        const localDb = await getProjectDb(targetProject);
         if (localDb) {
             const res = localDb.prepare(`DELETE FROM ide_agent_nuggets WHERE key = ?`).run(key);
             if (res.changes > 0) {
@@ -222,9 +227,11 @@ export async function nuggetForget({ key, active_project }) {
  * @param {object} params
  * @param {string[]} [params.kinds] - Filter by kind ('project', 'user', 'agent')
  * @param {string} [params.active_project] - Project context for SQLite isolation
+ * @param {string} [params.project] - Optional alias for active_project
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function nuggetList({ kinds, active_project }) {
+export async function nuggetList({ kinds, active_project, project }) {
+    const targetProject = active_project || project || null;
     let combinedResults = [];
 
     // 1. Fetch from Global Postgres
@@ -244,11 +251,11 @@ export async function nuggetList({ kinds, active_project }) {
     }
 
     // 2. Fetch from Local SQLite
-    if (active_project && (!kinds || kinds.includes('project'))) {
-        const localDb = await getProjectDb(active_project);
+    if (targetProject && (!kinds || kinds.includes('project'))) {
+        const localDb = await getProjectDb(targetProject);
         if (localDb) {
             let sql = `SELECT key, value, kind, created_at, updated_at, 'sqlite:' || ? as source FROM ide_agent_nuggets`;
-            let params = [active_project];
+            let params = [targetProject];
             
             if (kinds && kinds.length > 0) {
                 const placeholders = kinds.map(() => '?').join(',');

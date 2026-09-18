@@ -135,9 +135,10 @@ async function _addGlobalMemory(category, content, finalTags, embeddingStr, supe
  * @param {number[]} [params._embedding] - Optional pre-computed embedding to avoid redundant LLM calls
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function addMemory({ category, content, tags, project, supersedes_id, _embedding }) {
+export async function addMemory({ category, content, tags, project, active_project, supersedes_id, _embedding }) {
     if (!category || !content) throw new McpError(ErrorCode.InvalidParams, "Missing params");
     
+    const targetProject = project || active_project || null;
     const embeddingArray = _embedding || await getEmbedding(content);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
 
@@ -148,8 +149,8 @@ export async function addMemory({ category, content, tags, project, supersedes_i
 
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 
-    if (project) {
-        return await _addProjectMemory(project, category, content, finalTags, embeddingStr, supersedes_id || null);
+    if (targetProject) {
+        return await _addProjectMemory(targetProject, category, content, finalTags, embeddingStr, supersedes_id || null);
     }
     return await _addGlobalMemory(category, content, finalTags, embeddingStr, supersedes_id || null);
 }
@@ -397,24 +398,25 @@ async function db_fetch_linked_blobs(memory_id) {
  * @param {boolean} [params.include_superseded=false] - If true, returns superseded/invalidated records
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function searchMemory({ category, query, limit = 3, active_project, _embedding, search_type = 'semantic', include_history = false, include_linked_blobs = false, include_superseded = false }) {
+export async function searchMemory({ category, query, limit = 3, active_project, project, _embedding, search_type = 'semantic', include_history = false, include_linked_blobs = false, include_superseded = false }) {
     if (!category || !query) throw new McpError(ErrorCode.InvalidParams, "Missing category or query params");
 
+    const targetProject = active_project || project || null;
     let pgResults = [];
     let sqliteResults = [];
 
     if (search_type === 'keyword') {
-        pgResults = await _keywordSearchGlobal(category, query, limit, active_project);
-        sqliteResults = await _keywordSearchProject(active_project, category, query, limit);
+        pgResults = await _keywordSearchGlobal(category, query, limit, targetProject);
+        sqliteResults = await _keywordSearchProject(targetProject, category, query, limit);
     } else if (search_type === 'tag') {
-        pgResults = await _tagSearchGlobal(category, query, limit, active_project);
-        sqliteResults = await _tagSearchProject(active_project, category, query, limit);
+        pgResults = await _tagSearchGlobal(category, query, limit, targetProject);
+        sqliteResults = await _tagSearchProject(targetProject, category, query, limit);
     } else {
         // default semantic search
         const embeddingArray = _embedding || await getEmbedding(query, PRIORITY.HIGH);
         if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
-        pgResults = await _searchGlobalMemory(category, embeddingArray, limit, active_project);
-        sqliteResults = await _searchProjectMemory(active_project, category, embeddingArray, limit);
+        pgResults = await _searchGlobalMemory(category, embeddingArray, limit, targetProject);
+        sqliteResults = await _searchProjectMemory(targetProject, category, embeddingArray, limit);
     }
 
     let allCandidates = [...pgResults, ...sqliteResults];
@@ -488,9 +490,9 @@ export async function searchMemory({ category, query, limit = 3, active_project,
  * @param {string[]} [params.tags] - Optional tags
  * @returns {Promise<{content: Array}>}
  */
-export async function supersedeMemory({ id, category, content, project, tags }) {
+export async function supersedeMemory({ id, category, content, project, active_project, tags }) {
     if (!id || !category || !content) throw new McpError(ErrorCode.InvalidParams, "Missing id, category, or content params");
-    return await addMemory({ category, content, tags, project, supersedes_id: id });
+    return await addMemory({ category, content, tags, project: project || active_project, supersedes_id: id });
 }
 
 /**
@@ -501,10 +503,11 @@ export async function supersedeMemory({ id, category, content, project, tags }) 
  * @param {string} [params.reason="Explicitly invalidated by agent"] - Reason for invalidation
  * @returns {Promise<{content: Array}>}
  */
-export async function invalidateMemory({ id, project, reason = "Explicitly invalidated by agent" }) {
+export async function invalidateMemory({ id, project, active_project, reason = "Explicitly invalidated by agent" }) {
     if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing id param");
-    if (project) {
-        const db = await getProjectDb(project);
+    const targetProject = project || active_project || null;
+    if (targetProject) {
+        const db = await getProjectDb(targetProject);
         if (db) {
             db.prepare(`UPDATE ide_agent_memory SET status = 'INVALIDATED' WHERE id = ?`).run(id);
             const row = db.prepare(`SELECT pg_id FROM ide_agent_memory WHERE id = ?`).get(id);
@@ -536,16 +539,17 @@ export async function invalidateMemory({ id, project, reason = "Explicitly inval
  * @param {number} [params.limit=10] - Max results to return
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function listMemories({ category, project, limit = 10 }) {
+export async function listMemories({ category, project, active_project, limit = 10 }) {
     if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
 
+    const targetProject = project || active_project || null;
     let results = [];
     
-    if (project) {
-        const db = await getProjectDb(project);
+    if (targetProject) {
+        const db = await getProjectDb(targetProject);
         if (db) {
             results = db.prepare(`SELECT id, content, tags, created_at FROM ide_agent_memory WHERE category = ? ORDER BY created_at DESC LIMIT ?`).all(category, limit);
-            results = results.map(r => ({ ...r, project, source: 'project' }));
+            results = results.map(r => ({ ...r, project: targetProject, source: 'project' }));
         }
     } else {
         const client = await pool.connect();
@@ -581,11 +585,12 @@ export async function listMemories({ category, project, limit = 10 }) {
  * @param {string} params.project - Target project string.
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function compileProjectState({ project }) {
-    if (!project) throw new McpError(ErrorCode.InvalidParams, "Missing project");
+export async function compileProjectState({ project, active_project }) {
+    const targetProject = project || active_project;
+    if (!targetProject) throw new McpError(ErrorCode.InvalidParams, "Missing project");
 
     const state = { priorities: [], outcomes: [], activity: [], lessons: [], nudges: [] };
-    const db = await getProjectDb(project);
+    const db = await getProjectDb(targetProject);
 
     const fetchCategory = async (client, category, limit) => {
         let results = [];
@@ -731,9 +736,10 @@ async function _deleteGlobalMemory(id) {
  * @param {string} [params.source_project] - Project context for SQLite isolation
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function deleteMemory({ id, source_project }) {
+export async function deleteMemory({ id, source_project, project, active_project }) {
     if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
-    if (source_project) return await _deleteProjectMemory(id, source_project);
+    const targetProject = source_project || project || active_project || null;
+    if (targetProject) return await _deleteProjectMemory(id, targetProject);
     return await _deleteGlobalMemory(id);
 }
 
@@ -829,13 +835,14 @@ async function _updateGlobalMemory(id, content, tags, project) {
  * @param {string} [params.source_project] - Project context for SQLite isolation
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function updateMemory({ id, content, tags, project, source_project }) {
+export async function updateMemory({ id, content, tags, project, source_project, active_project }) {
     if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
     if (!content && !tags && (project === undefined)) {
         throw new McpError(ErrorCode.InvalidParams, "Must provide at least one field to update (content, tags, or project)");
     }
 
-    if (source_project) return await _updateProjectMemory(id, content, tags, source_project);
+    const targetSource = source_project || active_project || null;
+    if (targetSource) return await _updateProjectMemory(id, content, tags, targetSource);
     return await _updateGlobalMemory(id, content, tags, project);
 }
 
@@ -1027,10 +1034,11 @@ async function _consolidatePostgres(category, threshold, dry_run) {
  * @param {boolean} [params.dry_run=false] - Preview matches without merging
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function consolidateMemories({ category, project, threshold = 0.15, dry_run = false }) {
+export async function consolidateMemories({ category, project, active_project, threshold = 0.15, dry_run = false }) {
     if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
-    if (project) {
-        return await _consolidateSqlite(category, project, threshold, dry_run);
+    const targetProject = project || active_project || null;
+    if (targetProject) {
+        return await _consolidateSqlite(category, targetProject, threshold, dry_run);
     }
     return await _consolidatePostgres(category, threshold, dry_run);
 }

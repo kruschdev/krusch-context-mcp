@@ -280,6 +280,7 @@ export const ALL_TOOLS = [
           type: "object",
           properties: {
             project: { type: "string" },
+            active_project: { type: "string", description: "Optional project context (alias for project)" },
             category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
             content: { type: "string" },
             tags: { type: "array", items: { type: "string" } },
@@ -298,6 +299,7 @@ export const ALL_TOOLS = [
             category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
             content: { type: "string", description: "New authoritative content" },
             project: { type: "string" },
+            active_project: { type: "string", description: "Optional project context (alias for project)" },
             tags: { type: "array", items: { type: "string" } }
           },
           required: ["id", "category", "content"]
@@ -311,6 +313,7 @@ export const ALL_TOOLS = [
           properties: {
             id: { type: "number", description: "Memory ID to invalidate" },
             project: { type: "string" },
+            active_project: { type: "string", description: "Optional project context (alias for project)" },
             reason: { type: "string", description: "Reason for invalidating this memory" }
           },
           required: ["id"]
@@ -322,7 +325,8 @@ export const ALL_TOOLS = [
         inputSchema: {
           type: "object",
           properties: {
-            active_project: { type: "string" },
+            active_project: { type: "string", description: "The active project context (alias for project)" },
+            project: { type: "string", description: "The active project context (alias for active_project)" },
             category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
             query: { type: "string" },
             limit: { type: "number", default: 3 },
@@ -354,7 +358,8 @@ export const ALL_TOOLS = [
         inputSchema: {
           type: "object",
           properties: {
-            project: { type: "string", description: "The project name to compile state for." }
+            project: { type: "string", description: "The project name to compile state for." },
+            active_project: { type: "string", description: "Optional alias for project" }
           },
           required: ["project"]
         }
@@ -379,6 +384,7 @@ export const ALL_TOOLS = [
           properties: {
             category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
             project: { type: "string", description: "Filter by project name" },
+            active_project: { type: "string", description: "Optional project filter (alias for project)" },
             limit: { type: "number", default: 10 }
           },
           required: ["category"]
@@ -485,7 +491,9 @@ export const ALL_TOOLS = [
           type: "object",
           properties: {
             id: { type: "number", description: "The numeric ID of the memory to delete" },
-            source_project: { type: "string", description: "The project name if this is a project-specific SQLite memory. Leave empty for Global PG memories." }
+            source_project: { type: "string", description: "The project name if this is a project-specific SQLite memory. Leave empty for Global PG memories." },
+            project: { type: "string", description: "Optional alias for source_project" },
+            active_project: { type: "string", description: "Optional alias for source_project" }
           },
           required: ["id"]
         }
@@ -498,6 +506,7 @@ export const ALL_TOOLS = [
           properties: {
             id: { type: "number", description: "The numeric ID of the memory to update" },
             source_project: { type: "string", description: "The project name if this is a project-specific SQLite memory. Leave empty for Global PG memories." },
+            active_project: { type: "string", description: "Optional alias for source_project" },
             content: { type: "string", description: "New content (triggers re-embedding)" },
             tags: { type: "array", items: { type: "string" } },
             project: { type: "string", description: "New project assignment" }
@@ -622,6 +631,7 @@ export const ALL_TOOLS = [
           properties: {
             category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
             project: { type: "string", description: "Optional: only consolidate memories for this project" },
+            active_project: { type: "string", description: "Optional project filter (alias for project)" },
             threshold: { type: "number", default: 0.15, description: "Cosine distance threshold — pairs closer than this are considered duplicates" },
             dry_run: { type: "boolean", default: false, description: "If true, only preview matches without merging" }
           },
@@ -666,6 +676,7 @@ export const ALL_TOOLS = [
             key: { type: "string" },
             value: { type: "string" },
             kind: { type: "string", enum: ['project', 'user', 'agent'] },
+            project: { type: "string", description: "The project context (alias for active_project)." },
             active_project: { type: "string", description: "The active project context. Required for 'project' kind nuggets." }
           },
           required: ["key", "value"]
@@ -680,6 +691,7 @@ export const ALL_TOOLS = [
             query: { type: "string" },
             kinds: { type: "array", items: { type: "string", enum: ['project', 'user', 'agent'] } },
             limit: { type: "number", default: 3 },
+            project: { type: "string", description: "The project context (alias for active_project)." },
             active_project: { type: "string", description: "The active project context. Required to retrieve 'project' kind nuggets." }
           },
           required: ["query"]
@@ -692,6 +704,7 @@ export const ALL_TOOLS = [
           type: "object",
           properties: {
             key: { type: "string" },
+            project: { type: "string", description: "The project context (alias for active_project)." },
             active_project: { type: "string", description: "The active project context. Required to delete 'project' kind nuggets." }
           },
           required: ["key"]
@@ -704,6 +717,7 @@ export const ALL_TOOLS = [
           type: "object",
           properties: {
             kinds: { type: "array", items: { type: "string", enum: ['project', 'user', 'agent'] } },
+            project: { type: "string", description: "The project context (alias for active_project)." },
             active_project: { type: "string", description: "The active project context. Required to list 'project' kind nuggets." }
           }
         }
