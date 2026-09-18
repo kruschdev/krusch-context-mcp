@@ -33,15 +33,16 @@ Krusch Context MCP decouples into a 13-tool Core with modular companion extensio
 
 ### `krusch_context_retrieve`
 
-**Polygres-Inspired Unified Context Retrieval**: Single-query hybrid retrieval engine that combines dense HNSW vector search, multi-hop graph walks (`graph_hops`), stage-aware context pruning, and server-side token budget packing (`limit_tokens`) into a single Markdown context payload. Cross-references episodic memory and objective PG-Git codebase blobs and AST symbols in a single call.
+**Polygres-Inspired Unified Context Retrieval**: Single-query hybrid retrieval engine that combines dense HNSW vector search, multi-hop graph walks (`graph_hops`), stage-aware context pruning, and server-side token budget packing (`limit_tokens`) into a single Markdown context payload. Cross-references episodic memory and objective PG-Git codebase blobs and AST symbols in a single call. Auto-detects the active repository if `project` is omitted.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `query` | `string` | ✅ | — | Natural language retrieval query |
-| `project` | `string` | ❌ | `null` | Target project or repository filter |
+| `project` | `string` | ❌ | Auto-detected | Target project or repository filter (defaults to current repository) |
 | `graph_hops` | `number` | ❌ | `1` | Graph traversal depth (hops) across `code_symbol_edges` and `memory_to_blob_edges` |
 | `limit_tokens` | `number` | ❌ | `4000` | Hard token budget limit for packed context payload |
 | `include_code` | `boolean` | ❌ | `true` | Whether to include matching PG-Git codebase blobs and symbols alongside episodic memory |
+| `include_state` | `boolean` | ❌ | `false` | Prepend compiled project state briefing (priorities, blockers, lessons) directly into packed payload |
 
 **Example call:**
 ```json
@@ -50,7 +51,8 @@ Krusch Context MCP decouples into a 13-tool Core with modular companion extensio
   "project": "krusch-context-mcp",
   "graph_hops": 2,
   "limit_tokens": 3500,
-  "include_code": true
+  "include_code": true,
+  "include_state": true
 }
 ```
 
@@ -60,11 +62,12 @@ Krusch Context MCP decouples into a 13-tool Core with modular companion extensio
 
 ### `krusch_context_compile_state`
 
-**Contextmaxxing**: Proactively compile a comprehensive, structured Markdown document of a project's current state. This gathers recent priorities, outcomes, lessons, and behavioral nudges into a single payload, avoiding the need for multiple independent semantic searches.
+**Contextmaxxing**: Proactively compile a comprehensive, structured Markdown document of a project's current state. This gathers recent priorities, outcomes, lessons, behavioral nudges, and working tree freshness alerts into a single payload, avoiding the need for multiple independent semantic searches. Auto-detects the active repository if `project` is omitted.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `project` | `string` | ✅ | — | The target project string to compile state for |
+| `project` | `string` | ❌ | Auto-detected | The target project string to compile state for (defaults to active repository) |
+| `active_project` | `string` | ❌ | `null` | Alias for `project` |
 
 **Example call:**
 ```json
@@ -72,6 +75,7 @@ Krusch Context MCP decouples into a 13-tool Core with modular companion extensio
   "project": "pocket-lawyer"
 }
 ```
+*(Or call with `{}` to auto-detect the current repository)*
 
 ---
 

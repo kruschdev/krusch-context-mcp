@@ -5,6 +5,7 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
 import { generateTagsFromLLM } from './llm-tags.js';
 import { isPgContextEnabled, syncPgContextPoints } from './pgcontext-helper.js';
+import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
 
 /**
  * Filter memory records to return only valid, non-superseded, non-invalidated records.
@@ -585,9 +586,9 @@ export async function listMemories({ category, project, active_project, limit = 
  * @param {string} params.project - Target project string.
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function compileProjectState({ project, active_project }) {
-    const targetProject = project || active_project;
-    if (!targetProject) throw new McpError(ErrorCode.InvalidParams, "Missing project");
+export async function compileProjectState({ project, active_project } = {}) {
+    const targetProject = project || active_project || detectCurrentProject();
+    if (!targetProject) throw new McpError(ErrorCode.InvalidParams, "Missing project (could not auto-detect active project)");
 
     const state = { priorities: [], outcomes: [], activity: [], lessons: [], nudges: [] };
     const db = await getProjectDb(targetProject);
@@ -622,7 +623,7 @@ export async function compileProjectState({ project, active_project }) {
             state.nudges.push(...nudgeRows);
         }
         try {
-            const res = await client.query(`SELECT key, value, kind FROM ide_agent_nuggets WHERE kind IN ('project', 'agent') AND (project = $1 OR project IS NULL)`, [project]);
+            const res = await client.query(`SELECT key, value, kind FROM ide_agent_nuggets WHERE kind IN ('project', 'agent') AND (project = $1 OR project IS NULL)`, [targetProject]);
             state.nudges.push(...res.rows);
         } catch (e) {
             console.warn(`[krusch-context] Warning: Global nudges fetch failed (${e.message})`);
@@ -638,7 +639,7 @@ export async function compileProjectState({ project, active_project }) {
                 AND (project = $1 OR $1 = ANY(ontology_tags))
                 AND ontology_tags && ARRAY['commitment', 'escalation', 'decision']::text[]
                 ORDER BY created_at DESC LIMIT 5
-            `, [project]);
+            `, [targetProject]);
             state.actionable = res.rows;
         } catch (e) {
             console.warn(`[krusch-context] Warning: Actionable states fetch failed (${e.message})`);
@@ -653,7 +654,7 @@ export async function compileProjectState({ project, active_project }) {
     }
     const uniqueNudges = Array.from(uniqueNudgesMap.values());
 
-    let output = `# 🧠 Compiled Project State: ${project}\n\n`;
+    let output = `# 🧠 Compiled Project State: ${targetProject}\n\n`;
 
     output += `## 🎯 Priorities (Current Focus)\n`;
     if (state.priorities.length === 0) output += `- No recent priorities found.\n`;
@@ -689,6 +690,11 @@ export async function compileProjectState({ project, active_project }) {
     for (const a of state.actionable) {
         const tags = a.ontology_tags ? `[${a.ontology_tags.join(', ')}] ` : '';
         output += `- ${tags}${a.content}\n`;
+    }
+
+    const worktree = getWorktreeStatus();
+    if (worktree.isDirty) {
+        output += `\n---\n> ${worktree.message}\n`;
     }
 
     return { content: [{ type: "text", text: output }] };

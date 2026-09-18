@@ -2,15 +2,24 @@
 
 You are connected to `krusch-context-mcp`, a persistent working memory and structural codebase retrieval engine. Follow these lifecycle protocols:
 
-## 1. Session Initialization (State Briefing)
+## 1. Session Initialization (Compound Retrieval & State Briefing)
 At the beginning of your session or before tackling a complex task:
-- Call `krusch_context_compile_state`:
+- **One-Turn Compound Retrieval (Recommended)**: Call `krusch_context_retrieve` with `include_state: true` to pack project priorities, blockers, lessons, and code context in a single turn:
   ```json
   {
-    "project": "<project_name>"
+    "query": "<task or technical topic>",
+    "include_state": true,
+    "graph_hops": 2,
+    "limit_tokens": 3500,
+    "include_code": true
   }
   ```
-- Review recent priorities, unresolved blockers, and recent lessons learned before planning or writing code.
+  *(Note: `project` is automatically detected from your workspace directory if omitted!)*
+- **Or Standalone State Briefing**: Call `krusch_context_compile_state` (`project` is optional with auto-detection):
+  ```json
+  {}
+  ```
+- Review recent priorities, unresolved blockers, worktree freshness alerts, and recent lessons learned before planning or writing code.
 
 ## 2. Code Context & Graph Grounding
 Before proposing architectural edits or deep multi-file changes:

@@ -5,9 +5,19 @@ This project uses `krusch-context-mcp` for cross-session working memory, structu
 ## Standard Tool Calling Lifecycle
 
 ### 1. At Start of Work / New Session
-Call `krusch_context_compile_state` to hydrate current project priorities, known blockers, and lessons learned:
+Call `krusch_context_retrieve` with `include_state: true` to hydrate current project state alongside code context in a single turn (workspace project is automatically detected if omitted):
 ```javascript
-krusch_context_compile_state({ project: "<project_name>" });
+krusch_context_retrieve({
+  query: "<task context>",
+  include_state: true,
+  graph_hops: 2,
+  limit_tokens: 3500,
+  include_code: true
+});
+```
+Or inspect the compiled state briefing standalone (`project` is optional with auto-detection):
+```javascript
+krusch_context_compile_state({});
 ```
 
 ### 2. Before Non-Trivial Code Modifications

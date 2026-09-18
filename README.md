@@ -47,7 +47,8 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 ## 🏛️ Core Capabilities: The 5 Pillars
 
 ### 1. 🔍 Unified Hybrid Retrieval (`krusch_context_retrieve`)
-* **Single-Call Context Packing**: Combines dense vector similarity with multi-hop graph walks and server-side token budget packing (`limit_tokens`) into a single Markdown payload.
+* **Compound One-Shot Retrieval (`include_state: true`)**: Retrieves the compiled project state briefing (priorities, blockers, lessons, steering rules) alongside code and symbol graphs in a single round-trip turn within your token budget.
+* **Auto-Detecting Project Scope**: Automatically resolves the current workspace project from the active working directory, `package.json`, or Git repository if `project` is omitted across all core retrieval and memory tools.
 * **Bi-Directional Grounding**: Cross-references subjective episodic memory (lessons, bugs, decisions) alongside objective code blobs and symbols in a single turn.
 * **Token Budget Awareness**: Automatically ranks and truncates contextual snippets to prevent prompt overflows.
 
@@ -59,7 +60,7 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 * **Standalone Synergy**: 100% schema-compatible with [PG-Git](https://github.com/kruschdev/pg-git) (`pg-git-mcp@1.1.0`), supporting dedicated `pg_git_*` aliases.
 
 ### 3. 🧠 Episodic Memory & Steering Nuggets (With Active Hygiene)
-* **Deterministic State Briefing (`compile_state`)**: Compiles project state (priorities, active blockers, lessons, steering rules) into a single-shot briefing document.
+* **Deterministic State Briefing (`compile_state`)**: Compiles project state (priorities, active blockers, lessons, steering rules) and working tree freshness alerts into a single-shot briefing document. Project parameter is optional with auto-detection.
 * **Temporal Superseding (`supersede_memory`)**: Supersede outdated rules with lineage links and auto-marking of stale facts as `SUPERSEDED`.
 * **Explicit Invalidation (`invalidate_memory`)**: Mark revoked secrets, obsolete invariants, or abandoned rules as `INVALIDATED` to guarantee they are never retrieved.
 * **Persistent Steering Nuggets (`nugget_remember`)**: Micro-key-value rules and conventions (coding standards, architectural constraints) that steer agent behavior without prompt bloat.
@@ -221,12 +222,13 @@ Restart your IDE — your agent now has immediate access to the **13 core contex
 
 ## 💡 Practical Agent Workflows (Core Profile & Polygres)
 
-### Workflow 1: Single-Turn Hybrid Retrieval (`krusch_context_retrieve`)
+### Workflow 1: Compound One-Shot Hybrid Retrieval (`krusch_context_retrieve`)
 ```javascript
-// Retrieve vector context, 2-hop symbol dependencies, and memories packed under 3500 tokens
+// Retrieve vector context, 2-hop symbol graph, memories, AND compiled project state in 1 turn
+// (project is automatically resolved from git/package.json if omitted!)
 await krusch_context_retrieve({
   query: "Postgres connection pooling and idle timeout settings",
-  project: "krusch-context-mcp",
+  include_state: true,
   graph_hops: 2,
   limit_tokens: 3500,
   include_code: true
@@ -235,10 +237,9 @@ await krusch_context_retrieve({
 
 ### Workflow 2: One-Shot State Briefing (`krusch_context_compile_state`)
 ```javascript
-// Instant project briefing — returns recent priorities, blockers, and lessons in one payload
-await krusch_context_compile_state({
-  project: "krusch-context-mcp"
-});
+// Instant project briefing — auto-detects active workspace project from cwd/git
+// Returns recent priorities, blockers, lessons, steering rules, and worktree freshness
+await krusch_context_compile_state({});
 ```
 
 ### Workflow 3: Code Symbol & Caller Exploration
@@ -315,9 +316,15 @@ Context engines only deliver value when coding models actively query and maintai
 | **Windsurf / Antigravity** | [AGENTS.md](AGENTS.md) | Root `AGENTS.md` |
 
 ### Core Agent Routine:
-1. **Session Start**: Model calls `krusch_context_compile_state` to hydrate active blockers, recent priorities, and lessons.
+1. **Session Start (1-Turn Compound Retrieval)**: Model calls `krusch_context_retrieve({ query: "...", include_state: true })` (or native `session_start` prompt) to hydrate active blockers, recent priorities, lessons, steering rules, and code context in a single turn. Workspace project is automatically resolved if omitted!
 2. **Before Edits**: Model calls `krusch_context_retrieve` and `krusch_context_nugget_nudges` to ground context and enforce project rules.
 3. **When Decisions Change**: Model calls `krusch_context_supersede_memory` or `krusch_context_invalidate_memory` to keep the working memory pristine.
+4. **Pre-Commit**: Model verifies compliance with `krusch_context_nugget_nudges` (or native `pre_commit` prompt) before committing changes.
+
+### Native Core MCP Prompts
+Krusch Context provides built-in MCP prompts (supported out-of-the-box in Cursor, Claude Code, and Antigravity) without requiring optional extensions:
+* `session_start`: Prompts the model to hydrate working context via compound retrieval or compile_state.
+* `pre_commit`: Prompts the model to audit staged changes against project steering nuggets and verify memory cleanliness.
 
 ---
 
@@ -328,18 +335,18 @@ For complete parameter types, input schemas, and JSON examples, see **[TOOL_REFE
 ### Core Profile (13 Tools — Sovereign Default)
 | Category | Tool | Description |
 | :--- | :--- | :--- |
-| **Retrieval** | `krusch_context_retrieve` | Polygres-style single-query hybrid vector + graph walk + token budget packing |
+| **Retrieval** | `krusch_context_retrieve` | Polygres-style single-query hybrid vector + graph walk + token budget packing (supports compound `include_state: true`) |
 | **Memory** | `krusch_context_add_memory` | Store persistent episodic memory (priorities, bugs, outcomes, lessons, activity) |
 | **Memory** | `krusch_context_supersede_memory` | Temporal fact superseding with lineage tracking (marks old record `SUPERSEDED`) |
 | **Memory** | `krusch_context_invalidate_memory` | Explicitly invalidate obsolete rules/facts (marks record `INVALIDATED`) |
 | **Memory** | `krusch_context_search_memory`| Semantic search with recency decay (excludes superseded/invalidated facts) |
-| **State** | `krusch_context_compile_state` | One-shot multi-scale project state compilation briefing |
+| **State** | `krusch_context_compile_state` | One-shot multi-scale project state compilation briefing (auto-detects project if omitted) |
 | **Nuggets** | `krusch_context_nugget_remember`| Store fast key-value steering fact or convention (project/user/agent) |
 | **Nuggets** | `krusch_context_nugget_nudges` | Semantically retrieve steering facts for the active task |
 | **Codebase** | `krusch_context_search_symbols`| Search extracted structural symbols (functions, classes, routes) across JS, TS, Python, Go, Rust |
 | **Codebase** | `krusch_context_symbol_graph` | Walk relational symbol dependency edges, inbound callers, and outbound imports |
 | **Codebase** | `krusch_context_search_code` | Hybrid dense pgvector + BM25 RRF search over Git blobs with age decay |
-| **Health** | `krusch_context_health` | Diagnostic health check for DB pool, embeddings, and repository status |
+| **Health** | `krusch_context_health` | Diagnostic health check for DB pool, embeddings, and repository / worktree freshness status |
 | **Safety** | `krusch_context_proactive_nudge`| Proactive threat auditor — flags rule violations or known bug regressions |
 
 ### ⚡ Polygres Cloud Companion Tools (5 Tools)

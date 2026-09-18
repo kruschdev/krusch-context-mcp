@@ -58,6 +58,7 @@ import { pool } from '../db/pool.js';
 import { detectPgContext, initPgContextCollections, isPgContextEnabled } from './pgcontext-helper.js';
 import { unifiedRetrieve } from './unified-retrieval.js';
 import { loadExtensions, resolveExtension } from './extensions/index.js';
+import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
 
 // Verify core database connection and tables
 async function verifyDatabase() {
@@ -216,7 +217,8 @@ export const CORE_TOOL_DEFINITIONS = [
         project: { type: "string" },
         graph_hops: { type: "number", default: 1 },
         limit_tokens: { type: "number", default: 4000 },
-        include_code: { type: "boolean", default: true }
+        include_code: { type: "boolean", default: true },
+        include_state: { type: "boolean", default: false, description: "Optionally prepend compiled project state briefing directly into the packed payload" }
       },
       required: ["query"]
     }
@@ -287,13 +289,14 @@ export const CORE_TOOL_DEFINITIONS = [
   },
   {
     name: "krusch_context_compile_state",
-    description: "Compile a consolidated project state briefing (active priorities, recent blockers, outcome history, steering nuggets).",
+    description: "Compile a consolidated project state briefing (active priorities, recent blockers, outcome history, steering nuggets). Auto-detects project if omitted.",
     inputSchema: {
       type: "object",
       properties: {
-        project: { type: "string", description: "The project to compile state for." }
+        project: { type: "string", description: "The project to compile state for. Defaults to detected active project if omitted." },
+        active_project: { type: "string", description: "Alias for project" }
       },
-      required: ["project"]
+      required: []
     }
   },
   {
@@ -591,11 +594,12 @@ async function handleListRepos() {
 async function handleSearchCode(args) {
   const { query: searchQuery, limit = 5, project, repository_id } = args;
   let resolvedRepoId = repository_id;
-  if (project && !resolvedRepoId) {
-      const repoRes = await pool.query(`SELECT id FROM repositories WHERE name = $1`, [project]);
+  const targetProject = project || detectCurrentProject();
+  if (targetProject && !resolvedRepoId) {
+      const repoRes = await pool.query(`SELECT id FROM repositories WHERE name = $1`, [targetProject]);
       if (repoRes.rows.length > 0) {
           resolvedRepoId = repoRes.rows[0].id;
-      } else {
+      } else if (project) {
           throw new McpError(ErrorCode.InvalidParams, `Project '${project}' not found in PG-Git. Use krusch_context_list_repos to verify exact repository names.`);
       }
   }
@@ -691,8 +695,9 @@ async function handleReadBlob(args) {
 async function handleSearchSymbols(args) {
   const { query, limit = 20, repository_id, project } = args;
   let resolvedRepoId = repository_id;
-  if (project && !resolvedRepoId) {
-    const repoRes = await pool.query('SELECT id FROM repositories WHERE name = $1', [project]);
+  const targetProject = project || detectCurrentProject();
+  if (targetProject && !resolvedRepoId) {
+    const repoRes = await pool.query('SELECT id FROM repositories WHERE name = $1', [targetProject]);
     if (repoRes.rows.length > 0) resolvedRepoId = repoRes.rows[0].id;
   }
   const symbols = await searchSymbols(query, limit, resolvedRepoId);
@@ -720,8 +725,9 @@ async function handleFileSymbols(args) {
 async function handleSymbolGraph(args) {
   const { symbol_name, repository_id, project, depth = 2 } = args;
   let resolvedRepoId = repository_id;
-  if (project && !resolvedRepoId) {
-    const repoRes = await pool.query('SELECT id FROM repositories WHERE name = $1', [project]);
+  const targetProject = project || detectCurrentProject();
+  if (targetProject && !resolvedRepoId) {
+    const repoRes = await pool.query('SELECT id FROM repositories WHERE name = $1', [targetProject]);
     if (repoRes.rows.length > 0) resolvedRepoId = repoRes.rows[0].id;
   }
   const graph = await getSymbolGraph(symbol_name, resolvedRepoId, depth);
@@ -765,6 +771,14 @@ async function handleHealthCheck() {
   if (v2Count > 0) {
     text += `\n- Company Brain states (v2): ${v2Count}`;
   }
+
+  const worktree = getWorktreeStatus();
+  if (worktree.isDirty) {
+    text += `\n- Worktree Status: ${worktree.message}`;
+  } else {
+    text += `\n- Worktree Status: 🟢 Clean (synchronized with Git HEAD)`;
+  }
+
   return { content: [{ type: "text", text }] };
 }
 
@@ -823,27 +837,88 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools };
 });
 
+export const CORE_PROMPTS = [
+  {
+    name: "session_start",
+    description: "Initializes coding agent working memory: hydrates compiled project state, priorities, and steering conventions.",
+    arguments: [
+      { name: "project", description: "Target project name (auto-detected if omitted)", required: false }
+    ],
+    generateMessages: (args) => {
+      const proj = args?.project || detectCurrentProject() || "current project";
+      return [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Please initialize the session for '${proj}' using krusch-context-mcp:\n` +
+                  `1. Call krusch_context_compile_state to review active priorities, recent lessons, and blockers.\n` +
+                  `2. Call krusch_context_nugget_nudges to load active project conventions and steering rules.\n` +
+                  `3. Report a concise briefing before proposing any code edits.`
+          }
+        }
+      ];
+    }
+  },
+  {
+    name: "pre_commit",
+    description: "Pre-commit verification prompt: audits uncommitted changes against steering rules and updates memory.",
+    arguments: [
+      { name: "project", description: "Target project name (auto-detected if omitted)", required: false }
+    ],
+    generateMessages: (args) => {
+      const proj = args?.project || detectCurrentProject() || "current project";
+      return [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Before committing changes in '${proj}':\n` +
+                  `1. Call krusch_context_nugget_nudges to ensure changes comply with all project conventions.\n` +
+                  `2. If any architectural decisions or bug workarounds changed, record them via krusch_context_add_memory or supersede outdated ones via krusch_context_supersede_memory.\n` +
+                  `3. Remind to run 'npm run snapshot -- .' if new files were created to synchronize PG-Git symbol graphs.`
+          }
+        }
+      ];
+    }
+  }
+];
+
 server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  const prompts = CORE_PROMPTS.map(p => ({
+    name: p.name,
+    description: p.description,
+    arguments: p.arguments || []
+  }));
+
   const skillsExt = activeExtensions.find(e => e.name === 'skills-docs');
   if (skillsExt) {
     const { listSkills } = await import('./extensions/skills-docs/skills-engine.js');
     const skills = listSkills();
-    return {
-      prompts: skills.map(s => ({
-        name: s.name,
-        description: s.description,
-        arguments: s.argumentHint ? [{ name: "argument", description: s.argumentHint, required: false }] : []
-      }))
-    };
+    prompts.push(...skills.map(s => ({
+      name: s.name,
+      description: s.description,
+      arguments: s.argumentHint ? [{ name: "argument", description: s.argumentHint, required: false }] : []
+    })));
   }
-  return { prompts: [] };
+
+  return { prompts };
 });
 
 server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const promptName = request.params.name;
+  const corePrompt = CORE_PROMPTS.find(p => p.name === promptName);
+  if (corePrompt) {
+    return {
+      description: corePrompt.description,
+      messages: corePrompt.generateMessages(request.params.arguments || {})
+    };
+  }
+
   const skillsExt = activeExtensions.find(e => e.name === 'skills-docs');
   if (skillsExt) {
     const { getSkill } = await import('./extensions/skills-docs/skills-engine.js');
-    const skill = getSkill(request.params.name);
+    const skill = getSkill(promptName);
     if (skill) {
       return {
         description: skill.description,
@@ -851,7 +926,8 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
       };
     }
   }
-  throw new McpError(ErrorCode.InvalidParams, `Prompt '${request.params.name}' not found.`);
+
+  throw new McpError(ErrorCode.InvalidParams, `Prompt '${promptName}' not found.`);
 });
 
 const tracer = trace.getTracer('krusch-context-mcp');

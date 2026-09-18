@@ -14,6 +14,8 @@ import { isPgContextEnabled } from './pgcontext-helper.js';
 import { searchBlobs } from './git-engine.js';
 import { selectMinimalCoveringSet } from './setwise-engine.js';
 import { prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from './prune-helper.js';
+import { detectCurrentProject } from './project-helper.js';
+import { compileProjectState } from './memory-engine.js';
 
 
 const DECAY_RATE = 0.01; // Exponential time decay rate per day
@@ -250,11 +252,14 @@ async function traverseGraphNeighbors(seedItems, hops = 1) {
  * @param {string} [params.project] - Active project scope
  * @param {number} [params.graph_hops=1] - Hops for graph expansion (0..2)
  * @param {number} [params.limit_tokens=4000] - Hard token budget
- * @param {boolean} [params.include_code=true] - Whether to search code blobs
+ * @param {boolean} [params.include_state=false] - Whether to prepend compiled project state briefing
+ * @param {boolean} [params.setwise_rerank=false] - Whether to apply Setwise minimal cover
  * @returns {Promise<{content: Array}>} MCP Tool Output
  */
-export async function unifiedRetrieve({ query, project, graph_hops = 1, limit_tokens = 4000, include_code = true, setwise_rerank = false }) {
+export async function unifiedRetrieve({ query, project, graph_hops = 1, limit_tokens = 4000, include_code = true, include_state = false, setwise_rerank = false }) {
     if (!query) return { content: [{ type: "text", text: "Error: Missing required query parameter." }] };
+
+    const resolvedProject = project || detectCurrentProject();
 
     // 1. Stage-Aware Pre-Retrieval Pruning (arXiv: 2608.08389)
     const cleanedQuery = prunePreRetrieval(query);
@@ -264,8 +269,8 @@ export async function unifiedRetrieve({ query, project, graph_hops = 1, limit_to
     if (!queryEmbedding) return { content: [{ type: "text", text: "Error: Failed to generate query embedding." }] };
 
     // 3. Fetch seed nodes (Memories + Steering Nuggets)
-    const seedMemories = await getSeedMemories(queryEmbedding, project, 10);
-    const seedNuggets = await getSeedNuggets(queryEmbedding, project, 5);
+    const seedMemories = await getSeedMemories(queryEmbedding, resolvedProject, 10);
+    const seedNuggets = await getSeedNuggets(queryEmbedding, resolvedProject, 5);
     
     let allCandidates = [...seedMemories, ...seedNuggets];
 
@@ -298,16 +303,31 @@ export async function unifiedRetrieve({ query, project, graph_hops = 1, limit_to
         expandedGraphItems = selectMinimalCoveringSet(expandedGraphItems, query, 10);
     }
 
-    // 8. Server-Side Token Budget Accumulator (Pre-Synthesis Pruned)
-    const { contextText, packedCount, totalTokens } = packTokenBudget(expandedGraphItems, limit_tokens);
+    // 8. Optional Pre-compiled Project State Briefing
+    let stateBriefing = '';
+    if (include_state && resolvedProject) {
+        try {
+            const stateRes = await compileProjectState({ project: resolvedProject });
+            if (stateRes && stateRes.content && stateRes.content[0]?.text) {
+                stateBriefing = stateRes.content[0].text + '\n\n---\n\n';
+            }
+        } catch (err) {
+            console.warn(`[unifiedRetrieve] Failed to compile project state: ${err.message}`);
+        }
+    }
+
+    // 9. Server-Side Token Budget Accumulator (Pre-Synthesis Pruned)
+    const stateTokens = estimateTokens(stateBriefing);
+    const remainingBudget = Math.max(limit_tokens - stateTokens, 1000);
+    const { contextText, packedCount, totalTokens } = packTokenBudget(expandedGraphItems, remainingBudget);
 
     const summaryHeader = `## 🧠 Unified Context Retrieval\n` +
-        `**Query**: "${query}" | **Project**: ${project || 'Global'} | **Graph Hops**: ${graph_hops} | **Setwise Rerank**: ${setwise_rerank} | **Packed**: ${packedCount} items (~${totalTokens} tokens / max ${limit_tokens})\n\n`;
+        `**Query**: "${query}" | **Project**: ${resolvedProject || 'Global'} | **Graph Hops**: ${graph_hops} | **State Included**: ${include_state} | **Setwise Rerank**: ${setwise_rerank} | **Packed**: ${packedCount} items (~${totalTokens + stateTokens} tokens / max ${limit_tokens})\n\n`;
 
     return {
         content: [{
             type: "text",
-            text: summaryHeader + contextText
+            text: summaryHeader + stateBriefing + contextText
         }]
     };
 }
