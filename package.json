@@ -25,9 +25,17 @@
   },
   "keywords": [
     "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "context-engine",
+    "coding-agents",
+    "cursor-ide",
+    "claude-code",
+    "windsurf",
     "semantic-search",
     "pgvector",
-    "context-engine"
+    "episodic-memory",
+    "memory-hygiene"
   ],
   "author": "kruschdev",
   "license": "MIT",

@@ -58,11 +58,11 @@ Krusch Context MCP decouples into a 13-tool Core with modular companion extensio
 
 ---
 
-## Contextmaxxing & State Hydration
+## State Compilation & Session Hydration
 
 ### `krusch_context_compile_state`
 
-**Contextmaxxing**: Proactively compile a comprehensive, structured Markdown document of a project's current state. This gathers recent priorities, outcomes, lessons, behavioral nudges, and working tree freshness alerts into a single payload, avoiding the need for multiple independent semantic searches. Auto-detects the active repository if `project` is omitted.
+**State Compilation**: Proactively compile a comprehensive, structured Markdown document of a project's current state. This gathers recent priorities, outcomes, lessons, behavioral steering nudges, and working tree freshness alerts into a single payload, avoiding the need for multiple independent semantic searches. Auto-detects the active repository if `project` is omitted.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

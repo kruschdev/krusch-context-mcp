@@ -88,14 +88,17 @@ describe('Tool Contract & Profile Invariant Suite', () => {
       path.join(ROOT_DIR, 'AGENTS.md'),
       path.join(ROOT_DIR, 'docs', 'TOOL_REFERENCE.md'),
       path.join(ROOT_DIR, 'docs', 'cloud_integration_post.md'),
-      path.join(ROOT_DIR, 'docs', 'polygres_050_announcement_post.md')
+      path.join(ROOT_DIR, 'docs', 'polygres_050_announcement_post.md'),
+      path.join(ROOT_DIR, '.env.example')
     ];
 
     const forbiddenPatterns = [
       { pattern: /64 tools/i, label: 'stale 64 tools claim' },
       { pattern: /18\s+tools\s+with\s+polygres/i, label: 'stale 18 tools with cloud claim' },
       { pattern: /31\s+with\s+polygres/i, label: 'stale 31 with cloud claim' },
-      { pattern: /11\s+core\s+tools/i, label: 'stale 11 core tools claim' }
+      { pattern: /11\s+core\s+tools/i, label: 'stale 11 core tools claim' },
+      { pattern: /25\s+tools/i, label: 'stale 25 tools extended claim (should be 26)' },
+      { pattern: /extended.*\(25\)/i, label: 'stale extended (25) claim' }
     ];
 
     for (const filePath of filesToAudit) {
@@ -104,6 +107,15 @@ describe('Tool Contract & Profile Invariant Suite', () => {
       for (const { pattern, label } of forbiddenPatterns) {
         assert.ok(!pattern.test(content), `File ${path.basename(filePath)} contains forbidden pattern: ${label}`);
       }
+    }
+
+    // Also verify CHANGELOG.md latest release section reflects current 26 and 61 counts
+    const changelogPath = path.join(ROOT_DIR, 'CHANGELOG.md');
+    if (fs.existsSync(changelogPath)) {
+      const changelog = fs.readFileSync(changelogPath, 'utf-8');
+      const latestSection = changelog.split('## [1.6.0]')[0] || '';
+      assert.ok(latestSection.includes('26 tools total'), 'CHANGELOG [1.6.1] must specify 26 tools total for extended profile');
+      assert.ok(latestSection.includes('61 tools'), 'CHANGELOG [1.6.1] must specify 61 tools for full monolithic suite');
     }
   });
 });
