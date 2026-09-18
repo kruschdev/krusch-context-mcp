@@ -26,6 +26,7 @@ cp .env.example .env
 | `EMBED_MODEL` | Embedding model identifier | `bge-large` |
 | `EMBED_DIMS` | Embedding vector dimensions (must match Postgres schema) | `1024` |
 | `TAG_MODEL` | Model for tag extraction | `llama3.2` |
+| `OPENROUTER_API_KEY` | Turnkey OpenRouter API key for zero-VRAM remote embeddings (`baai/bge-large-en-v1.5`) and completions (`llama-3.2-3b-instruct`) | *(none)* |
 | `COMPLETION_URL` | Custom OpenAI-compatible completion API URL (e.g., `http://localhost:8080/v1/chat/completions`) | *(none)* |
 | `COMPLETION_API_KEY` | Custom API Key for completions (if required) | *(none)* |
 | `COMPLETION_MODEL` | Custom model identifier to send to custom completion API | *(none)* |
@@ -50,6 +51,9 @@ All first-party tables (`ide_agent_memory`, `interaction_memory`,
 Polygres “zero-client” embeddings are convenient, not dimension-compatible
 with the local 1024-d schema unless you pin a 1024-d model or recreate
 vector columns. Never mix models in one table.
+
+> [!NOTE]
+> **Polygres Cloud + OpenRouter Tagging**: Polygres handles in-engine vectorization and database persistence, but does not provide LLM text generation. For automated episodic memory tagging in a cloud-backed zero-GPU setup, configure `OPENROUTER_API_KEY="sk-or-v1-..."` (defaults to `meta-llama/llama-3.2-3b-instruct`). Without an LLM key, Krusch Context uses deterministic heuristic keyword extraction.
 
 ---
 

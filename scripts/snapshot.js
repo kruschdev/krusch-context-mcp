@@ -7,6 +7,7 @@ import { query, pool } from '../db/pool.js';
 import { hashContent } from '../src/git-engine.js';
 import { getEmbedding, getChunkedCentroidEmbedding, isEmbeddable, MAX_EMBED_CHARS, ollamaQueue, PRIORITY } from '../src/embedding-helper.js';
 import { extractSymbolsAndImports } from '../src/ast-chunker.js';
+import { chat } from '../src/llm.js';
 
 const EXCLUDED_DIRS = new Set([
     '.git', 'node_modules', 'dist', 'dist-ext', 'build', '__pycache__', 'data', 'tmp',
@@ -26,6 +27,20 @@ async function generateInlineSummary(text, fileName) {
         return defaultSummary;
     }
     if (text.length < 50) return defaultSummary;
+
+    if (process.env.OPENROUTER_API_KEY || process.env.COMPLETION_URL) {
+        try {
+            const summary = await chat(
+                "You are an expert code summarizer. Respond ONLY with a concise 1-line summary of what this code does.",
+                `File: ${fileName}\n\nCode:\n${text.substring(0, 3000)}`,
+                { maxTokens: 80 }
+            );
+            if (summary && summary.trim().length > 5) {
+                return summary.trim().substring(0, 500);
+            }
+        } catch (_) {}
+        return defaultSummary;
+    }
     try {
         const prompt = `Provide a concise 1-line summary of what this code does. Respond ONLY with the summary.\n\nFile: ${fileName}\n\nCode:\n${text.substring(0, 3000)}`;
         const targetModel = process.env.OLLAMA_SUMMARY_MODEL || 'qwen2.5-coder:3b';

@@ -23,13 +23,13 @@ Every new conversation started from a blank slate. Agents would:
 
 Traditional RAG tools (Pinecone, Qdrant, naive vector search) failed to solve this because they treated agent memory like a flat text index. They lacked **temporal awareness**, **steering capabilities**, **multi-agent consensus**, and **local offline capabilities**.
 
-`krusch-context-mcp` was built to be the **sovereign, zero-trust, multi-engine working memory server** for the agent era.
+`krusch-context-mcp` was built to be the **sovereign, grounded, multi-engine working memory server** for the agent era.
 
 ---
 
 ## 🏗️ 2. How Local & Remote Agents Use the MCP Server
 
-`krusch-context-mcp` exposes **64 standardized Model Context Protocol (MCP) tools** over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
+`krusch-context-mcp` organizes its functionality into a **lean 13-tool Sovereign Core** with companion extensions (totaling **61 standardized Model Context Protocol tools** across the full suite) over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
 
 ![5 Unified Memory Subsystems Architecture](assets/krusch_context_mcp_5_subsystems_diagram.png)
 
@@ -85,10 +85,10 @@ Integrates cutting-edge AI research subsystems:
 
 | Feature | Generic Vector DBs | Naive MCP Memory | `krusch-context-mcp` |
 | :--- | :---: | :---: | :---: |
-| **Protocol Support** | Proprietary REST | MCP | **Native 64-Tool MCP Surface** |
-| **Code RAG & AST Indexing** | ❌ No | ❌ No | **✅ Native Git DAG + AST Symbols + Hybrid RRF** |
+| **Protocol Support** | Proprietary REST | MCP | **13 Core (Default) · 61 Full Suite** |
+| **Code RAG & Structural Indexing** | ❌ No | ❌ No | **✅ Native Git DAG + Structural Symbols + Hybrid RRF** |
 | **Temporal Recency Decay** | ❌ No | ❌ No | **✅ Exponential Decay ($e^{-0.01t}$)** |
-| **Micro-Steering (Nuggets)** | ❌ No | ❌ No | **✅ Holographic Steering Facts** |
+| **Micro-Steering (Nuggets)** | ❌ No | ❌ No | **✅ Persistent Steering Facts** |
 | **Multi-Agent Consensus** | ❌ No | ❌ No | **✅ Company Brain v2 Substrate** |
 | **Graph-Vector Fusion** | Separate DB | ❌ No | **✅ Native `pgGraph` & Symbol Dependency Walks** |
 | **Offline Cache + Cloud Sync** | ❌ No | Local Only | **✅ SQLite Cache + Polygres.com Sync** |
@@ -129,13 +129,13 @@ Inspiration & The Origin Story
 
 In early 2026, as AI coding assistants like Cursor, Claude Code, Windsurf, and Gemini CLI became central to daily development, a critical architectural gap emerged: AI agents suffer from severe amnesia between sessions. Every new conversation started from a blank slate.
 
-Traditional RAG tools (Pinecone, Qdrant, naive vector search) failed to solve this because they treated agent memory like a flat text index. They lacked temporal awareness, steering capabilities, multi-agent consensus, and local offline capabilities. krusch-context-mcp was built to be the sovereign, zero-trust, multi-engine working memory server for the agent era.
+Traditional RAG tools (Pinecone, Qdrant, naive vector search) failed to solve this because they treated agent memory like a flat text index. They lacked temporal awareness, steering capabilities, multi-agent consensus, and local offline capabilities. krusch-context-mcp was built to be the sovereign, grounded, multi-engine working memory server for the agent era.
 
 How Local & Remote Agents Use the MCP Server
 
 [INSERT IMAGE: docs/assets/krusch_context_mcp_5_subsystems_diagram.png]
 
-krusch-context-mcp exposes 64 standardized Model Context Protocol (MCP) tools over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
+krusch-context-mcp organizes into a lean 13-tool Sovereign Core (expanding to 61 tools in full multi-server mode) over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
 
 • Local Agent Support: Local agents get instant sub-5ms zero-latency reads from the project-scoped SQLite cache. No internet connection required.
 

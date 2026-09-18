@@ -637,7 +637,7 @@ Read the full content of a file by its blob SHA hash. Get blob IDs from `krusch_
 
 ### `krusch_context_deep_search`
 
-**Zero-Trust composite search.** Generates a single embedding and queries both the codebase (PG-Git blobs) and all 5 episodic memory categories simultaneously. Use this to establish a holistic baseline before starting work.
+**Grounded composite search.** Generates a single embedding and queries both the codebase (PG-Git blobs) and all 5 episodic memory categories simultaneously. Use this to establish a holistic baseline before starting work.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

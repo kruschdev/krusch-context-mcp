@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Polygres Cloud cleanly decoupled as an optional high-throughput turnkey cloud runtime and companion extension (`npm run start:cloud`), eliminating automatic vendor push.
 - **Accurate Profile Tiers**:
   - `core` (13 tools, default)
-  - `extended` (25 tools: Core + memory lifecycle, Git DAG inspection, cited thinking)
+  - `extended` (26 tools: Core + memory lifecycle, Git DAG inspection, cited thinking, nudge feedback)
   - Companion Extensions (35 tools across 5 extensions: `research` [15], `company-brain` [8], `polygres-cloud` [5], `skills-docs` [5], `session-bridge` [2])
   - `full` (61 tools: Core + Extended + all 5 companion extensions in-process)
 - **Backward-Compatibility Re-Exports**: Retained lightweight re-exports in `src/` (`v2-engine.js`, `agentdebugx-engine.js`, `session-engine.js`, etc.) pointing to `src/extensions/` to maintain 100% compatibility for external consumers.

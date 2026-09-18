@@ -43,7 +43,7 @@ import {
 import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
 import { handleThink } from './think-engine.js';
 import { handleProactiveNudge, handleNudgeFeedback } from './proactive-engine.js';
-import { getEmbedding } from './embedding-helper.js';
+import { getEmbedding, getEmbeddingProvider } from './embedding-helper.js';
 import {
   searchBlobs,
   getRepositories,
@@ -759,8 +759,9 @@ async function handleHealthCheck() {
   const nuggetCount = nuggetCheck.rows[0].count;
   const symbolCount = symbolCheck.rows[0]?.count || 0;
   const engineStatus = isPgContextEnabled() ? 'pgContext (HNSW + Single-Pass Filter)' : 'pgvector (Standard)';
+  const embedProvider = getEmbeddingProvider();
   
-  let text = `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Extracted symbols: ${symbolCount}\n- Vector Engine: ${engineStatus}\n- Database: Connected\n- Version: ${VERSION}`;
+  let text = `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Extracted symbols: ${symbolCount}\n- Embedding Provider: ${embedProvider.name}\n- Vector Engine: ${engineStatus}\n- Database: Connected\n- Version: ${VERSION}`;
   if (v2Count > 0) {
     text += `\n- Company Brain states (v2): ${v2Count}`;
   }

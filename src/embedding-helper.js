@@ -44,12 +44,30 @@ export async function getOllamaEmbedding(text, priority = PRIORITY.LOW) {
 
 
 /**
- * Custom local wrapper for getEmbedding to support custom embedding endpoints (e.g., OpenAI-compatible, llama.cpp, etc.)
+ * Detect active embedding provider metadata.
+ */
+export function getEmbeddingProvider() {
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
+    const customUrl = process.env.EMBEDDING_URL;
+    if (openrouterKey || (customUrl && customUrl.includes('openrouter.ai'))) {
+        const model = process.env.EMBED_MODEL || 'baai/bge-large-en-v1.5';
+        return { provider: 'openrouter', model, name: `OpenRouter Cloud (${model}, 1024d)` };
+    }
+    if (customUrl) {
+        const model = process.env.EMBED_MODEL || 'custom';
+        return { provider: 'custom', model, name: `Custom Endpoint (${model})` };
+    }
+    return { provider: 'ollama', model: process.env.EMBED_MODEL || 'bge-large', name: `Local Ollama (${process.env.EMBED_MODEL || 'bge-large'}, 1024d)` };
+}
+
+/**
+ * Custom local wrapper for getEmbedding to support custom embedding endpoints (OpenRouter, OpenAI-compatible, llama.cpp, etc.)
  */
 export async function getEmbedding(text, priority = PRIORITY.LOW) {
-    const customUrl = process.env.EMBEDDING_URL;
-    const apiKey = process.env.EMBEDDING_API_KEY || null;
-    const model = process.env.EMBED_MODEL || 'bge-large';
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
+    const customUrl = process.env.EMBEDDING_URL || (openrouterKey ? 'https://openrouter.ai/api/v1/embeddings' : null);
+    const apiKey = process.env.EMBEDDING_API_KEY || openrouterKey || null;
+    const model = process.env.EMBED_MODEL || (openrouterKey ? 'baai/bge-large-en-v1.5' : 'bge-large');
 
     if (customUrl) {
         try {
@@ -57,7 +75,7 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
             const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
             
             // Determine if it's an OpenAI-compatible /v1/embeddings or custom llama.cpp /embedding
-            const isStandardOpenAI = customUrl.includes('/v1/embeddings');
+            const isStandardOpenAI = customUrl.includes('/v1/embeddings') || customUrl.includes('openrouter.ai');
             const isLlamaCppRaw = customUrl.endsWith('/embedding');
             
             let bodyPayload;
@@ -80,6 +98,10 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
             const headers = { 'Content-Type': 'application/json' };
             if (apiKey) {
                 headers['Authorization'] = `Bearer ${apiKey}`;
+            }
+            if (customUrl && customUrl.includes('openrouter.ai')) {
+                headers['HTTP-Referer'] = 'https://github.com/kruschdev/krusch-context-mcp';
+                headers['X-Title'] = 'Krusch Context MCP';
             }
 
             const res = await fetch(customUrl, {

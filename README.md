@@ -6,12 +6,12 @@
   <a href="https://github.com/kruschdev/krusch-context-mcp"><img src="https://img.shields.io/github/package-json/v/kruschdev/krusch-context-mcp.svg" alt="Version" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-13%20core%20tools-purple.svg" alt="13 core MCP tools" /></a>
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/architecture-core%2013%20%7C%20extended%2025%20%7C%20extensions-lightgrey.svg" alt="Core + Extensions" /></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/architecture-core%2013%20%7C%20extended%2026%20%7C%20extensions-lightgrey.svg" alt="Core + Extensions" /></a>
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22+-green.svg" alt="Node" /></a>
   <a href="https://github.com/pgvector/pgvector"><img src="https://img.shields.io/badge/Database-PostgreSQL%20%2B%20pgvector-lightgrey.svg" alt="Database" /></a>
 </p>
 
-**13-tool sovereign AI context engine** for coding agents: hybrid codebase retrieval, persistent episodic memory with self-healing superseding/invalidation, holographic steering nuggets, and proactive trajectory auditing. 100% local-first on PostgreSQL + Ollama, with optional turnkey Polygres Cloud runtime.
+**13-tool sovereign AI context engine** for coding agents: hybrid codebase retrieval, persistent episodic memory with self-healing superseding/invalidation, persistent steering nuggets, and proactive trajectory auditing. 100% local-first on PostgreSQL + Ollama, with optional turnkey Polygres Cloud runtime.
 
 Modular architecture: **core (13 tools, sovereign default)** → **extended core (26 tools)** → **modular companion extensions** (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`).
 
@@ -23,7 +23,7 @@ Every time you start a new AI coding session, your agent starts from absolute ze
 
 **Krusch Context MCP bridges objective codebase reality with persistent agent memory.**
 
-Operating as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server, it provides coding agents (Cursor, Claude Code, Windsurf, Gemini CLI) persistent working memory, zero-trust codebase verification, and automated trajectory protection across sessions.
+Operating as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server, it provides coding agents (Cursor, Claude Code, Windsurf, Gemini CLI) persistent working memory, grounded codebase verification, and automated trajectory protection across sessions.
 
 ---
 
@@ -59,10 +59,10 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 * **Standalone Synergy**: 100% schema-compatible with [PG-Git](https://github.com/kruschdev/pg-git) (`pg-git-mcp@1.1.0`), supporting dedicated `pg_git_*` aliases.
 
 ### 3. 🧠 Episodic Memory & Steering Nuggets (With Active Hygiene)
-* **Contextmaxxing (`compile_state`)**: Compiles project state (priorities, active blockers, lessons, steering facts) into a single-shot briefing document.
+* **Deterministic State Briefing (`compile_state`)**: Compiles project state (priorities, active blockers, lessons, steering rules) into a single-shot briefing document.
 * **Temporal Superseding (`supersede_memory`)**: Supersede outdated rules with lineage links and auto-marking of stale facts as `SUPERSEDED`.
 * **Explicit Invalidation (`invalidate_memory`)**: Mark revoked secrets, obsolete invariants, or abandoned rules as `INVALIDATED` to guarantee they are never retrieved.
-* **Holographic Steering Nuggets (`nugget_remember`)**: Micro-key-value facts (coding standards, conventions) that steer agent behavior without repetitive system prompt edits.
+* **Persistent Steering Nuggets (`nugget_remember`)**: Micro-key-value rules and conventions (coding standards, architectural constraints) that steer agent behavior without prompt bloat.
 * **Lakebase Architecture**: Zero-latency reads from per-project local SQLite compute cache (`.agent/memory.db`) backed by durable PostgreSQL object storage.
 
 ### 4. 🛡️ Proactive Trajectory Auditing & Alignment Loop
@@ -94,7 +94,7 @@ graph TD;
     subgraph "Core Operational Engines (13 Tools)"
         MCP --> PGGit["🧩 Structural Code Engine<br/>Lexer & Call Graph Walks"];
         MCP --> Memory["🧠 Episodic Memory<br/>Superseding & Invalidation"];
-        MCP --> State["📋 Contextmaxxing<br/>compile_state Brief"];
+        MCP --> State["📋 State Briefing<br/>compile_state Brief"];
         MCP --> Auditor["🛡️ Proactive Auditor<br/>Trajectory Guardrails"];
     end
 
@@ -144,7 +144,22 @@ DATABASE_URL="postgresql://user:password@db.polygres.com:5432/your_database"
 POLYGRES_PROJECT_ID="your_project_id"
 POLYGRES_RUNTIME_URL="https://your_project_id.api.db.polygres.com/v1"
 POLYGRES_API_KEY="poly_live_your_key"
+# Optional: add OpenRouter for automated LLM memory tagging
+OPENROUTER_API_KEY="sk-or-v1-your-openrouter-key"
 ```
+
+> [!TIP]
+> **Tagging on Polygres Cloud**: Polygres Cloud manages PostgreSQL storage and in-engine vector embeddings, but does not provide LLM text completions. To enable semantic episodic memory tagging without local GPU hardware, pair Polygres with an OpenRouter API key. If omitted, Krusch Context uses deterministic heuristic keyword extraction.
+
+#### Option C: OpenRouter Remote Embeddings (Zero Local VRAM Stack)
+Run PostgreSQL and SQLite locally, but offload vector embeddings and tags to OpenRouter (`baai/bge-large-en-v1.5`, 1024 dims). Ideal for developer laptops or CPU-only homelabs without GPU VRAM for Ollama:
+
+```env
+KRUSCH_PROFILE="core"
+DATABASE_URL="postgresql://postgres:password@localhost:5432/kruschdb"
+OPENROUTER_API_KEY="sk-or-v1-your-openrouter-key"
+```
+
 ### 3. Ingest Your Codebase (Optional but Recommended)
 Index the current repository into the PostgreSQL Git DAG:
 ```bash
@@ -296,7 +311,7 @@ For complete parameter types, input schemas, and JSON examples, see **[TOOL_REFE
 | **State** | `krusch_context_compile_state` | One-shot multi-scale project state compilation briefing |
 | **Nuggets** | `krusch_context_nugget_remember`| Store fast key-value steering fact or convention (project/user/agent) |
 | **Nuggets** | `krusch_context_nugget_nudges` | Semantically retrieve steering facts for the active task |
-| **Codebase** | `krusch_context_search_symbols`| Search extracted structural AST symbols across JS, TS, Python, Go, Rust |
+| **Codebase** | `krusch_context_search_symbols`| Search extracted structural symbols (functions, classes, routes) across JS, TS, Python, Go, Rust |
 | **Codebase** | `krusch_context_symbol_graph` | Walk relational symbol dependency edges, inbound callers, and outbound imports |
 | **Codebase** | `krusch_context_search_code` | Hybrid dense pgvector + BM25 RRF search over Git blobs with age decay |
 | **Health** | `krusch_context_health` | Diagnostic health check for DB pool, embeddings, and repository status |
@@ -313,7 +328,7 @@ For complete parameter types, input schemas, and JSON examples, see **[TOOL_REFE
 | **Cloud Engine** | `polygres_cloud_capabilities` | Verify active runtime engine features (HNSW vector indexing, text-in vectorization, hybrid search) |
 | **Cloud Sync** | `polygres_cloud_embedding_configs` | Inspect automated table-embedding configurations synchronized with Polygres Cloud |
 
-### Extended Core Inspection (12 Tools)
+### Extended Core Inspection (13 Tools — 26 Total)
 *Enabled via `--profile=extended` or `KRUSCH_PROFILE=extended`*
 
 | Category | Tool | Description |
@@ -330,6 +345,7 @@ For complete parameter types, input schemas, and JSON examples, see **[TOOL_REFE
 | **Nuggets** | `krusch_context_nugget_forget` | Delete a steering fact by key |
 | **Nuggets** | `krusch_context_nugget_list` | Chronological list of active steering nuggets |
 | **Thinking** | `krusch_context_think` | Cited context synthesis, conflict detection & gap analysis |
+| **Safety** | `krusch_context_nudge_feedback` | Record developer approvals or corrections to align proactive nudging |
 
 ### Modular Companion Extensions (`src/extensions/`)
 *Run as standalone companion MCP servers or load dynamically via `--extensions=...`*

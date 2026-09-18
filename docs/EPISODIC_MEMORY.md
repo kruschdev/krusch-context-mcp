@@ -79,7 +79,7 @@ To prevent semantic cross-contamination (e.g., a bug memory polluting a list of 
 |---|---|---|
 | 📌 **`priorities`** | Active goals, roadmap, task state, and milestones. | `Implement SQLite pull/push sync engine for Krusch Context.` |
 | 🐛 **`bugs`** | Identified issues, root causes, symptoms, and fixes. | `Port 5441 conflicts with PostgreSQL. Switched container to 5442.` |
-| 🎯 **`outcomes`** | Results of completed sessions, deployments, or tests. | `Verified all 64 tools pass smoke tests on production host.` |
+| 🎯 **`outcomes`** | Results of completed sessions, deployments, or tests. | `Verified all 61 tools pass smoke tests on production host.` |
 | 🎓 **`lessons`** | Pattern discoveries, architectural decisions, and conventions. | `Avoid circular imports in index.js by exporting DB pools from pool.js.` |
 | 🕒 **`activity`** | Chronological log of steps taken during the session. | `Created test suite, migrated schema, verified connections.` |
 
@@ -89,10 +89,10 @@ To prevent semantic cross-contamination (e.g., a bug memory polluting a list of 
 
 IDE agents should proactively integrate episodic memory into their lifecycle.
 
-### Workflow 1: Zero-Trust Session Start
+### Workflow 1: Grounded Session Start
 When you begin a task, the agent runs a composite search to review recent memory and verify it matches the active codebase:
 ```javascript
-// Step 1: Query database using zero-trust deep search
+// Step 1: Query database using composite deep search
 krusch_context_deep_search({
   query: "implement sqlite syncing",
   project: "krusch-context-mcp"

@@ -1,44 +1,68 @@
 import { pool } from '../db/pool.js';
 import { getEmbedding, PRIORITY } from '../src/embedding-helper.js';
+import { searchBlobs } from '../src/git-engine.js';
 
-const QUERIES = [
+/**
+ * Retrieval accuracy benchmark comparing dense vector retrieval (bge-large, 1024d)
+ * against hybrid Reciprocal Rank Fusion (dense + BM25 tsvector + temporal decay).
+ */
+const BENCHMARK = [
     {
         query: "priority queue for ollama inference fleet",
-        expectedMatches: ["llm-queue.js", "request_queue.py", "sweetdreams.md", "llm_foundational_papers.md"]
+        expectedMatches: ["llm-queue.js"]
     },
     {
         query: "database connection pool setup",
-        expectedMatches: ["pool.js", "db.js"]
+        expectedMatches: ["pool.js", "db.js", "SETUP.md"]
     },
     {
-        query: "semantic search across codebase blobs",
-        expectedMatches: ["memory-engine.js", "search_code.js", "AGENTS.md", "README.md"]
+        query: "codebase search with reciprocal rank fusion and bm25",
+        expectedMatches: ["git-engine.js"]
     },
     {
-        query: "jwt authentication middleware factory",
-        expectedMatches: ["auth.js"]
+        query: "episodic memory superseding and invalidation lifecycle",
+        expectedMatches: ["memory-engine.js", "invalidation-memory.test.js", "EPISODIC_MEMORY.md"]
     },
     {
-        query: "json parser with markdown code block stripping",
-        expectedMatches: ["json-parse.js"]
+        query: "structural symbol and import extraction with regex",
+        expectedMatches: ["ast-chunker.js"]
+    },
+    {
+        query: "lakebase sqlite write-behind push sync",
+        expectedMatches: ["sqlite-engine.js", "lakebase.test.js"]
+    },
+    {
+        query: "single-turn hybrid retrieval with token budget packing",
+        expectedMatches: ["unified-retrieval.js"]
+    },
+    {
+        query: "proactive threat auditor and trajectory guardrails",
+        expectedMatches: ["proactive-engine.js"]
+    },
+    {
+        query: "steering nuggets memory persistence and nudges",
+        expectedMatches: ["nuggets-engine.js", "EPISODIC_MEMORY.md"]
+    },
+    {
+        query: "postgresql git dag schema with pgvector embeddings",
+        expectedMatches: ["schema.sql", "002_hybrid_and_symbols.sql", "SETUP.md"]
     }
 ];
 
 async function run() {
-    console.log('🚀 Starting Accuracy Evaluation for bge-large...\n');
-    
-    let totalQueries = QUERIES.length;
-    let recallAt1 = 0;
-    let recallAt5 = 0;
-    let recallAt10 = 0;
+    console.log('🚀 Running Retrieval Accuracy Benchmark (Dense vs. Hybrid RRF)...\n');
     
     const client = await pool.connect();
     
+    let denseMetrics = { r1: 0, r5: 0, r10: 0, mrrSum: 0 };
+    let hybridMetrics = { r1: 0, r5: 0, r10: 0, mrrSum: 0 };
+    const total = BENCHMARK.length;
+
     try {
-        for (const testCase of QUERIES) {
-            console.log(`Query: "${testCase.query}"`);
+        for (const [idx, item] of BENCHMARK.entries()) {
+            console.log(`[${idx + 1}/${total}] Query: "${item.query}"`);
             
-            const embeddingArray = await getEmbedding(testCase.query, PRIORITY.HIGH);
+            const embeddingArray = await getEmbedding(item.query, PRIORITY.HIGH);
             if (!embeddingArray) {
                 console.error('Failed to generate embedding for query');
                 continue;
@@ -46,8 +70,8 @@ async function run() {
             
             const embeddingStr = `[${embeddingArray.join(',')}]`;
             
-            // Search across blobs
-            const res = await client.query(`
+            // 1. Baseline Dense Vector Search
+            const denseRes = await client.query(`
                 SELECT b.file_name, b.file_path, r.name as repo, (1 - (b.embedding <=> $1::vector)) as similarity
                 FROM blobs b
                 JOIN repositories r ON b.repository_id = r.id
@@ -55,41 +79,55 @@ async function run() {
                 ORDER BY b.embedding <=> $1::vector
                 LIMIT 10
             `, [embeddingStr]);
+            const denseFiles = denseRes.rows.map(r => r.file_name);
             
-            const topFiles = res.rows.map(r => r.file_name);
-            console.log(`Top 3 hits:`);
-            res.rows.slice(0, 3).forEach((r, i) => {
-                console.log(`  ${i+1}. [${(r.similarity*100).toFixed(1)}%] ${r.repo}/${r.file_path}`);
-            });
-            
-            // Check recalls
-            const matches = testCase.expectedMatches;
-            let foundAt = -1;
-            
-            for (let i = 0; i < topFiles.length; i++) {
-                if (topFiles[i] && matches.some(m => topFiles[i].includes(m))) {
-                    foundAt = i;
+            // 2. Hybrid RRF Search (search_code)
+            const hybridRes = await searchBlobs(item.query, 10, null, { search_type: 'hybrid', vector: embeddingArray });
+            const hybridFiles = hybridRes.map(r => r.file_name);
+
+            // Evaluate Dense
+            let dRank = -1;
+            for (let i = 0; i < denseFiles.length; i++) {
+                if (item.expectedMatches.some(m => denseFiles[i] && denseFiles[i].includes(m))) {
+                    dRank = i + 1;
                     break;
                 }
             }
-            
-            if (foundAt === 0) recallAt1++;
-            if (foundAt >= 0 && foundAt < 5) recallAt5++;
-            if (foundAt >= 0 && foundAt < 10) recallAt10++;
-            
-            if (foundAt >= 0) {
-                console.log(`✅ Found expected file at rank ${foundAt + 1}\n`);
-            } else {
-                console.log(`❌ Failed to find expected files in top 10\n`);
+            if (dRank === 1) denseMetrics.r1++;
+            if (dRank >= 1 && dRank <= 5) denseMetrics.r5++;
+            if (dRank >= 1 && dRank <= 10) denseMetrics.r10++;
+            if (dRank > 0) denseMetrics.mrrSum += 1.0 / dRank;
+
+            // Evaluate Hybrid RRF
+            let hRank = -1;
+            for (let i = 0; i < hybridFiles.length; i++) {
+                if (item.expectedMatches.some(m => hybridFiles[i] && hybridFiles[i].includes(m))) {
+                    hRank = i + 1;
+                    break;
+                }
             }
+            if (hRank === 1) hybridMetrics.r1++;
+            if (hRank >= 1 && hRank <= 5) hybridMetrics.r5++;
+            if (hRank >= 1 && hRank <= 10) hybridMetrics.r10++;
+            if (hRank > 0) hybridMetrics.mrrSum += 1.0 / hRank;
+
+            console.log(`  - Dense Top Hit : ${denseFiles[0]} (Rank: ${dRank > 0 ? dRank : 'Miss'})`);
+            console.log(`  - Hybrid Top Hit: ${hybridFiles[0]} (Rank: ${hRank > 0 ? hRank : 'Miss'})\n`);
         }
-        
-        console.log('=== Evaluation Results ===');
-        console.log(`Total Queries: ${totalQueries}`);
-        console.log(`Recall@1:  ${recallAt1}/${totalQueries} (${((recallAt1/totalQueries)*100).toFixed(1)}%)`);
-        console.log(`Recall@5:  ${recallAt5}/${totalQueries} (${((recallAt5/totalQueries)*100).toFixed(1)}%)`);
-        console.log(`Recall@10: ${recallAt10}/${totalQueries} (${((recallAt10/totalQueries)*100).toFixed(1)}%)`);
-        
+
+        console.log('===============================================================');
+        console.log('                 RETRIEVAL EVALUATION RESULTS                  ');
+        console.log('===============================================================');
+        console.log(`Total Benchmark Queries : ${total}`);
+        console.log('---------------------------------------------------------------');
+        console.log(`Metric      | Dense Cosine (bge-large) | Hybrid RRF (search_code)`);
+        console.log('---------------------------------------------------------------');
+        console.log(`Recall@1    | ${denseMetrics.r1}/${total} (${((denseMetrics.r1/total)*100).toFixed(1)}%)            | ${hybridMetrics.r1}/${total} (${((hybridMetrics.r1/total)*100).toFixed(1)}%)`);
+        console.log(`Recall@5    | ${denseMetrics.r5}/${total} (${((denseMetrics.r5/total)*100).toFixed(1)}%)           | ${hybridMetrics.r5}/${total} (${((hybridMetrics.r5/total)*100).toFixed(1)}%)`);
+        console.log(`Recall@10   | ${denseMetrics.r10}/${total} (${((denseMetrics.r10/total)*100).toFixed(1)}%)           | ${hybridMetrics.r10}/${total} (${((hybridMetrics.r10/total)*100).toFixed(1)}%)`);
+        console.log(`MRR         | ${(denseMetrics.mrrSum/total).toFixed(3)}                      | ${(hybridMetrics.mrrSum/total).toFixed(3)}`);
+        console.log('===============================================================\n');
+
     } finally {
         client.release();
     }
@@ -98,6 +136,6 @@ async function run() {
 }
 
 run().catch(err => {
-    console.error('Test failed:', err);
+    console.error('Benchmark failed:', err);
     process.exit(1);
 });
