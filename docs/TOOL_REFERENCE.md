@@ -11,7 +11,7 @@
 To prevent agent context exhaustion and tool selection degradation, tools are organized into three profile tiers and modular companion extensions:
 
 - **`core` (Default — 13 Tools, or 18 Tools with Polygres Cloud)**: The lean, high-signal daily driver context engine. Includes `krusch_context_retrieve`, `add_memory`, `supersede_memory`, `invalidate_memory`, `search_memory`, `compile_state`, `nugget_remember`, `nugget_nudges`, `search_symbols`, `symbol_graph`, `search_code`, `health`, and `proactive_nudge`. When `POLYGRES_API_KEY` is present, the 5 Polygres Cloud tools auto-mount alongside core (18 tools total).
-- **`extended` (25 Tools, or 30 with Polygres Cloud)**: Core plus complete memory administrative lifecycle (`list`, `delete`, `update`, `consolidate`), Git exploration (`list_repos`, `read_tree`, `read_blob`, `file_symbols`), and cited thinking (`think`).
+- **`extended` (26 Tools, or 31 with Polygres Cloud)**: Core plus complete memory administrative lifecycle (`list`, `delete`, `update`, `consolidate`), Git exploration (`list_repos`, `read_tree`, `read_blob`, `file_symbols`), cited thinking (`think`), and proactive alignment feedback (`nudge_feedback`).
 - **`extensions` / `full` (61 Tools total)**: All core and extended tools plus the 5 modular companion extensions (`polygres-cloud`: 5, `company-brain`: 8, `research`: 15, `session-bridge`: 2, `skills-docs`: 5).
 
 Configure via `KRUSCH_PROFILE=core` in your `.env` or IDE MCP configuration, or pass `--profile=core` on the command line. Registered handlers for all tools remain executable on direct invocation regardless of the active profile.

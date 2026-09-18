@@ -13,7 +13,7 @@
 
 **13-tool sovereign AI context engine** for coding agents: hybrid codebase retrieval, persistent episodic memory with self-healing superseding/invalidation, holographic steering nuggets, and proactive trajectory auditing. 100% local-first on PostgreSQL + Ollama, with optional turnkey Polygres Cloud runtime.
 
-Modular architecture: **core (13 tools, sovereign default)** → **extended core (25 tools)** → **modular companion extensions** (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`).
+Modular architecture: **core (13 tools, sovereign default)** → **extended core (26 tools)** → **modular companion extensions** (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`).
 
 ---
 
@@ -34,7 +34,7 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 | Profile / Mode | Tools Exposed | Default | System Prompt Cost | Intended Use |
 | :--- | :---: | :---: | :---: | :--- |
 | **`core`** *(Sovereign Default)* | **13 tools** | ✅ **Yes** | **~900 tokens** | High-signal daily drivers using local PostgreSQL + local Ollama: hybrid retrieval, episodic memory, active superseding & invalidation, state compilation, steering nuggets, structural symbol search, dependency graph, health, and proactive guardrails. |
-| **`extended`** | **25 tools** | ❌ No | ~1,800 tokens | Adds full administrative memory inspection (`list`, `delete`, `update`, `consolidate`), Git tree/blob inspection, and cited thinking. |
+| **`extended`** | **26 tools** | ❌ No | ~1,800 tokens | Adds full administrative memory inspection (`list`, `delete`, `update`, `consolidate`), Git tree/blob inspection, cited thinking, and alignment feedback. |
 | **`extensions`** | **Companion MCPs** | ❌ No | On-demand | Specialized domains running as independent companion servers or loaded dynamically via `--extensions=...` (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`). |
 | **`full`** | **61 tools** | ❌ No | ~4,200 tokens | Complete monolithic development suite with all 5 companion extensions loaded in-process. |
 

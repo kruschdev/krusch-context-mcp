@@ -140,7 +140,8 @@ async function verifyDatabase() {
     }
 }
 
-const server = new Server({ name: "krusch-context-mcp", version: "1.5.0" }, { capabilities: { tools: {}, prompts: {} } });
+export const VERSION = "1.6.1";
+const server = new Server({ name: "krusch-context-mcp", version: VERSION }, { capabilities: { tools: {}, prompts: {} } });
 
 // Core tool definitions (13 curated daily drivers)
 export const CORE_TOOLS = new Set([
@@ -159,7 +160,7 @@ export const CORE_TOOLS = new Set([
   "krusch_context_proactive_nudge"
 ]);
 
-// Extended core inspection tools
+// Extended core inspection tools (13 tools)
 export const EXTENDED_CORE_TOOLS = new Set([
   "krusch_context_list_memories",
   "krusch_context_delete_memory",
@@ -172,7 +173,8 @@ export const EXTENDED_CORE_TOOLS = new Set([
   "krusch_context_file_symbols",
   "krusch_context_nugget_forget",
   "krusch_context_nugget_list",
-  "krusch_context_think"
+  "krusch_context_think",
+  "krusch_context_nudge_feedback"
 ]);
 
 export function getActiveProfile() {
@@ -758,7 +760,7 @@ async function handleHealthCheck() {
   const symbolCount = symbolCheck.rows[0]?.count || 0;
   const engineStatus = isPgContextEnabled() ? 'pgContext (HNSW + Single-Pass Filter)' : 'pgvector (Standard)';
   
-  let text = `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Extracted symbols: ${symbolCount}\n- Vector Engine: ${engineStatus}\n- Database: Connected\n- Version: 1.5.0`;
+  let text = `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Extracted symbols: ${symbolCount}\n- Vector Engine: ${engineStatus}\n- Database: Connected\n- Version: ${VERSION}`;
   if (v2Count > 0) {
     text += `\n- Company Brain states (v2): ${v2Count}`;
   }

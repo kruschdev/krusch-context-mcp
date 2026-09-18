@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-09-18
+
+### Security
+- **CVE-2026-13676 Transitive Dependency Override**: Pinned `fast-uri` to `4.1.3` via npm overrides, neutralizing the URI parsing vulnerability in transitive `@modelcontextprotocol/sdk` and `ajv` dependencies.
+
+### Fixed
+- **Tool-Count Discrepancy & Registration Reconciliation**: Added `krusch_context_nudge_feedback` to the `EXTENDED_CORE_TOOLS` set (13 extended tools), bringing the Extended Core profile to 26 tools total (13 core + 13 extended) and the Full monolithic suite to exactly 61 tools (26 + 35 companion extensions). Eliminates runtime log and schema off-by-one discrepancies.
+- **Server Version Synchronization**: Synchronized MCP server initialization handshake and health check reporting to version `1.6.1` across core and all companion extension servers (`polygres-cloud`, `company-brain`, `research`, `session-bridge`, `skills-docs`).
+- **Documentation & Specification Alignment**: Aligned tool counts across `AGENTS.md`, `README.md`, and `docs/TOOL_REFERENCE.md` to reflect 13 Core, 26 Extended Core, 35 Companion Extensions, and 61 Full Suite tools.
+
 ## [1.6.0] - 2026-09-18
 
 ### Added

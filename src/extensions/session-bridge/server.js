@@ -13,7 +13,7 @@ import { extension } from "./index.js";
 
 async function main() {
   const server = new Server(
-    { name: "krusch-session-bridge-mcp", version: "1.5.0" },
+    { name: "krusch-session-bridge-mcp", version: "1.6.1" },
     { capabilities: { tools: {} } }
   );
 
