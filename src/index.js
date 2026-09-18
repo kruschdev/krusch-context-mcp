@@ -141,7 +141,7 @@ async function verifyDatabase() {
     }
 }
 
-export const VERSION = "1.6.1";
+export const VERSION = "1.6.2";
 const server = new Server({ name: "krusch-context-mcp", version: VERSION }, { capabilities: { tools: {}, prompts: {} } });
 
 // Core tool definitions (13 curated daily drivers)

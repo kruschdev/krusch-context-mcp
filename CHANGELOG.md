@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-09-18
+
+### Added
+- **3-Way Retrieval Accuracy Benchmark (`scripts/eval_accuracy.js`)**:
+  - Implemented empirical 3-way ablation suite comparing pure BM25 lexical search, pure dense vector search (`bge-large` 1024-d), and Hybrid Reciprocal Rank Fusion (`search_code`).
+  - Evaluated on 14 technical benchmarks across conceptual architecture and exact code identifiers, demonstrating Hybrid RRF delivering **92.9% Recall@1 (100% on code identifiers) and 0.964 MRR**, outperforming pure Dense (78.6% R@1 / 0.881 MRR) and pure BM25 (21.4% R@1 / 0.238 MRR).
+- **Agent Ergonomics & Automatic Project Grounding**:
+  - Implemented automatic git repository detection (`detectCurrentProject()`) across `compileProjectState`, `unifiedRetrieve`, `searchBlobs`, and memory engines, eliminating tedious manual project arguments.
+  - Added compound single-turn retrieval (`unifiedRetrieve` with `include_state=true`) packing real-time git status, active episodic memories, and structural symbols into a single MCP turn.
+  - Added core agent protocol prompts (`session_start`, `pre_commit`) for Cursor and Claude Code.
+- **Zero-VRAM Inference & OpenRouter Auto-Routing**:
+  - Added zero-VRAM cloud inference support with automatic OpenRouter routing for embeddings (`text-embedding-3-small`, 1536-d) and chat completions (`google/gemini-2.5-flash`).
+  - Added zero-dependency regex heuristic fallback tagger for keyword extraction when no local LLM or API keys are present.
+- **Automated Tool Contract Invariants (`tests/tool-contract.test.js`)**:
+  - Added CI contract tests enforcing tool counts (13 Core, 26 Extended Core, 35 Companion Extensions, 61 Full Suite), zero naming collisions, and documentation synchrony.
+
+### Changed
+- Synchronized server version to `1.6.2` across `package.json`, core MCP server, and all 5 companion servers (`company-brain`, `polygres-cloud`, `research`, `session-bridge`, `skills-docs`).
+- Updated `docs/EVALS.md` with complete 3-way ablation tables and empirical analysis.
+
 ## [1.6.1] - 2026-09-18
 
 ### Security
@@ -44,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Smoke Test Profiles Consistency**: Aligned standalone JSON-RPC test runners (`test_v2_memory.js`, `test_v2_lens_graph.js`, `test_v2_action_memory.js`, `test_teacher_distillation.js`, `test_think.js`, `test_feedback.js`) to default `KRUSCH_PROFILE` to `full` when executed individually.
 
 ## [1.5.0] - 2026-09-16
+
+> *Archival Note*: Version 1.5.0 represents the pre-decoupling monolithic architecture (64 tools in-process). In version 1.6.0+, the server was refactored into a 13-tool Sovereign Core with 5 modular companion MCP extensions (61 tools total across the suite).
 
 ### Added
 - **Polygres Cloud v0.5.0 Runtime Integration (`src/polygres-cloud.js`)**: Direct agent control over cloud collections, in-engine text vectorization, model discovery, and quota monitoring.

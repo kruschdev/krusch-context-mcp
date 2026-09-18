@@ -13,7 +13,7 @@ import { extension } from "./index.js";
 
 async function main() {
   const server = new Server(
-    { name: "krusch-research-mcp", version: "1.6.1" },
+    { name: "krusch-research-mcp", version: "1.6.2" },
     { capabilities: { tools: {} } }
   );
 

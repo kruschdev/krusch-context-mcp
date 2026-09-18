@@ -1,6 +1,6 @@
 {
   "name": "krusch-context-mcp",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "type": "module",
   "description": "Sovereign 13-tool core MCP context engine (working memory, structural code retrieval, steering nuggets) with modular companion extensions.",
   "main": "src/index.js",
