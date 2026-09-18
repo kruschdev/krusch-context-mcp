@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { getEmbedding, getEmbeddingProvider } from '../src/embedding-helper.js';
+import { getEmbedding, getEmbeddingProvider, getConfiguredEmbeddingDim, validateVectorDimension } from '../src/embedding-helper.js';
 import { chat } from '../src/llm.js';
 import { generateTagsFromLLM, extractHeuristicTags } from '../src/llm-tags.js';
 
@@ -25,6 +25,7 @@ test('custom embedding endpoint routing - OpenAI format', async () => {
     process.env.EMBEDDING_URL = 'http://mock-embedding-server:8080/v1/embeddings';
     process.env.EMBEDDING_API_KEY = 'mock-key';
     process.env.EMBED_MODEL = 'mock-model';
+    process.env.EMBED_DIMS = '3';
 
     try {
         const result = await getEmbedding('hello world');
@@ -40,6 +41,7 @@ test('custom embedding endpoint routing - OpenAI format', async () => {
         delete process.env.EMBEDDING_URL;
         delete process.env.EMBEDDING_API_KEY;
         delete process.env.EMBED_MODEL;
+        delete process.env.EMBED_DIMS;
     }
 });
 
@@ -60,6 +62,7 @@ test('custom embedding endpoint routing - llama.cpp raw format', async () => {
     };
 
     process.env.EMBEDDING_URL = 'http://mock-embedding-server:8080/embedding';
+    process.env.EMBED_DIMS = '3';
 
     try {
         const result = await getEmbedding('hello llama');
@@ -72,6 +75,7 @@ test('custom embedding endpoint routing - llama.cpp raw format', async () => {
     } finally {
         globalThis.fetch = originalFetch;
         delete process.env.EMBEDDING_URL;
+        delete process.env.EMBED_DIMS;
     }
 });
 
@@ -270,6 +274,18 @@ test('heuristic fallback tag extraction when no LLM is configured', async () => 
     assert.ok(tags.length > 0);
     assert.ok(tags.includes('authmiddleware') || tags.includes('verifyjwttoken'));
     assert.ok(tags.includes('jwt') || tags.includes('postgresql'));
+});
+
+test('validateVectorDimension rejects poison vectors with mismatched dimensions', () => {
+    assert.strictEqual(getConfiguredEmbeddingDim(), 1024);
+
+    const validVec = new Array(1024).fill(0.1);
+    assert.strictEqual(validateVectorDimension(validVec), validVec);
+
+    const poisonVec = new Array(1536).fill(0.1);
+    assert.throws(() => {
+        validateVectorDimension(poisonVec, 'Test');
+    }, /Dimension Mismatch/);
 });
 
 

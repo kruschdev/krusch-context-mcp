@@ -30,7 +30,7 @@ export async function getOllamaEmbedding(text, priority = PRIORITY.LOW) {
                 });
                 if (res.ok) {
                     const data = await res.json();
-                    return data.embedding;
+                    return validateVectorDimension(data.embedding, 'Ollama Embed');
                 } else {
                     const errText = await res.text();
                     throw new Error(`Status ${res.status}: ${errText}`);
@@ -60,6 +60,20 @@ export function getConfiguredEmbeddingDim() {
         if (!isNaN(parsed) && parsed > 0) return parsed;
     }
     return 1024;
+}
+
+/**
+ * Runtime dimension assertion protecting database tables from poison rows of mismatched dimension.
+ */
+export function validateVectorDimension(vector, context = 'Embedding') {
+    if (!vector || !Array.isArray(vector)) return null;
+    const expectedDim = getConfiguredEmbeddingDim();
+    if (vector.length !== expectedDim) {
+        const msg = `[${context} Dimension Mismatch] Provider returned ${vector.length} dimensions, but configured EMBED_DIMS is ${expectedDim}. Rejected vector to prevent corrupting database columns. Run db/migrate_dimensions.sql or update EMBED_DIMS in .env.`;
+        console.error(msg);
+        throw new Error(msg);
+    }
+    return vector;
 }
 
 /**
@@ -144,21 +158,25 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
             
             const data = await res.json();
             
-            // Parse response based on format
+            let rawVector = null;
             if (isStandardOpenAI) {
                 // OpenAI returns { data: [ { embedding: [...] } ] }
                 if (data.data && data.data[0] && data.data[0].embedding) {
-                    return data.data[0].embedding;
+                    rawVector = data.data[0].embedding;
                 }
             } else if (isLlamaCppRaw) {
                 // llama.cpp /embedding returns { embedding: [...] }
                 if (data.embedding) {
-                    return data.embedding;
+                    rawVector = data.embedding;
                 }
             } else {
                 // Fallback parse: check embedding array or data.data
-                if (data.embedding) return data.embedding;
-                if (data.data && data.data[0] && data.data[0].embedding) return data.data[0].embedding;
+                if (data.embedding) rawVector = data.embedding;
+                else if (data.data && data.data[0] && data.data[0].embedding) rawVector = data.data[0].embedding;
+            }
+            
+            if (rawVector) {
+                return validateVectorDimension(rawVector, 'Custom Embed');
             }
             
             throw new Error("Could not parse embedding array from custom response");

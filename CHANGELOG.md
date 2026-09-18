@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.3] - 2026-09-18
+
+### Added
+- **Embedding Dimension Single Source of Truth & Runtime Poison Guard**:
+  - Enforced `getConfiguredEmbeddingDim()` resolving `EMBED_DIMS` (default: 1024) across the entire engine.
+  - Implemented `validateVectorDimension()` runtime guard in `getEmbedding()` and `getOllamaEmbedding()`, immediately rejecting poison vectors with mismatched dimensions before database operations.
+  - Added automated PostgreSQL vector column dimension inspection in `krusch_context_health`, dynamically validating `ide_agent_memory`, `ide_agent_nuggets`, and `blobs` against configured dimensions.
+  - Added transactional schema migration script [`db/migrate_dimensions.sql`](db/migrate_dimensions.sql) to easily alter vector columns and rebuild HNSW indexes between 1024-d and 1536-d.
+- **Frozen Benchmark Fixtures (`evals/fixtures/`)**:
+  - Published frozen, versioned JSON benchmark fixtures:
+    - [`evals/fixtures/corpus_14_ablation.json`](evals/fixtures/corpus_14_ablation.json) (14-query in-corpus ablation).
+    - [`evals/fixtures/express_benchmark_10.json`](evals/fixtures/express_benchmark_10.json) (10-query foreign codebase benchmark on Express).
+  - Added contract tests in `tests/eval-fixtures.test.js` verifying fixture schema and query invariants.
+- **Public Foreign Codebase Evaluation (`npm run eval:foreign`)**:
+  - Validated retrieval generalization on `expressjs/express` (206 files, 167 blobs, 3,354 symbols).
+  - Empirical results show Hybrid RRF delivering **70.0% Recall@1 / 0.783 MRR (60.0% on code identifiers)**, outperforming Dense alone (60.0% R@1 / 0.733 MRR, 40.0% on code identifiers).
+- **AST Chunker CommonJS Support**:
+  - Enhanced `src/ast-chunker.js` to extract CommonJS and prototype method assignments (`exports.foo = function`, `res.format = function`, etc.).
+
+### Changed
+- Aligned documentation, `.env.example`, and setup guides to emphasize `baai/bge-large-en-v1.5` (1024 dims) as the sovereign zero-VRAM drop-in model.
+- Synchronized server version to `1.6.3` across `package.json`, core MCP server, and all 5 companion servers.
+
 ## [1.6.2] - 2026-09-18
 
 ### Added
