@@ -1,5 +1,19 @@
 #!/usr/bin/env node
 
+/**
+ * @module krusch-context-mcp
+ * Sovereign, low-latency working-memory and AST code-retrieval layer for coding agents.
+ * 13 core tools by default, with modular companion extensions.
+ */
+
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '..', '.env'), quiet: true });
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -11,35 +25,41 @@ import {
   McpError
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { loadSkills, listSkills, getSkill, routeSkills } from './skills-engine.js';
-
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { trace } from '@opentelemetry/api';
 import { initTracing } from './telemetry.js';
 
-// Import logic from our required MCP packages
-import { addMemory, searchMemory, listMemories, deleteMemory, updateMemory, consolidateMemories, compileProjectState, supersedeMemory, invalidateMemory } from './memory-engine.js';
-import { writeState, resolveConflict, getProvenance, updateOntology, searchLens, traverseGraph, linkBlob } from './v2-engine.js';
+// Core engine imports
+import {
+  addMemory,
+  searchMemory,
+  listMemories,
+  deleteMemory,
+  updateMemory,
+  consolidateMemories,
+  compileProjectState,
+  supersedeMemory,
+  invalidateMemory
+} from './memory-engine.js';
 import { nuggetRemember, nuggetNudges, nuggetForget, nuggetList } from './nuggets-engine.js';
 import { handleThink } from './think-engine.js';
-import { handleProactiveNudge, handleNudgeFeedback, handleAnalyzeTrajectory, handleEvaluateResilience } from './proactive-engine.js';
-import { writeSessionHandoff, readSessionReview, initSessionEngineTable } from './session-engine.js';
+import { handleProactiveNudge, handleNudgeFeedback } from './proactive-engine.js';
 import { getEmbedding } from './embedding-helper.js';
-import { searchBlobs, getRepositories, getRepoRootTree, getTreeEntries, getBlob, searchSymbols, getSymbolsForBlob, getSymbolGraph } from './git-engine.js';
+import {
+  searchBlobs,
+  getRepositories,
+  getRepoRootTree,
+  getTreeEntries,
+  getBlob,
+  searchSymbols,
+  getSymbolsForBlob,
+  getSymbolGraph
+} from './git-engine.js';
 import { pool } from '../db/pool.js';
 import { detectPgContext, initPgContextCollections, isPgContextEnabled } from './pgcontext-helper.js';
 import { unifiedRetrieve } from './unified-retrieval.js';
-import { initAgentDebugXTable, logAgentFailure, searchFailures, getRecoveryPattern } from './agentdebugx-engine.js';
-import { initDataFlowTables, registerOperator, inspectOperatorRegistry, mutatePipelineDag } from './dataflow-engine.js';
-import { setwiseRerank } from './setwise-engine.js';
-import { initArexTable, updateResearchState, auditResearchConstraints } from './arex-engine.js';
-import { initAcmTable, manageContextLifecycle, auditContextBudget } from './acm-engine.js';
-import { initTeacherMemoryTable, distillTeacherMemory, retrieveTeacherDistillation, distillFunctionMemory } from './teacher-distillation-engine.js';
-import { getCloudUsage, getCloudEmbeddingModels, getCloudCapabilities, listCloudEmbeddingConfigs, searchCloudContext } from './polygres-cloud.js';
+import { loadExtensions, resolveExtension } from './extensions/index.js';
 
-// Verify DB connection
+// Verify core database connection and tables
 async function verifyDatabase() {
     try {
         await pool.query('SELECT 1');
@@ -64,7 +84,7 @@ async function verifyDatabase() {
         try {
             await pool.query('ALTER TABLE ide_agent_memory ADD COLUMN project VARCHAR(255)');
         } catch (e) {
-            if (e.code !== '42701' && e.code !== '42P07') throw e; // 42701 duplicate column, 42P07 duplicate relation/column in some PG configs
+            if (e.code !== '42701' && e.code !== '42P07') throw e;
         }
         try {
             await pool.query('ALTER TABLE ide_agent_memory ADD COLUMN tags TEXT');
@@ -108,97 +128,12 @@ async function verifyDatabase() {
         try {
             await pool.query('ALTER TABLE ide_agent_nuggets ADD COLUMN project VARCHAR(255)');
         } catch (e) {
-            if (e.code !== '42701') throw e; // 42701 is duplicate column
+            if (e.code !== '42701') throw e;
         }
 
-        // Rename legacy tables to interaction_memory if they exist
-        try {
-            const homelabCheck = await pool.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'homelab_memory_v2'
-                )
-            `);
-            const v2Check = await pool.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'memory_v2'
-                )
-            `);
-            const targetCheck = await pool.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'interaction_memory'
-                )
-            `);
-
-            if (homelabCheck.rows[0].exists && !targetCheck.rows[0].exists) {
-                await pool.query('ALTER TABLE homelab_memory_v2 RENAME TO interaction_memory');
-                console.error('[krusch-context-mcp] Successfully renamed homelab_memory_v2 to interaction_memory');
-            } else if (v2Check.rows[0].exists && !targetCheck.rows[0].exists) {
-                await pool.query('ALTER TABLE memory_v2 RENAME TO interaction_memory');
-                console.error('[krusch-context-mcp] Successfully renamed memory_v2 to interaction_memory');
-            }
-        } catch (e) {
-            console.error('[krusch-context-mcp] Rename migration error:', e.message);
-        }
-
-        await pool.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
-        
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS interaction_memory (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                category VARCHAR(50) NOT NULL,
-                content TEXT NOT NULL,
-                embedding VECTOR(1024),
-                author_id VARCHAR(100) NOT NULL,
-                source_ref VARCHAR(255),
-                confidence FLOAT DEFAULT 1.0,
-                action_trace JSONB,
-                parent_id UUID REFERENCES interaction_memory(id),
-                version_id INT DEFAULT 1,
-                status VARCHAR(20) DEFAULT 'active',
-                ontology_tags TEXT[],
-                read_roles TEXT[] DEFAULT '{system}',
-                write_roles TEXT[] DEFAULT '{system}',
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        `);
-
-        try {
-            await pool.query('ALTER TABLE interaction_memory ADD COLUMN project VARCHAR(255)');
-        } catch (e) {
-            if (e.code !== '42701') throw e; // 42701 is duplicate column
-        }
-
-        // Add indexes
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_ontology_tags ON interaction_memory USING GIN (ontology_tags)');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_v2_embedding ON interaction_memory USING hnsw (embedding vector_cosine_ops)');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_v1_embedding ON ide_agent_memory USING hnsw (embedding vector_cosine_ops)');
 
-        // Add memory_to_blob_edges table
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS memory_to_blob_edges (
-                memory_id UUID REFERENCES interaction_memory(id),
-                blob_id VARCHAR(255),
-                relationship VARCHAR(50),
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        `);
-
-        // Initialize AI Watch research integration tables
-        await initAgentDebugXTable();
-        await initDataFlowTables();
-        await initArexTable();
-        await initAcmTable();
-        await initTeacherMemoryTable();
-        await initSessionEngineTable();
-
-        console.error('[krusch-context-mcp] Database connection verified via native pool. Migrations completed.');
+        console.error('[krusch-context-mcp] Core database connection verified. Core tables ready.');
     } catch (err) {
         console.error('[krusch-context-mcp] FATAL: Cannot reach PostgreSQL:', err.message);
         process.exit(1);
@@ -207,10 +142,12 @@ async function verifyDatabase() {
 
 const server = new Server({ name: "krusch-context-mcp", version: "1.5.0" }, { capabilities: { tools: {}, prompts: {} } });
 
-// Profile assignments
+// Core tool definitions (13 curated daily drivers)
 export const CORE_TOOLS = new Set([
   "krusch_context_retrieve",
   "krusch_context_add_memory",
+  "krusch_context_supersede_memory",
+  "krusch_context_invalidate_memory",
   "krusch_context_search_memory",
   "krusch_context_compile_state",
   "krusch_context_nugget_remember",
@@ -222,9 +159,8 @@ export const CORE_TOOLS = new Set([
   "krusch_context_proactive_nudge"
 ]);
 
-export const EXTENDED_ADDITIONAL_TOOLS = new Set([
-  "krusch_context_supersede_memory",
-  "krusch_context_invalidate_memory",
+// Extended core inspection tools
+export const EXTENDED_CORE_TOOLS = new Set([
   "krusch_context_list_memories",
   "krusch_context_delete_memory",
   "krusch_context_update_memory",
@@ -236,13 +172,7 @@ export const EXTENDED_ADDITIONAL_TOOLS = new Set([
   "krusch_context_file_symbols",
   "krusch_context_nugget_forget",
   "krusch_context_nugget_list",
-  "krusch_context_think",
-  "krusch_context_list_skills",
-  "krusch_context_get_skill",
-  "krusch_docs_list",
-  "krusch_docs_search",
-  "krusch_context_write_session_handoff",
-  "krusch_context_read_session_review"
+  "krusch_context_think"
 ]);
 
 export function getActiveProfile() {
@@ -257,948 +187,400 @@ export function getActiveProfile() {
   return 'core';
 }
 
-export const ALL_TOOLS = [
-      {
-        name: "krusch_context_retrieve",
-        description: "Polygres-inspired unified context retrieval tool. Combines HNSW vector search, multi-hop graph walks, and server-side token budget packing into a single context payload.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-            project: { type: "string" },
-            graph_hops: { type: "number", default: 1 },
-            limit_tokens: { type: "number", default: 4000 },
-            include_code: { type: "boolean", default: true }
-          },
-          required: ["query"]
-        }
+export function getRequestedExtensions() {
+  const extArg = process.argv.find(a => a.startsWith('--extensions=') || a.startsWith('--extension='));
+  const rawList = extArg 
+    ? extArg.split('=')[1].split(',').map(s => s.trim()).filter(Boolean)
+    : (process.env.KRUSCH_EXTENSIONS ? process.env.KRUSCH_EXTENSIONS.split(',').map(s => s.trim()).filter(Boolean) : []);
+
+  const profile = getActiveProfile();
+  if (profile === 'full' || rawList.includes('all')) {
+    return ['all'];
+  }
+
+  const disablePolygres = process.argv.includes('--no-polygres') || rawList.includes('none') || rawList.includes('no-polygres');
+  const exts = new Set(rawList.filter(e => e !== 'none' && e !== 'no-polygres'));
+
+  // Default to enabling polygres-cloud companion extension whenever POLYGRES_API_KEY is configured
+  if (process.env.POLYGRES_API_KEY && !disablePolygres) {
+    exts.add('polygres-cloud');
+  }
+
+  return Array.from(exts);
+}
+
+// Core Tool Schemas
+export const CORE_TOOL_DEFINITIONS = [
+  {
+    name: "krusch_context_retrieve",
+    description: "Polygres-inspired unified context retrieval tool. Combines HNSW vector search, multi-hop graph walks, and server-side token budget packing into a single context payload.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        project: { type: "string" },
+        graph_hops: { type: "number", default: 1 },
+        limit_tokens: { type: "number", default: 4000 },
+        include_code: { type: "boolean", default: true }
       },
-      {
-        name: "krusch_context_add_memory",
-        description: "Add a new fact or memory to the persistent IDE database. Supports MobileMem temporal superseding (arXiv: 2608.13606) via supersedes_id.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            project: { type: "string" },
-            active_project: { type: "string", description: "Optional project context (alias for project)" },
-            category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
-            content: { type: "string" },
-            tags: { type: "array", items: { type: "string" } },
-            supersedes_id: { type: "number", description: "Optional ID of a previous memory record that this new fact supersedes/replaces." }
-          },
-          required: ["category", "content"]
-        }
+      required: ["query"]
+    }
+  },
+  {
+    name: "krusch_context_add_memory",
+    description: "Add a new fact or memory to the persistent IDE database. Supports MobileMem temporal superseding via supersedes_id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        active_project: { type: "string", description: "Optional project context (alias for project)" },
+        category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
+        content: { type: "string" },
+        tags: { type: "array", items: { type: "string" } },
+        supersedes_id: { type: "number", description: "Optional ID of a previous memory record that this new fact supersedes/replaces." }
       },
-      {
-        name: "krusch_context_supersede_memory",
-        description: "Explicitly supersede an outdated memory with updated knowledge, linking lineage and marking the old record as SUPERSEDED.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: { type: "number", description: "Target memory ID to supersede" },
-            category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
-            content: { type: "string", description: "New authoritative content" },
-            project: { type: "string" },
-            active_project: { type: "string", description: "Optional project context (alias for project)" },
-            tags: { type: "array", items: { type: "string" } }
-          },
-          required: ["id", "category", "content"]
-        }
+      required: ["category", "content"]
+    }
+  },
+  {
+    name: "krusch_context_supersede_memory",
+    description: "Explicitly supersede an outdated memory with updated knowledge, linking lineage and marking the old record as SUPERSEDED.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number", description: "Target memory ID to supersede" },
+        category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
+        content: { type: "string", description: "New authoritative content" },
+        project: { type: "string" },
+        active_project: { type: "string", description: "Optional project context (alias for project)" },
+        tags: { type: "array", items: { type: "string" } }
       },
-      {
-        name: "krusch_context_invalidate_memory",
-        description: "Explicitly mark a memory record as INVALIDATED (e.g. revoked secret, deprecated invariant, obsolete design rule).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: { type: "number", description: "Memory ID to invalidate" },
-            project: { type: "string" },
-            active_project: { type: "string", description: "Optional project context (alias for project)" },
-            reason: { type: "string", description: "Reason for invalidating this memory" }
-          },
-          required: ["id"]
-        }
+      required: ["id", "category", "content"]
+    }
+  },
+  {
+    name: "krusch_context_invalidate_memory",
+    description: "Explicitly mark a memory record as INVALIDATED (e.g. revoked secret, deprecated invariant, obsolete design rule).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number", description: "Memory ID to invalidate" },
+        project: { type: "string" },
+        active_project: { type: "string", description: "Optional project context (alias for project)" },
+        reason: { type: "string", description: "Reason for invalidating this memory" }
       },
-      {
-        name: "krusch_context_search_memory",
-        description: "Search the persistent IDE database for past lessons, bugs, priorities, or project outcomes. Supports MobileMem active lineage filtering (excludes invalidated/superseded records by default) and GRASP options.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            active_project: { type: "string", description: "The active project context (alias for project)" },
-            project: { type: "string", description: "The active project context (alias for active_project)" },
-            category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
-            query: { type: "string" },
-            limit: { type: "number", default: 3 },
-            search_type: { type: "string", enum: ['semantic', 'keyword', 'tag'], default: 'semantic' },
-            include_history: { type: "boolean", default: false },
-            include_linked_blobs: { type: "boolean", default: false },
-            include_superseded: { type: "boolean", default: false, description: "If true, includes superseded and invalidated records (useful for audits)" }
-          },
-          required: ["category", "query"]
-        }
+      required: ["id"]
+    }
+  },
+  {
+    name: "krusch_context_search_memory",
+    description: "Search the persistent IDE database for past lessons, bugs, priorities, or project outcomes. Excludes superseded/invalidated records by default.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        active_project: { type: "string", description: "The active project context (alias for project)" },
+        project: { type: "string", description: "The active project context (alias for active_project)" },
+        category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
+        query: { type: "string" },
+        limit: { type: "number", default: 3 },
+        search_type: { type: "string", enum: ['semantic', 'keyword', 'tag'], default: 'semantic' },
+        include_history: { type: "boolean", default: false },
+        include_superseded: { type: "boolean", default: false, description: "If true, includes superseded and invalidated records" }
       },
-      {
-        name: "krusch_context_search_code",
-        description: "Semantically search the contents of all files in PG-Git. Results are automatically decayed by age so recent code ranks higher.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-            limit: { type: "number", default: 5 },
-            project: { type: "string" },
-            repository_id: { type: "number" }
-          },
-          required: ["query"]
-        }
+      required: ["category", "query"]
+    }
+  },
+  {
+    name: "krusch_context_compile_state",
+    description: "Compile a consolidated project state briefing (active priorities, recent blockers, outcome history, steering nuggets).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: { type: "string", description: "The project to compile state for." }
       },
-      {
-        name: "krusch_context_compile_state",
-        description: "Contextmaxxing: Compile a comprehensive, structured Markdown document of a project's current state. This proactively gathers recent priorities, outcomes, lessons, and behavioral nudges into a single payload so you don't have to search for them individually.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            project: { type: "string", description: "The project name to compile state for." },
-            active_project: { type: "string", description: "Optional alias for project" }
-          },
-          required: ["project"]
-        }
+      required: ["project"]
+    }
+  },
+  {
+    name: "krusch_context_search_code",
+    description: "Semantically search the contents of all files in PG-Git with age-decay weighting.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "number", default: 5 },
+        project: { type: "string" },
+        repository_id: { type: "number" }
       },
-      {
-        name: "krusch_context_deep_search",
-        description: "Zero-Trust composite search. Query both the objective codebase (PG-Git) and subjective history (Homelab Memory) simultaneously. Use this to establish a holistic baseline context for a topic.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "The search query." },
-            project: { type: "string", description: "Optional project name to boost results." }
-          },
-          required: ["query"]
-        }
+      required: ["query"]
+    }
+  },
+  {
+    name: "krusch_context_search_symbols",
+    description: "Search extracted AST code symbols (functions, classes, interfaces, methods) across indexed repositories.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Symbol name or substring to search" },
+        limit: { type: "number", default: 20 },
+        repository_id: { type: "number", description: "Optional repository ID filter" },
+        project: { type: "string", description: "Optional project name filter" }
       },
-      {
-        name: "krusch_context_list_memories",
-        description: "List recent memories in a category, optionally filtered by project. No embedding required — fast chronological listing.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
-            project: { type: "string", description: "Filter by project name" },
-            active_project: { type: "string", description: "Optional project filter (alias for project)" },
-            limit: { type: "number", default: 10 }
-          },
-          required: ["category"]
-        }
+      required: ["query"]
+    }
+  },
+  {
+    name: "krusch_context_symbol_graph",
+    description: "Traverse dependency and call edges for an AST symbol up to N hops.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol_name: { type: "string", description: "The symbol identifier to traverse" },
+        depth: { type: "number", default: 2 },
+        repository_id: { type: "number", description: "Optional repository ID" },
+        project: { type: "string", description: "Optional project name filter" }
       },
-      {
-        name: "krusch_context_write_state",
-        description: "Company Brain Substrate (v2): Write a memory state with optimistic concurrency control. Replaces standard add_memory.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            content: { type: "string", description: "The memory content." },
-            category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
-            author_id: { type: "string", description: "Identifier of the agent/human (e.g., 'agent:antigravity')." },
-            parent_id: { type: "string", description: "If updating an existing state, provide the UUID to ensure optimistic concurrency control." },
-            source_ref: { type: "string", description: "Optional URI or document hash that generated this memory." },
-            ontology_tags: { type: "array", items: { type: "string" } },
-            action_trace: { type: "array", items: { type: "object" }, description: "Optional trace of agent actions that led to this state." },
-            project: { type: "string", description: "Optional project association for the state." }
-          },
-          required: ["content", "category", "author_id"]
-        }
+      required: ["symbol_name"]
+    }
+  },
+  {
+    name: "krusch_context_nugget_remember",
+    description: "Store a short, durable Holographic Nugget memory fact (coding standards, conventions).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: { type: "string" },
+        value: { type: "string" },
+        kind: { type: "string", enum: ['project', 'user', 'agent'] },
+        project: { type: "string", description: "The project context (alias for active_project)." },
+        active_project: { type: "string", description: "The active project context. Required for 'project' kind nuggets." }
       },
-      {
-        name: "krusch_context_resolve_conflict",
-        description: "Company Brain Substrate (v2): Merge branching states, deprecate conflicting IDs, and create a unified head.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            conflict_ids: { type: "array", items: { type: "string" }, description: "The IDs of the conflicting sibling states." },
-            resolution_content: { type: "string", description: "The combined, correct truth." },
-            author_id: { type: "string", description: "Identifier of the resolving agent/human." }
-          },
-          required: ["conflict_ids", "resolution_content", "author_id"]
-        }
+      required: ["key", "value"]
+    }
+  },
+  {
+    name: "krusch_context_nugget_nudges",
+    description: "Return short, relevant Nuggets facts to gently steer the agent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        kinds: { type: "array", items: { type: "string", enum: ['project', 'user', 'agent'] } },
+        limit: { type: "number", default: 3 },
+        project: { type: "string", description: "The project context (alias for active_project)." },
+        active_project: { type: "string", description: "The active project context. Required to retrieve 'project' kind nuggets." }
       },
-      {
-        name: "krusch_context_get_provenance",
-        description: "Company Brain Substrate (v2): Interrogate why a piece of context exists by tracing its version history.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            memory_id: { type: "string", description: "The UUID of the memory to trace." }
-          },
-          required: ["memory_id"]
-        }
-      },
-      {
-        name: "krusch_context_update_ontology",
-        description: "Company Brain Substrate (v2): Update ontology tags across all active memories.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            old_tag: { type: "string" },
-            new_tag: { type: "string" }
-          },
-          required: ["old_tag", "new_tag"]
-        }
-      },
-      {
-        name: "krusch_context_search_lens",
-        description: "Company Brain Substrate (v2): Lens-Based Retrieval. Performs semantic search filtered by user or agent role.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-            roles: { type: "array", items: { type: "string" }, description: "Array of roles to filter by (e.g., ['system', 'admin'])" },
-            limit: { type: "number", default: 5 },
-            status: { type: "string", default: "active" }
-          },
-          required: ["query", "roles"]
-        }
-      },
-      {
-        name: "krusch_context_traverse_graph",
-        description: "Company Brain Substrate (v2): Graph Traversal. Traverses parent/child memory lineage and linked codebase blobs.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            memory_id: { type: "string", description: "The UUID of the memory to traverse from." },
-            direction: { type: "string", enum: ['parents', 'children', 'blobs', 'actionable', 'all'], default: 'all' },
-            depth: { type: "number", default: 3 }
-          },
-          required: ["memory_id"]
-        }
-      },
-      {
-        name: "krusch_context_link_blob",
-        description: "Company Brain Substrate (v2): Link a memory state to a codebase file (blob) to build the organizational graph.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            memory_id: { type: "string", description: "The UUID of the memory state." },
-            blob_id: { type: "string", description: "The SHA hash of the codebase blob (from PG-Git)." },
-            relationship: { type: "string", description: "The relationship type (e.g., 'references', 'fixes', 'implements', 'deprecates')." }
-          },
-          required: ["memory_id", "blob_id", "relationship"]
-        }
-      },
-      {
-        name: "krusch_context_delete_memory",
-        description: "Delete a specific memory by its ID. Use list or search first to find the ID.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: { type: "number", description: "The numeric ID of the memory to delete" },
-            source_project: { type: "string", description: "The project name if this is a project-specific SQLite memory. Leave empty for Global PG memories." },
-            project: { type: "string", description: "Optional alias for source_project" },
-            active_project: { type: "string", description: "Optional alias for source_project" }
-          },
-          required: ["id"]
-        }
-      },
-      {
-        name: "krusch_context_update_memory",
-        description: "Update an existing memory's content, tags, or project assignment. Content changes trigger re-embedding.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: { type: "number", description: "The numeric ID of the memory to update" },
-            source_project: { type: "string", description: "The project name if this is a project-specific SQLite memory. Leave empty for Global PG memories." },
-            active_project: { type: "string", description: "Optional alias for source_project" },
-            content: { type: "string", description: "New content (triggers re-embedding)" },
-            tags: { type: "array", items: { type: "string" } },
-            project: { type: "string", description: "New project assignment" }
-          },
-          required: ["id"]
-        }
-      },
-      {
-        name: "krusch_context_list_repos",
-        description: "List all repositories indexed in PG-Git with their IDs and descriptions.",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "krusch_context_read_tree",
-        description: "Browse the file tree of a repository indexed in PG-Git. Returns directory entries (files and subdirectories) for a given tree ID. Use krusch_context_list_repos first to get a repo ID, then call with no tree_id to get the root.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            repository_id: { type: "number", description: "The repository ID (from krusch_context_list_repos)" },
-            tree_id: { type: "string", description: "The tree hash to browse. Omit for root tree." }
-          },
-          required: ["repository_id"]
-        }
-      },
-      {
-        name: "krusch_context_read_blob",
-        description: "Read the full content of a specific file (blob) from PG-Git by its blob ID. Get blob IDs from krusch_context_read_tree.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            blob_id: { type: "string", description: "The SHA hash of the blob to read" }
-          },
-          required: ["blob_id"]
-        }
-      },
-      {
-        name: "krusch_context_search_symbols",
-        description: "Search extracted AST code symbols (functions, classes, interfaces, methods) across indexed repositories.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Symbol name or substring to search" },
-            limit: { type: "number", default: 20 },
-            repository_id: { type: "number", description: "Optional repository ID filter" },
-            project: { type: "string", description: "Optional project name filter" }
-          },
-          required: ["query"]
-        }
-      },
-      {
-        name: "krusch_context_file_symbols",
-        description: "Get all AST code symbols extracted for a given file blob SHA.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            blob_id: { type: "string", description: "The SHA hash of the blob" }
-          },
-          required: ["blob_id"]
-        }
-      },
-      {
-        name: "krusch_context_symbol_graph",
-        description: "Traverse dependency and call edges for an AST symbol up to N hops.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            symbol_name: { type: "string", description: "The symbol identifier to traverse" },
-            depth: { type: "number", default: 2 },
-            repository_id: { type: "number", description: "Optional repository ID" },
-            project: { type: "string", description: "Optional project name filter" }
-          },
-          required: ["symbol_name"]
-        }
-      },
-      {
-        name: "pg_git_search_symbols",
-        description: "Alias for krusch_context_search_symbols: Search extracted AST code symbols across repositories.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Symbol name or substring to search" },
-            limit: { type: "number", default: 20 },
-            repository_id: { type: "number", description: "Optional repository ID filter" },
-            project: { type: "string", description: "Optional project name filter" }
-          },
-          required: ["query"]
-        }
-      },
-      {
-        name: "pg_git_file_symbols",
-        description: "Alias for krusch_context_file_symbols: Get all AST symbols extracted for a blob.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            blob_id: { type: "string", description: "The SHA hash of the blob" }
-          },
-          required: ["blob_id"]
-        }
-      },
-      {
-        name: "pg_git_dependency_graph",
-        description: "Alias for krusch_context_symbol_graph: Traverse symbol dependency/call graph up to N hops.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            symbol_name: { type: "string", description: "The symbol name to traverse" },
-            depth: { type: "number", default: 2 },
-            repository_id: { type: "number", description: "Optional repository ID" },
-            project: { type: "string", description: "Optional project name filter" }
-          },
-          required: ["symbol_name"]
-        }
-      },
-      {
-        name: "krusch_context_consolidate",
-        description: "Find and merge semantically duplicate memories within a category. Use dry_run=true first to preview which pairs would be merged. Default threshold 0.15 (lower = stricter matching).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
-            project: { type: "string", description: "Optional: only consolidate memories for this project" },
-            active_project: { type: "string", description: "Optional project filter (alias for project)" },
-            threshold: { type: "number", default: 0.15, description: "Cosine distance threshold — pairs closer than this are considered duplicates" },
-            dry_run: { type: "boolean", default: false, description: "If true, only preview matches without merging" }
-          },
-          required: ["category"]
-        }
-      },
-      {
-        name: "krusch_context_health",
-        description: "Verify that the Krusch Context MCP server is alive, connected to the database, and functioning.",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "krusch_docs_list",
-        description: "List all available external manuals and documentation that have been ingested into the semantic database.",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "krusch_docs_search",
-        description: "Semantically search a specific external manual. Use krusch_docs_list to find available manual names.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            manual_name: { type: "string", description: "The exact name of the manual (e.g. anthropic-docs)" },
-            query: { type: "string", description: "The search query" },
-            limit: { type: "number", default: 5 }
-          },
-          required: ["manual_name", "query"]
-        }
-      },
-      {
-        name: "krusch_context_nugget_remember",
-        description: "Store a short, durable Nuggets memory fact. Best for lightweight nudges like preferences or corrections.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            key: { type: "string" },
-            value: { type: "string" },
-            kind: { type: "string", enum: ['project', 'user', 'agent'] },
-            project: { type: "string", description: "The project context (alias for active_project)." },
-            active_project: { type: "string", description: "The active project context. Required for 'project' kind nuggets." }
-          },
-          required: ["key", "value"]
-        }
-      },
-      {
-        name: "krusch_context_nugget_nudges",
-        description: "Return short, relevant Nuggets facts to gently steer the agent.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-            kinds: { type: "array", items: { type: "string", enum: ['project', 'user', 'agent'] } },
-            limit: { type: "number", default: 3 },
-            project: { type: "string", description: "The project context (alias for active_project)." },
-            active_project: { type: "string", description: "The active project context. Required to retrieve 'project' kind nuggets." }
-          },
-          required: ["query"]
-        }
-      },
-      {
-        name: "krusch_context_nugget_forget",
-        description: "Delete a specific nugget by key.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            key: { type: "string" },
-            project: { type: "string", description: "The project context (alias for active_project)." },
-            active_project: { type: "string", description: "The active project context. Required to delete 'project' kind nuggets." }
-          },
-          required: ["key"]
-        }
-      },
-      {
-        name: "krusch_context_nugget_list",
-        description: "List all saved nuggets chronologically.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            kinds: { type: "array", items: { type: "string", enum: ['project', 'user', 'agent'] } },
-            project: { type: "string", description: "The project context (alias for active_project)." },
-            active_project: { type: "string", description: "The active project context. Required to list 'project' kind nuggets." }
-          }
-        }
-      },
-      {
-        name: "krusch_context_think",
-        description: "Perform cited context synthesis, conflict detection, and gap analysis across memory and codebase.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "The query or question to think about." },
-            project: { type: "string", description: "Optional project name/filter to restrict search scope." }
-          },
-          required: ["query"]
-        }
-      },
-      {
-        name: "krusch_context_list_skills",
-        description: "List all available AI agent skills (TDD, Diagnose, Handoff, Caveman, etc.) loaded from the homelab registry.",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "krusch_context_get_skill",
-        description: "Retrieve a specific AI agent skill's markdown prompt instructions by name.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: { type: "string", description: "The name of the skill to retrieve (e.g. 'tdd', 'diagnose', 'caveman', 'grill-with-docs')" }
-          },
-          required: ["name"]
-        }
-      },
-      {
-        name: "krusch_context_proactive_nudge",
-        description: "Proactively audits current agent trajectory against historical lessons, bugs, priorities, and nuggets. Returns a warning nudge if any constraints or custom rules are violated, otherwise returns 'NO_NUDGES_REQUIRED'.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            history: {
-              oneOf: [
-                { type: "string", description: "The last user query or current task context." },
-                {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      role: { type: "string", enum: ["user", "assistant", "system"] },
-                      content: { type: "string" }
-                    },
-                    required: ["role", "content"]
-                  },
-                  description: "Full sliding window of the conversation history."
-                }
-              ]
-            },
-            project: { type: "string", description: "Optional active project scope to filter and load SQLite isolated nuggets." }
-          },
-          required: ["history"]
-        }
-      },
-      {
-        name: "krusch_context_nudge_feedback",
-        description: "Logs developer or agent feedback for proactive auditor nudges to collect alignment signals for offline post-training/fine-tuning.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query_text: { type: "string", description: "The task context or query audited." },
-            nudge_text: { type: "string", description: "The proactive warning nudge text returned." },
-            user_approved: { type: "boolean", description: "Whether the nudge was approved or helpful." },
-            agent_corrected: { type: "boolean", description: "Whether the agent trajectory was corrected." },
-            correction_diff: { type: "string", description: "Optional diff showing the correction." },
-            project: { type: "string", description: "Optional project name." }
-          },
-          required: ["query_text", "nudge_text", "user_approved", "agent_corrected"]
-        }
-      },
-      {
-        name: "krusch_context_analyze_trajectory",
-        description: "Analyze the step-level execution path of a memory ID using STRACE. Identifies causal fault steps and failure patterns.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            memory_id: { type: "string", description: "The UUID of the leaf state in the interaction_memory table to trace." }
-          },
-          required: ["memory_id"]
-        }
-      },
-      {
-        name: "krusch_context_write_session_handoff",
-        description: "Session Bridge (IDE ↔ Jean): Write the IDE session summary, calculate modified files, insert the DB record, and autonomously spawn the Jean SRE companion for review. Call this when executing /close.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            project: { type: "string" },
-            summary: { type: "string" }
-          },
-          required: ["project", "summary"]
-        }
-      },
-      {
-        name: "krusch_context_read_session_review",
-        description: "Session Bridge (Jean ↔ IDE): Fetch the latest session review from the Jean SRE companion. This is guaranteed to be idempotent (it atomically marks the review as consumed). Call this when executing /continue.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            project: { type: "string" }
-          },
-          required: ["project"]
-        }
-      },
-      // AgentDebugX Tools
-      {
-        name: "krusch_context_log_agent_failure",
-        description: "AgentDebugX Error Hub: Log an agent execution failure trajectory, attributed root cause, and recovery patch bundle.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            agent_name: { type: "string" },
-            error_symptom: { type: "string" },
-            trajectory: { type: "array", description: "Array of trajectory step objects" },
-            root_cause: { type: "string" },
-            recovery_patch: { type: "object", description: "Recovery patch or parameter modifications" }
-          },
-          required: ["agent_name", "error_symptom", "root_cause"]
-        }
-      },
-      {
-        name: "krusch_context_search_failures",
-        description: "AgentDebugX Error Hub: Search for past agent failure bundles matching an error symptom or query.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-            agent_name: { type: "string" },
-            limit: { type: "number", default: 5 }
-          },
-          required: ["query"]
-        }
-      },
-      {
-        name: "krusch_context_get_recovery_pattern",
-        description: "AgentDebugX Error Hub: Get execution recovery pattern and patch for a failure bundle ID.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            failure_id: { type: "number" }
-          },
-          required: ["failure_id"]
-        }
-      },
-      // DataFlow-Harness Tools
-      {
-        name: "krusch_context_register_pipeline_operator",
-        description: "DataFlow-Harness: Register a grounded dataflow/ingestion operator with strict input, output, and side-effect schemas.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-            input_schema: { type: "object" },
-            output_schema: { type: "object" },
-            side_effects: { type: "string" },
-            docs: { type: "string" }
-          },
-          required: ["name", "input_schema", "output_schema"]
-        }
-      },
-      {
-        name: "krusch_context_inspect_pipeline_registry",
-        description: "DataFlow-Harness: Inspect active grounded operator schemas in the MCP registry.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            filter: { type: "string" }
-          }
-        }
-      },
-      {
-        name: "krusch_context_mutate_pipeline_dag",
-        description: "DataFlow-Harness: Mutate a pipeline DAG using grounded, typed operations (AddNode, RemoveNode, WireEdge, UpdateNodeConfig).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            pipeline_name: { type: "string" },
-            mutation_type: { type: "string", enum: ["AddNode", "RemoveNode", "WireEdge", "UpdateNodeConfig"] },
-            node_data: { type: "object" },
-            edge_data: { type: "object" }
-          },
-          required: ["pipeline_name", "mutation_type"]
-        }
-      },
-      // Rubric4Setwise Tool
-      {
-        name: "krusch_context_setwise_rerank",
-        description: "Rubric4Setwise: Rerank candidate document/memory sets against Redundancy, Conflict, and Complementarity rubrics into a minimal covering set.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            candidates: { type: "array", description: "Array of candidate document/memory objects" },
-            query: { type: "string" },
-            target_count: { type: "number", default: 5 }
-          },
-          required: ["candidates", "query"]
-        }
-      },
-      // AREX Deep Research Tools
-      {
-        name: "krusch_context_update_research_state",
-        description: "AREX Deep Research: Update or create research state maintaining verified evidence and unresolved constraints.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            task_id: { type: "string" },
-            verified_evidence: { type: "array" },
-            unresolved_constraints: { type: "array" },
-            next_action_hints: { type: "array" }
-          },
-          required: ["task_id"]
-        }
-      },
-      {
-        name: "krusch_context_arex_audit",
-        description: "AREX Deep Research: Audit research evidence and unresolved constraints for a task to produce self-improving next follow-up steps.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            task_id: { type: "string" },
-            candidate_response: { type: "string" }
-          },
-          required: ["task_id"]
-        }
-      },
-      {
-        name: "krusch_context_manage_lifecycle",
-        description: "Agentic Context Management (ACM): Manage context fragment lifecycle (stage, compact, evict, get, list) and retention policies.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            action: { type: "string", description: "'stage' | 'compact' | 'evict' | 'get' | 'list'" },
-            fragment_id: { type: "string", description: "Unique fragment identifier" },
-            content: { type: "string", description: "Context text content or summary" },
-            stage: { type: "string", description: "'staged' | 'active' | 'compacted' | 'evicted'" },
-            ttl_days: { type: "number", description: "Retention time-to-live in days (default 30)" },
-            project: { type: "string", description: "Project identifier" },
-            metadata: { type: "object", description: "Optional arbitrary metadata" }
-          }
-        }
-      },
-      {
-        name: "krusch_context_audit_budget",
-        description: "Agentic Context Management (ACM): Audit context window pressure, token budget consumption, and eviction/compaction recommendations.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            project: { type: "string", description: "Project identifier" },
-            token_budget: { type: "number", description: "Total token budget (default 8192)" },
-            current_tokens: { type: "number", description: "Unmanaged prompt token count" }
-          }
-        }
-      },
-      {
-        name: "krusch_context_distill_teacher_memory",
-        description: "Hierarchical Teacher Memory Distillation (Paper 2608.07169): Log a teacher execution trajectory (workflow, subtask, or function tier) for student LLM agent learning.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            tier: { type: "string", enum: ["workflow", "subtask", "function"], description: "Memory tier: 'workflow' (task plan), 'subtask' (step goal), 'function' (tool error fix)" },
-            task_pattern: { type: "string", description: "Task pattern name or tool name (e.g. 'tool:git_commit')" },
-            teacher_model: { type: "string", description: "Identifier of the teacher model (e.g. 'gemini-3.5-flash')" },
-            student_model: { type: "string", description: "Target student model (e.g. 'qwen2.5-coder:7b')" },
-            trajectory: { type: "array", items: { type: "object" }, description: "Structured execution trajectory steps" },
-            distilled_rule: { type: "string", description: "High-level operational rule distilled from the trajectory" },
-            project: { type: "string", description: "Optional project association" },
-            tags: { type: "array", items: { type: "string" } }
-          },
-          required: ["tier", "task_pattern", "teacher_model", "trajectory", "distilled_rule"]
-        }
-      },
-      {
-        name: "krusch_context_retrieve_teacher_distillation",
-        description: "Hierarchical Teacher Memory Distillation (Paper 2608.07169): Retrieve distilled teacher trajectories matching a query and optional memory tier.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Search query or error message" },
-            tier: { type: "string", enum: ["workflow", "subtask", "function"], description: "Optional memory tier filter" },
-            project: { type: "string", description: "Optional project filter" },
-            limit: { type: "number", description: "Max results to return (default 3)" }
-          },
-          required: ["query"]
-        }
-      },
-      {
-        name: "krusch_context_distill_function_memory",
-        description: "Hierarchical Teacher Memory Distillation (Paper 2608.07169): Distill a tool call failure and teacher fix into a Tier 3 Function Memory entry for local student LLM error recovery.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            tool_name: { type: "string", description: "Tool that experienced an error" },
-            failed_input: { type: "string", description: "Input parameters that caused failure" },
-            error_message: { type: "string", description: "Error output or status" },
-            corrected_input: { type: "string", description: "Corrected input parameters provided by teacher" },
-            explanation: { type: "string", description: "Explanation of why the fix works" },
-            teacher_model: { type: "string", description: "Teacher model identifier" },
-            project: { type: "string", description: "Optional project filter" }
-          },
-          required: ["tool_name", "failed_input", "error_message", "corrected_input", "explanation"]
-        }
-      },
-      {
-        name: "krusch_context_route_skills",
-        description: "Diverse Skill Routing (DSR, arXiv: 2609.05824): Uses Determinantal Point Processes (DPP) to retrieve an orthogonal, non-redundant set of agent skills matching a task query without prompt bloat.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Task description, intent, or workflow requirements" },
-            max_skills: { type: "number", default: 5, description: "Maximum number of skills to route (default 5)" },
-            max_tokens: { type: "number", default: 4000, description: "Maximum combined token budget for routed skills" },
-            diversity_lambda: { type: "number", default: 0.6, description: "Weight parameter balancing relevance vs diversity (0.0 to 1.0, default 0.6)" }
-          },
-          required: ["query"]
-        }
-      },
-      {
-        name: "krusch_context_evaluate_resilience",
-        description: "Emergence World Multi-Agent Resilience Gate (arXiv: 2609.17320): Evaluates multi-agent execution traces and inter-agent handoffs for cascading failures, circular deadlocks, and credential leakage.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            handoffs: {
+      required: ["query"]
+    }
+  },
+  {
+    name: "krusch_context_proactive_nudge",
+    description: "Proactively audits current agent trajectory against historical lessons, bugs, priorities, and nuggets. Returns a warning nudge if any constraints or rules are violated.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        history: {
+          oneOf: [
+            { type: "string", description: "The last user query or current task context." },
+            {
               type: "array",
               items: {
                 type: "object",
                 properties: {
-                  senderId: { type: "string" },
-                  recipientId: { type: "string" },
-                  message: { type: "string" },
-                  status: { type: "string", enum: ["SUCCESS", "ERROR", "FAILED", "PENDING", "RESOLVED"] },
-                  error: { type: "string" }
+                  role: { type: "string", enum: ["user", "assistant", "system"] },
+                  content: { type: "string" }
                 },
-                required: ["senderId", "recipientId", "message"]
+                required: ["role", "content"]
               },
-              description: "Array of inter-agent handoff trace events"
-            },
-            max_cascade_depth: { type: "number", default: 2, description: "Maximum allowed consecutive error cascade depth" }
-          },
-          required: ["handoffs"]
-        }
+              description: "Full sliding window of conversation history."
+            }
+          ]
+        },
+        project: { type: "string", description: "Optional active project scope." }
       },
-      // Polygres Cloud Runtime 0.5.0 Tools
-      {
-        name: "polygres_cloud_usage",
-        description: "Polygres Cloud v0.5.0 Quota Monitor: Fetch live microcredit allowance, generation/query usage, and remaining free quota for the active Polygres project.",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "polygres_cloud_search",
-        description: "Polygres Cloud v0.5.0 In-Engine Search: Perform semantic or hybrid search over a cloud pgContext collection using pure text input (embeddings generated in-engine with zero local model load).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            collection: { type: "string", description: "Target pgContext collection name" },
-            text: { type: "string", description: "Raw text query to search and embed in-engine" },
-            limit: { type: "number", default: 10, description: "Max results to return (default 10)" },
-            filters: { type: "object", description: "Optional metadata filters" }
-          },
-          required: ["text"]
-        }
-      },
-      {
-        name: "polygres_cloud_models",
-        description: "Polygres Cloud v0.5.0 Model Catalog: Discover available in-engine embedding models, dimensions, and microcredit pricing.",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "polygres_cloud_capabilities",
-        description: "Polygres Cloud v0.5.0 Engine Capabilities: Inspect server-side pgContext version, HNSW limits (max record bytes, M factor), and compatibility.",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "polygres_cloud_embedding_configs",
-        description: "Polygres Cloud v0.5.0 Watched Tables: List automated in-database embedding pipelines configured on database tables.",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      }
-];
-
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const activeProfile = getActiveProfile();
-  let filteredTools = ALL_TOOLS;
-  if (activeProfile === 'core') {
-    filteredTools = ALL_TOOLS.filter(t => CORE_TOOLS.has(t.name));
-  } else if (activeProfile === 'extended') {
-    filteredTools = ALL_TOOLS.filter(t => CORE_TOOLS.has(t.name) || EXTENDED_ADDITIONAL_TOOLS.has(t.name));
-  }
-  return { tools: filteredTools };
-});
-
-server.setRequestHandler(ListPromptsRequestSchema, async () => {
-  const skills = listSkills();
-  return {
-    prompts: skills.map(s => ({
-      name: s.name,
-      description: s.description,
-      arguments: s.argumentHint ? [
-        {
-          name: "argument",
-          description: s.argumentHint,
-          required: false
-        }
-      ] : []
-    }))
-  };
-});
-
-server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-  const name = request.params.name;
-  const skill = getSkill(name);
-  if (!skill) {
-    throw new McpError(ErrorCode.InvalidParams, `Skill '${name}' not found.`);
-  }
-  
-  const argumentValue = request.params.arguments?.argument || "";
-  let text = skill.body;
-  if (argumentValue) {
-    text = `Argument provided by user: "${argumentValue}"\n\n${text}`;
-  }
-
-  return {
-    description: skill.description,
-    messages: [
-      {
-        role: "user",
-        content: {
-          type: "text",
-          text: text
-        }
-      }
-    ]
-  };
-});
-
-// --- Inline tool handlers (tools with logic living in index.js rather than engines) ---
-
-async function handleListSkills() {
-  const skills = listSkills();
-  let output = `=== 🛠️ Agent Skills Registry (${skills.length}) ===\n`;
-  for (const s of skills) {
-    output += `\n- Name: ${s.name}\n  Category: ${s.category}\n  Description: ${s.description}\n`;
-    if (s.argumentHint) {
-      output += `  Argument hint: ${s.argumentHint}\n`;
+      required: ["history"]
+    }
+  },
+  {
+    name: "krusch_context_health",
+    description: "Inspect the health, connectivity, and counts of the context engine.",
+    inputSchema: {
+      type: "object",
+      properties: {}
     }
   }
-  return { content: [{ type: "text", text: output }] };
-}
+];
 
-async function handleGetSkill(args) {
-  const { name } = args;
-  const skill = getSkill(name);
-  if (!skill) {
-    return { content: [{ type: "text", text: `Skill '${name}' not found.` }], isError: true };
+// Extended Core Tool Schemas
+export const EXTENDED_CORE_DEFINITIONS = [
+  {
+    name: "krusch_context_list_memories",
+    description: "List recent memories in a category, optionally filtered by project. Fast chronological listing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
+        project: { type: "string", description: "Filter by project name" },
+        active_project: { type: "string", description: "Optional project filter (alias for project)" },
+        limit: { type: "number", default: 10 }
+      },
+      required: ["category"]
+    }
+  },
+  {
+    name: "krusch_context_delete_memory",
+    description: "Delete a specific memory by its numeric ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number", description: "The numeric ID of the memory to delete" },
+        source_project: { type: "string", description: "Project name for SQLite memory. Leave empty for Global PG." },
+        project: { type: "string", description: "Optional alias for source_project" }
+      },
+      required: ["id"]
+    }
+  },
+  {
+    name: "krusch_context_update_memory",
+    description: "Update an existing memory's content, tags, or project assignment.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number", description: "The numeric ID of the memory to update" },
+        source_project: { type: "string", description: "Project name if SQLite memory." },
+        active_project: { type: "string", description: "Optional alias for source_project" },
+        content: { type: "string", description: "New content (triggers re-embedding)" },
+        tags: { type: "array", items: { type: "string" } },
+        project: { type: "string", description: "New project assignment" }
+      },
+      required: ["id"]
+    }
+  },
+  {
+    name: "krusch_context_consolidate",
+    description: "Consolidate duplicate or highly similar memories within a category and project.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: { type: "string", enum: ['priorities', 'bugs', 'outcomes', 'lessons', 'activity'] },
+        project: { type: "string" },
+        active_project: { type: "string", description: "Optional alias for project" },
+        threshold: { type: "number", default: 0.88 },
+        dry_run: { type: "boolean", default: true }
+      },
+      required: ["category"]
+    }
+  },
+  {
+    name: "krusch_context_deep_search",
+    description: "Deep concurrent search across all episodic memory categories and PG-Git codebase blobs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "The search query." },
+        project: { type: "string", description: "Optional project name." }
+      },
+      required: ["query"]
+    }
+  },
+  {
+    name: "krusch_context_list_repos",
+    description: "List all repositories indexed in PG-Git with their IDs and descriptions.",
+    inputSchema: {
+      type: "object",
+      properties: {}
+    }
+  },
+  {
+    name: "krusch_context_read_tree",
+    description: "Browse the file tree of a repository indexed in PG-Git.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repository_id: { type: "number", description: "The repository ID" },
+        tree_id: { type: "string", description: "The tree hash to browse. Omit for root tree." }
+      },
+      required: ["repository_id"]
+    }
+  },
+  {
+    name: "krusch_context_read_blob",
+    description: "Read the full content of a specific file (blob) from PG-Git by its SHA hash.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        blob_id: { type: "string", description: "The SHA hash of the blob to read" }
+      },
+      required: ["blob_id"]
+    }
+  },
+  {
+    name: "krusch_context_file_symbols",
+    description: "Get all AST code symbols extracted for a given file blob SHA.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        blob_id: { type: "string", description: "The SHA hash of the blob" }
+      },
+      required: ["blob_id"]
+    }
+  },
+  {
+    name: "krusch_context_nugget_forget",
+    description: "Delete a specific holographic nugget by key.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: { type: "string" },
+        project: { type: "string", description: "Project context (alias for active_project)." },
+        active_project: { type: "string", description: "Active project context." }
+      },
+      required: ["key"]
+    }
+  },
+  {
+    name: "krusch_context_nugget_list",
+    description: "List all saved holographic nuggets chronologically.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kinds: { type: "array", items: { type: "string", enum: ['project', 'user', 'agent'] } },
+        project: { type: "string" },
+        active_project: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "krusch_context_think",
+    description: "Perform cited context synthesis, conflict detection, and gap analysis across memory and codebase.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "The query or question to think about." },
+        project: { type: "string", description: "Optional project filter." }
+      },
+      required: ["query"]
+    }
+  },
+  {
+    name: "krusch_context_nudge_feedback",
+    description: "Logs developer feedback for proactive auditor nudges to collect alignment signals.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query_text: { type: "string" },
+        nudge_text: { type: "string" },
+        user_approved: { type: "boolean" },
+        agent_corrected: { type: "boolean" },
+        correction_diff: { type: "string" },
+        project: { type: "string" }
+      },
+      required: ["query_text", "nudge_text", "user_approved", "agent_corrected"]
+    }
   }
-  let output = `=== 🛠️ Skill: ${skill.name} (${skill.category}) ===\n`;
-  output += `Description: ${skill.description}\n\n`;
-  output += skill.body;
-  return { content: [{ type: "text", text: output }] };
-}
+];
 
+// Inline Git and Code Search Handlers
 async function handleListRepos() {
   const repos = await getRepositories();
   if (repos.length === 0) {
@@ -1212,8 +594,7 @@ async function handleListRepos() {
 }
 
 async function handleSearchCode(args) {
-  const { query: searchQuery, limit = 5, repository_id, project } = args;
-  
+  const { query: searchQuery, limit = 5, project, repository_id } = args;
   let resolvedRepoId = repository_id;
   if (project && !resolvedRepoId) {
       const repoRes = await pool.query(`SELECT id FROM repositories WHERE name = $1`, [project]);
@@ -1243,14 +624,9 @@ async function handleSearchCode(args) {
 
 async function handleDeepSearch(args) {
   const { query, project } = args;
-  
-  console.error(`[krusch-context-mcp] Executing deep context search for: "${query}"...`);
-  
-  // Generate embedding ONCE and share across all queries
   const vector = await getEmbedding(query);
   if (!vector) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
   
-  // Resolve repo ID for blob search
   let resolvedRepoId = undefined;
   if (project) {
       const repoRes = await pool.query(`SELECT id FROM repositories WHERE name = $1`, [project]);
@@ -1261,7 +637,6 @@ async function handleDeepSearch(args) {
       }
   }
   
-  // Search all memory categories + blobs concurrently with shared embedding
   const categories = ['lessons', 'bugs', 'priorities', 'outcomes', 'activity'];
   const memoryPromises = categories.map(cat =>
       searchMemory({ category: cat, query, limit: 2, active_project: project, _embedding: vector })
@@ -1272,8 +647,6 @@ async function handleDeepSearch(args) {
   const [blobMatches, ...memoryResults] = await Promise.all([blobsPromise, ...memoryPromises]);
   
   let output = `=== 🌍 DEEP CONTEXT SYNTHESIS ===\n\n`;
-  
-  // Merge memory results, skipping empty categories
   for (let i = 0; i < categories.length; i++) {
       const text = memoryResults[i].content[0].text;
       if (text && !text.includes("No results found")) {
@@ -1292,7 +665,6 @@ async function handleDeepSearch(args) {
         output += (r.summary || '(no preview)') + '\n';
     }
   }
-  
   return { content: [{ type: "text", text: output }] };
 }
 
@@ -1301,7 +673,7 @@ async function handleReadTree(args) {
   let treeHash = tree_id;
   if (!treeHash) {
     treeHash = await getRepoRootTree(repository_id);
-    if (!treeHash) return { content: [{ type: "text", text: "No root tree found for this repository. It may not have any commits synced." }] };
+    if (!treeHash) return { content: [{ type: "text", text: "No root tree found for this repository." }] };
   }
   const entries = await getTreeEntries(treeHash);
   if (entries.length === 0) return { content: [{ type: "text", text: `No entries found in tree: ${treeHash}` }] };
@@ -1379,157 +751,112 @@ async function handleHealthCheck() {
   const dbCheck = await pool.query('SELECT COUNT(*) as count FROM ide_agent_memory');
   const repoCheck = await pool.query('SELECT COUNT(*) as count FROM repositories');
   const nuggetCheck = await pool.query('SELECT COUNT(*) as count FROM ide_agent_nuggets');
-  const v2Check = await pool.query("SELECT COUNT(*) as count FROM interaction_memory WHERE status = 'active'");
   const symbolCheck = await pool.query('SELECT COUNT(*) as count FROM code_symbols').catch(() => ({ rows: [{ count: 0 }] }));
+  
+  let v2Count = 0;
+  try {
+    const v2Check = await pool.query("SELECT COUNT(*) as count FROM interaction_memory WHERE status = 'active'");
+    v2Count = v2Check.rows[0].count;
+  } catch (_) {}
+
   const memoryCount = dbCheck.rows[0].count;
   const repoCount = repoCheck.rows[0].count;
   const nuggetCount = nuggetCheck.rows[0].count;
-  const v2Count = v2Check.rows[0].count;
   const symbolCount = symbolCheck.rows[0]?.count || 0;
   const engineStatus = isPgContextEnabled() ? 'pgContext (HNSW + Single-Pass Filter)' : 'pgvector (Standard)';
-  return { content: [{ type: "text", text: `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Company Brain states (v2): ${v2Count}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Extracted symbols: ${symbolCount}\n- Vector Engine: ${engineStatus}\n- Database: Connected\n- Version: 1.4.0` }] };
+  
+  let text = `[krusch-context-mcp] 🟢 Server is healthy.\n- Episodic memories (v1): ${memoryCount}\n- Holographic nuggets: ${nuggetCount}\n- Indexed repositories: ${repoCount}\n- Extracted symbols: ${symbolCount}\n- Vector Engine: ${engineStatus}\n- Database: Connected\n- Version: 1.5.0`;
+  if (v2Count > 0) {
+    text += `\n- Company Brain states (v2): ${v2Count}`;
+  }
+  return { content: [{ type: "text", text }] };
 }
 
-async function handleDocsList() {
-  const configPath = process.env.EXTERNAL_DOCS_CONFIG_PATH || path.resolve(path.dirname(new URL(import.meta.url).pathname), '../config/external_docs.json');
-  try {
-    const fileContent = await fs.readFile(configPath, 'utf-8');
-    const configData = JSON.parse(fileContent);
-    if (!Array.isArray(configData) || configData.length === 0) {
-        return { content: [{ type: "text", text: "No manuals available." }] };
-    }
-    let output = `=== 📚 Available External Manuals ===\n`;
-    for (const doc of configData) {
-        output += `\n- ${doc.name} (Source: ${doc.url})`;
-    }
-    return { content: [{ type: "text", text: output }] };
-  } catch (e) {
-    return { content: [{ type: "text", text: "No external manuals configured." }] };
-  }
-}
-
-async function handleDocsSearch(args) {
-  const { manual_name, query: searchQuery, limit = 5 } = args;
-  
-  const repoRes = await pool.query(`SELECT id FROM repositories WHERE name = $1`, [manual_name]);
-  if (repoRes.rows.length === 0) {
-      return { content: [{ type: "text", text: `Manual '${manual_name}' not found in database. Use krusch_docs_list to see available manuals.` }] };
-  }
-  const resolvedRepoId = repoRes.rows[0].id;
-  
-  const vector = await getEmbedding(searchQuery);
-  if (!vector) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
-  
-  const results = await searchBlobs(vector, limit, resolvedRepoId, searchQuery);
-  if (results.length === 0) return { content: [{ type: "text", text: "No relevant documentation found." }] };
-  
-  let output = `=== 📖 Documentation Search: ${manual_name} ===\n`;
-  for (const r of results) {
-      const pathStr = r.file_path ? ` [${r.file_path}]` : '';
-      output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)})${pathStr} ---\n`;
-      output += (r.summary || '(no preview)') + '\n';
-  }
-  return { content: [{ type: "text", text: output }] };
-}
-
-// --- Dispatch table: tool name → handler function ---
-const TOOL_HANDLERS = new Map([
-  // Polygres-inspired Unified Context Retrieval
+// Master Dispatch Table
+export const TOOL_HANDLERS = new Map([
   ['krusch_context_retrieve',       (args) => unifiedRetrieve(args)],
-  // Memory engine (v1)
   ['krusch_context_add_memory',       (args) => addMemory(args)],
   ['krusch_context_supersede_memory', (args) => supersedeMemory(args)],
   ['krusch_context_invalidate_memory', (args) => invalidateMemory(args)],
   ['krusch_context_search_memory',    (args) => searchMemory(args)],
+  ['krusch_context_compile_state',  (args) => compileProjectState(args)],
+  ['krusch_context_nugget_remember', (args) => nuggetRemember(args)],
+  ['krusch_context_nugget_nudges',   (args) => nuggetNudges(args)],
+  ['krusch_context_search_symbols',   (args) => handleSearchSymbols(args)],
+  ['pg_git_search_symbols',           (args) => handleSearchSymbols(args)],
+  ['krusch_context_symbol_graph',     (args) => handleSymbolGraph(args)],
+  ['pg_git_dependency_graph',         (args) => handleSymbolGraph(args)],
+  ['krusch_context_search_code',     (args) => handleSearchCode(args)],
+  ['krusch_context_health',          () => handleHealthCheck()],
+  ['krusch_context_health_check',    () => handleHealthCheck()],
+  ['krusch_context_proactive_nudge', (args) => handleProactiveNudge(args)],
+  ['krusch_context_nudge_feedback', (args) => handleNudgeFeedback(args)],
+
+  // Extended Core inspection handlers
   ['krusch_context_list_memories',    (args) => listMemories(args)],
   ['krusch_context_delete_memory',  (args) => deleteMemory(args)],
   ['krusch_context_update_memory',  (args) => updateMemory(args)],
   ['krusch_context_consolidate',    (args) => consolidateMemories(args)],
-  ['krusch_context_compile_state',  (args) => compileProjectState(args)],
-  // Memory engine (v2 Company Brain)
-  ['krusch_context_write_state',      (args) => writeState(args)],
-  ['krusch_context_resolve_conflict', (args) => resolveConflict(args)],
-  ['krusch_context_get_provenance',   (args) => getProvenance(args)],
-  ['krusch_context_update_ontology',  (args) => updateOntology(args)],
-  ['krusch_context_search_lens',      (args) => searchLens(args)],
-  ['krusch_context_traverse_graph',   (args) => traverseGraph(args)],
-  ['krusch_context_link_blob',        (args) => linkBlob(args)],
-  // PG-Git codebase
-  ['krusch_context_list_repos',      () => handleListRepos()],
-  ['krusch_context_search_code',     (args) => handleSearchCode(args)],
   ['krusch_context_deep_search',     (args) => handleDeepSearch(args)],
+  ['krusch_context_list_repos',      () => handleListRepos()],
   ['krusch_context_read_tree',       (args) => handleReadTree(args)],
   ['krusch_context_read_blob',       (args) => handleReadBlob(args)],
-  ['krusch_context_search_symbols',   (args) => handleSearchSymbols(args)],
-  ['pg_git_search_symbols',           (args) => handleSearchSymbols(args)],
   ['krusch_context_file_symbols',     (args) => handleFileSymbols(args)],
   ['pg_git_file_symbols',             (args) => handleFileSymbols(args)],
-  ['krusch_context_symbol_graph',     (args) => handleSymbolGraph(args)],
-  ['pg_git_dependency_graph',         (args) => handleSymbolGraph(args)],
-  ['krusch_context_health_check',    () => handleHealthCheck()],
-  ['krusch_context_health',          () => handleHealthCheck()],
-  // Docs
-  ['krusch_docs_list',   () => handleDocsList()],
-  ['krusch_docs_search', (args) => handleDocsSearch(args)],
-  // Nuggets
-  ['krusch_context_nugget_remember', (args) => nuggetRemember(args)],
-  ['krusch_context_nugget_nudges',   (args) => nuggetNudges(args)],
   ['krusch_context_nugget_forget',   (args) => nuggetForget(args)],
   ['krusch_context_nugget_list',     (args) => nuggetList(args)],
-  ['krusch_context_think',           (args) => handleThink(args)],
-  ['krusch_context_list_skills',     () => handleListSkills()],
-  ['krusch_context_get_skill',      (args) => handleGetSkill(args)],
-  ['krusch_context_proactive_nudge', (args) => handleProactiveNudge(args)],
-  ['krusch_context_nudge_feedback', (args) => handleNudgeFeedback(args)],
-  ['krusch_context_analyze_trajectory', (args) => handleAnalyzeTrajectory(args)],
-  ['krusch_context_write_session_handoff', (args) => writeSessionHandoff(args)],
-  ['krusch_context_read_session_review',  (args) => readSessionReview(args)],
-  // AgentDebugX
-  ['krusch_context_log_agent_failure',     (args) => logAgentFailure(args)],
-  ['krusch_context_search_failures',        (args) => searchFailures(args)],
-  ['krusch_context_get_recovery_pattern',   (args) => getRecoveryPattern(args)],
-  // DataFlow-Harness
-  ['krusch_context_register_pipeline_operator', (args) => registerOperator(args)],
-  ['krusch_context_inspect_pipeline_registry',  (args) => inspectOperatorRegistry(args)],
-  ['krusch_context_mutate_pipeline_dag',       (args) => mutatePipelineDag(args)],
-  // Rubric4Setwise
-  ['krusch_context_setwise_rerank',         (args) => setwiseRerank(args)],
-  // AREX
-  ['krusch_context_update_research_state',  (args) => updateResearchState(args)],
-  ['krusch_context_arex_audit',             (args) => auditResearchConstraints(args)],
-  // ACM (Agentic Context Management - ArXiv 2607.21503)
-  ['krusch_context_manage_lifecycle',       (args) => manageContextLifecycle(args)],
-  ['krusch_context_audit_budget',           (args) => auditContextBudget(args)],
-  // Hierarchical Teacher Memory Distillation (ArXiv 2608.07169)
-  ['krusch_context_distill_teacher_memory',        (args) => distillTeacherMemory(args)],
-  ['krusch_context_retrieve_teacher_distillation', (args) => retrieveTeacherDistillation(args)],
-  ['krusch_context_distill_function_memory',       (args) => distillFunctionMemory(args)],
-  // Diverse Skill Routing (ArXiv 2609.05824)
-  ['krusch_context_route_skills',                  (args) => routeSkills(args)],
-  // Multi-Agent Resilience Gate (ArXiv 2609.17320)
-  ['krusch_context_evaluate_resilience',           (args) => handleEvaluateResilience(args)],
-  // Polygres Cloud Runtime 0.5.0
-  ['polygres_cloud_usage', async () => {
-    const usage = await getCloudUsage();
-    return { content: [{ type: "text", text: usage.summaryText }] };
-  }],
-  ['polygres_cloud_search', async (args) => {
-    const results = await searchCloudContext(args);
-    return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
-  }],
-  ['polygres_cloud_models', async () => {
-    const models = await getCloudEmbeddingModels();
-    return { content: [{ type: "text", text: JSON.stringify(models, null, 2) }] };
-  }],
-  ['polygres_cloud_capabilities', async () => {
-    const caps = await getCloudCapabilities();
-    return { content: [{ type: "text", text: JSON.stringify(caps, null, 2) }] };
-  }],
-  ['polygres_cloud_embedding_configs', async () => {
-    const configs = await listCloudEmbeddingConfigs();
-    return { content: [{ type: "text", text: JSON.stringify(configs, null, 2) }] };
-  }],
+  ['krusch_context_think',           (args) => handleThink(args)]
 ]);
+
+export let activeExtensions = [];
+
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  const activeProfile = getActiveProfile();
+  let tools = [...CORE_TOOL_DEFINITIONS];
+
+  if (activeProfile === 'extended' || activeProfile === 'full') {
+    tools.push(...EXTENDED_CORE_DEFINITIONS);
+  }
+
+  for (const ext of activeExtensions) {
+    if (ext.tools) {
+      tools.push(...ext.tools);
+    }
+  }
+
+  return { tools };
+});
+
+server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  const skillsExt = activeExtensions.find(e => e.name === 'skills-docs');
+  if (skillsExt) {
+    const { listSkills } = await import('./extensions/skills-docs/skills-engine.js');
+    const skills = listSkills();
+    return {
+      prompts: skills.map(s => ({
+        name: s.name,
+        description: s.description,
+        arguments: s.argumentHint ? [{ name: "argument", description: s.argumentHint, required: false }] : []
+      }))
+    };
+  }
+  return { prompts: [] };
+});
+
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const skillsExt = activeExtensions.find(e => e.name === 'skills-docs');
+  if (skillsExt) {
+    const { getSkill } = await import('./extensions/skills-docs/skills-engine.js');
+    const skill = getSkill(request.params.name);
+    if (skill) {
+      return {
+        description: skill.description,
+        messages: [{ role: "user", content: { type: "text", text: skill.body } }]
+      };
+    }
+  }
+  throw new McpError(ErrorCode.InvalidParams, `Prompt '${request.params.name}' not found.`);
+});
 
 const tracer = trace.getTracer('krusch-context-mcp');
 
@@ -1555,10 +882,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           span.setAttribute('tool.is_error', result.isError === true);
       }
       
-      span.setStatus({ code: 1 }); // OK
+      span.setStatus({ code: 1 });
       return result;
     } catch (err) {
-      span.setStatus({ code: 2, message: err.message }); // ERROR
+      span.setStatus({ code: 2, message: err.message });
       span.recordException(err);
       
       if (err instanceof McpError) throw err;
@@ -1582,13 +909,34 @@ async function main() {
   initTracing(tracePath);
   console.error(`[krusch-context-mcp] Tracing initialized: ${tracePath}`);
 
-  await loadSkills();
   await verifyDatabase();
+
+  // Load requested extensions
+  const requestedExts = getRequestedExtensions();
+  if (requestedExts.length > 0) {
+    console.error(`[krusch-context-mcp] Loading extensions: ${requestedExts.join(', ')}...`);
+    activeExtensions = await loadExtensions(requestedExts, pool);
+    for (const ext of activeExtensions) {
+      if (ext.handlers) {
+        for (const [name, fn] of ext.handlers.entries()) {
+          TOOL_HANDLERS.set(name, fn);
+        }
+      }
+    }
+    console.error(`[krusch-context-mcp] Active extensions loaded: ${activeExtensions.map(e => e.name).join(', ')}`);
+  }
+
   const activeProfile = getActiveProfile();
-  const exposedCount = activeProfile === 'core' 
-    ? CORE_TOOLS.size 
-    : (activeProfile === 'extended' ? (CORE_TOOLS.size + EXTENDED_ADDITIONAL_TOOLS.size) : ALL_TOOLS.length);
-  console.error(`[krusch-context-mcp] Active profile: '${activeProfile}' (${exposedCount} of ${ALL_TOOLS.length} tools exposed to agent)`);
+  let exposedCount = CORE_TOOLS.size;
+  if (activeProfile === 'extended' || activeProfile === 'full') {
+    exposedCount += EXTENDED_CORE_TOOLS.size;
+  }
+  for (const ext of activeExtensions) {
+    if (ext.tools) exposedCount += ext.tools.length;
+  }
+
+  console.error(`[krusch-context-mcp] Server ready | Profile: '${activeProfile}' | Exposed Tools: ${exposedCount} | Extensions: ${activeExtensions.length}`);
+  
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("[krusch-context-mcp] Server running on stdio");

@@ -15,7 +15,7 @@ const pending = new Map();
 
 const child = spawn('node', [SERVER], {
     stdio: ['pipe', 'pipe', 'inherit'],
-    env: { ...process.env }
+    env: { ...process.env, KRUSCH_PROFILE: process.env.KRUSCH_PROFILE || 'full' }
 });
 
 const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });

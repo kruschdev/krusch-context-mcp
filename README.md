@@ -5,15 +5,15 @@
 <p align="center">
   <a href="https://github.com/kruschdev/krusch-context-mcp"><img src="https://img.shields.io/github/package-json/v/kruschdev/krusch-context-mcp.svg" alt="Version" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-11%20core%20tools-purple.svg" alt="11 core MCP tools" /></a>
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/tiers-core%2011%20%7C%20extended%2031%20%7C%20full%2064-lightgrey.svg" alt="Expansion tiers" /></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-13%20core%20tools-purple.svg" alt="13 core MCP tools" /></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/architecture-core%2013%20%7C%20extended%2025%20%7C%20extensions-lightgrey.svg" alt="Core + Extensions" /></a>
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22+-green.svg" alt="Node" /></a>
   <a href="https://github.com/pgvector/pgvector"><img src="https://img.shields.io/badge/Database-PostgreSQL%20%2B%20pgvector-lightgrey.svg" alt="Database" /></a>
 </p>
 
-**11-tool AI context engine** for coding agents: hybrid codebase retrieval, episodic memory, steering nuggets, and a proactive auditor.
+**13-tool sovereign AI context engine** for coding agents: hybrid codebase retrieval, persistent episodic memory with self-healing superseding/invalidation, steering nuggets, and a proactive auditor. Built with **Polygres** as the primary backend (**18 tools** in default Polygres setup with cloud runtime).
 
-Modular expansion tiers: **core (11, default)** → **extended (31)** → **full (64)**. Do not expose the research suite unless you need it.
+Modular architecture: **core (13, sovereign default)** / **core + polygres-cloud (18, turnkey default)** → **extended core (25/30)** → **modular companion extensions** (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`).
 
 ---
 
@@ -29,14 +29,17 @@ Operating as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 
 
 ## 🎯 Curated Tool Profiles: No Tool Overload
 
-Exposing dozens of overlapping tools hurts LLM performance: it consumes thousands of prompt tokens per turn and causes tool-selection errors. Krusch Context MCP solves this with **Tool Profiles** (`KRUSCH_PROFILE`):
+Exposing dozens of overlapping tools hurts LLM performance: it consumes thousands of prompt tokens per turn and causes tool-selection errors. Krusch Context MCP solves this with **Tool Profiles** (`KRUSCH_PROFILE`) and **Modular Companion Extensions**:
 
-| Profile | Tools Exposed | Default | System Prompt Cost | Intended Use |
+| Profile / Mode | Tools Exposed | Default | System Prompt Cost | Intended Use |
 | :--- | :---: | :---: | :---: | :--- |
-| **`core`** | **11 tools** | ✅ **Yes** | **~850 tokens** | **Recommended for all agents.** High-signal daily drivers: hybrid retrieval, episodic memory, one-shot state compilation, steering nuggets, symbol search, dependency graph, health, and proactive guardrails. |
-| **`extended`** | **31 tools** | ❌ No | ~2,400 tokens | Adds full memory lifecycle (`supersede`, `invalidate`, `consolidate`), Git DAG inspection, agent skills prompt registry, and external docs. |
-| **`full`** | **64 tools** | ❌ No | ~4,800 tokens | Power-user & research tier: includes Company Brain v2 substrate, AI Watch experimental modules, and remote Polygres Cloud tools. |
+| **`core` + Polygres Cloud** *(Default Setup)* | **18 tools** (13 Core + 5 Polygres) | ✅ **Yes** (when configured) | **~1,200 tokens** | **Recommended turnkey setup.** All 13 Core daily drivers + Polygres Cloud in-engine vector search, live quota tracking, and model catalog. Auto-mounted whenever `POLYGRES_API_KEY` is present. |
+| **`core`** *(Pure Sovereign)* | **13 tools** | ✅ **Yes** (local-only) | **~900 tokens** | High-signal daily drivers using local PostgreSQL + local Ollama: hybrid retrieval, episodic memory, active superseding & invalidation, state compilation, steering nuggets, symbol search, dependency graph, health, and proactive guardrails. |
+| **`extended`** | **25 tools** *(30 with Polygres)* | ❌ No | ~1,800 tokens | Adds full administrative memory inspection (`list`, `delete`, `update`, `consolidate`), Git tree/blob inspection, and cited thinking. |
+| **`extensions`** | **Modular Companion MCPs** | ❌ No | On-demand | Specialized domains running as independent companion servers or loaded dynamically via `--extensions=...` (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`). |
 
+> [!TIP]
+> **Defaulting to Polygres Cloud**: Because Polygres Cloud is our primary backend, whenever `POLYGRES_API_KEY` is defined in your environment or `.env`, Krusch Context MCP **automatically enables** the 5 Polygres Cloud tools alongside the 13 Core tools (giving your agent **18 tools** total out of the box). If you want pure local Core with no cloud tools, pass `--no-polygres`.
 > Direct tool calls to registered handlers always succeed even if omitted from `tools/list`, ensuring complete script and CI compatibility.
 
 ---
@@ -55,21 +58,22 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 * **Hybrid RRF Search (`search_code`)**: Merges dense cosine similarity with lexical BM25 (`tsv` GIN index) using Reciprocal Rank Fusion and exponential temporal decay ($e^{-0.01t}$).
 * **Standalone Synergy**: 100% schema-compatible with [PG-Git](https://github.com/kruschdev/pg-git) (`pg-git-mcp@1.1.0`), supporting dedicated `pg_git_*` aliases.
 
-### 3. 🧠 Episodic Memory & Steering Nuggets
+### 3. 🧠 Episodic Memory & Steering Nuggets (With Active Hygiene)
 * **Contextmaxxing (`compile_state`)**: Compiles project state (priorities, active blockers, lessons, steering facts) into a single-shot briefing document.
-* **Temporal Superseding & Invalidation**: Supersede outdated rules (`supersede_memory`) and invalidate deprecated invariants (`invalidate_memory`) to eliminate stale knowledge drift.
+* **Temporal Superseding (`supersede_memory`)**: Supersede outdated rules with lineage links and auto-marking of stale facts as `SUPERSEDED`.
+* **Explicit Invalidation (`invalidate_memory`)**: Mark revoked secrets, obsolete invariants, or abandoned rules as `INVALIDATED` to guarantee they are never retrieved.
 * **Holographic Steering Nuggets (`nugget_remember`)**: Micro-key-value facts (coding standards, conventions) that steer agent behavior without repetitive system prompt edits.
 * **Lakebase Architecture**: Zero-latency reads from per-project local SQLite compute cache (`.agent/memory.db`) backed by durable PostgreSQL object storage.
 
 ### 4. 🛡️ Proactive Trajectory Auditing & Alignment Loop
 * **Proactive Auditor (`proactive_nudge`)**: Background threat-auditor that flags rule violations, architectural drift, or known regressions before edits execute.
 * **Closed-Loop Alignment (`nudge_feedback`)**: Automatically captures developer approvals and corrections to refine future proactive guidance.
-* **Trajectory Isolation (`analyze_trajectory`)**: Trace execution paths and isolate the exact turn where an agent diverged from project intent.
 
-### 5. 🔬 Research Substrates & Cloud Runtimes (Full Profile)
-* **Company Brain v2 Substrate**: Factual memory, interaction memory with parent-child lineage, conflict resolution (`resolve_conflict`), and role-based lens search.
-* **Experimental AI Watch Modules**: Failure observability (AgentDebugX), atomic pipeline DAG mutations (DataFlow), minimal cover reranking (Setwise), deep research convergence (AREX), and teacher trajectory distillation.
-* **Polygres Cloud Integration**: Optional zero-GPU cloud backend with in-engine embeddings and managed collections.
+### 5. ⚡ Polygres Engine & Modular Companion Extensions
+* **Dual-Layer Polygres Acceleration**:
+  - **Layer 1: pgContext In-Database Acceleration**: Native PostgreSQL acceleration with single-pass vector and metadata filtering. Automatically detected on boot via native pool.
+  - **Layer 2: Polygres Cloud Runtime 0.5.0 (`polygres_cloud_*`)**: In-engine embeddings (zero local GPU/model burden), remote vector search, model catalog, and live microcredit tracking. **Auto-mounted by default** whenever `POLYGRES_API_KEY` is configured.
+* **Modular Companion MCPs**: Run as independent companion servers or load dynamically via `--extensions=...` (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`).
 
 ---
 
@@ -77,23 +81,31 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 
 ```mermaid
 graph TD;
-    Agent["IDE Agent: Cursor / Claude Code / Windsurf"] --> MCP{"Krusch Context MCP<br/><b>Core: 11 Tools (Default)</b><br/>Full: 64 Tools"};
+    Agent["IDE Agent: Cursor / Claude Code / Windsurf"] --> MCP{"Krusch Context MCP<br/><b>Core: 13 Tools (Default)</b><br/>+ Modular Extensions"};
 
-    subgraph "Storage & Memory Layer"
-        MCP -- "Self-Hosted / Local (Primary)" --> PG[("🐘 PostgreSQL + pgvector<br/>• Code Blobs, Trees, Commits<br/>• AST Symbols & Graph Edges<br/>• Episodic Memory & Nuggets")];
+    subgraph "Storage & Backend Layer"
+        MCP -- "Self-Hosted / Fleet" --> PG[("🐘 PostgreSQL + pgvector / pgContext<br/>• Code Blobs, Trees, Commits<br/>• AST Symbols & Graph Edges<br/>• Episodic Memory & Nuggets")];
         MCP -- "Zero-Latency Cache" --> SQLite[("⚡ Local SQLite Lakebase<br/>.agent/memory.db")];
-        MCP -. "Optional Managed Cloud" .-> Polygres["⚡ Polygres Cloud<br/>In-Engine Embeddings"];
+        MCP -- "Cloud Engine (Primary)" --> Polygres["⚡ Polygres Cloud<br/>In-Engine Embeddings & Search"];
     end
 
     subgraph "Local Embeddings & Models"
         PG --> Ollama["🦙 Local Ollama<br/>• bge-large (1024d vectors)<br/>• llama3.2 (tags & brief)"];
     end
 
-    subgraph "Core Operational Engines"
+    subgraph "Core Operational Engines (13 Tools)"
         MCP --> PGGit["🧩 Structural Code Engine<br/>Lexer & Call Graph Walks"];
-        MCP --> Memory["🧠 Episodic Memory<br/>Superseding & Nuggets"];
+        MCP --> Memory["🧠 Episodic Memory<br/>Superseding & Invalidation"];
         MCP --> State["📋 Contextmaxxing<br/>compile_state Brief"];
         MCP --> Auditor["🛡️ Proactive Auditor<br/>Trajectory Guardrails"];
+    end
+
+    subgraph "Modular Companion Extensions"
+        MCP -. "auto / --extensions" .-> ExtCloud["⚡ Polygres Cloud (5 tools)<br/>Quota & in-engine search"];
+        MCP -. "companion / flag" .-> ExtBrain["🧠 Company Brain (8 tools)<br/>Multi-tenant v2 graph"];
+        MCP -. "companion / flag" .-> ExtResearch["🔬 Research Suite (15 tools)<br/>AgentDebugX, AREX, ACM"];
+        MCP -. "companion / flag" .-> ExtSession["🌉 Session Bridge (2 tools)<br/>Jean SRE handoffs"];
+        MCP -. "companion / flag" .-> ExtSkills["🛠️ Skills & Docs (5 tools)<br/>DSR routing & manuals"];
     end
 
     Auditor -. "Warning Nudge" .-> Agent;
@@ -117,24 +129,24 @@ npm install
 cp .env.example .env
 ```
 
-#### Option A: Local / Self-Hosted Stack (Default & Sovereign)
+#### Option A: Polygres Cloud Backend (Recommended / Turnkey Zero-GPU)
+Uses Polygres Cloud for in-engine embeddings and managed collections:
+
+```env
+DATABASE_URL="postgresql://openclaw:password@10.0.0.85:5434/kruschdb"
+POLYGRES_PROJECT_ID="your_project_id"
+POLYGRES_RUNTIME_URL="https://your_project_id.api.db.polygres.com/v1"
+POLYGRES_API_KEY="poly_live_your_key"
+```
+> *When `POLYGRES_API_KEY` is present, the 5 Polygres Cloud tools (`polygres_cloud_*`) automatically activate.*
+
+#### Option B: Local / Self-Hosted Stack (Sovereign)
 Uses your local PostgreSQL with `pgvector` and local Ollama (`bge-large`):
 
 ```env
 KRUSCH_PROFILE="core"
 DATABASE_URL="postgresql://postgres:password@localhost:5432/kruschdb"
 OLLAMA_URL="http://127.0.0.1:11434"
-```
-
-#### Option B: Polygres Cloud (Turnkey Zero-GPU Setup)
-If you prefer not running local DB and Ollama instances:
-
-```env
-KRUSCH_PROFILE="core"
-POLYGRES_PROJECT_ID="your_project_id"
-POLYGRES_RUNTIME_URL="https://your_project_id.api.db.polygres.com/v1"
-POLYGRES_API_KEY="sk-polygres-your-key"
-DATABASE_URL="postgresql://user:pass@app.polygres.com:5432/your_db?sslmode=require"
 ```
 
 ### 3. Ingest Your Codebase (Optional but Recommended)
@@ -153,11 +165,14 @@ Add the server to your IDE's MCP configuration.
   "mcpServers": {
     "krusch-context": {
       "command": "node",
-      "args": ["/absolute/path/to/krusch-context-mcp/src/index.js"],
+      "args": [
+        "/absolute/path/to/krusch-context-mcp/src/index.js",
+        "--extensions=polygres-cloud"
+      ],
       "env": {
-        "KRUSCH_PROFILE": "core",
         "DATABASE_URL": "postgresql://postgres:password@localhost:5432/kruschdb",
-        "OLLAMA_URL": "http://127.0.0.1:11434"
+        "POLYGRES_RUNTIME_URL": "https://your_project_id.api.db.polygres.com/v1",
+        "POLYGRES_API_KEY": "poly_live_your_key"
       }
     }
   }
@@ -170,22 +185,29 @@ Add the server to your IDE's MCP configuration.
   "mcpServers": {
     "krusch-context": {
       "command": "node",
-      "args": ["/absolute/path/to/krusch-context-mcp/src/index.js"],
+      "args": [
+        "/absolute/path/to/krusch-context-mcp/src/index.js",
+        "--extensions=polygres-cloud"
+      ],
       "env": {
-        "KRUSCH_PROFILE": "core",
         "DATABASE_URL": "postgresql://postgres:password@localhost:5432/kruschdb",
-        "OLLAMA_URL": "http://127.0.0.1:11434"
+        "POLYGRES_RUNTIME_URL": "https://your_project_id.api.db.polygres.com/v1",
+        "POLYGRES_API_KEY": "poly_live_your_key"
       }
     }
   }
 }
 ```
 
-Restart your IDE — your agent now has immediate access to the **11 core context tools** with zero prompt bloat.
+> [!NOTE]
+> **How Polygres Cloud Tools Are Enabled**:
+> 1. **Automatic Detection**: If `POLYGRES_API_KEY` is present in `env` (or your local `.env`), Krusch Context MCP auto-detects it and exposes all 18 tools (13 Core + 5 Polygres Cloud). You do not strictly need `--extensions=polygres-cloud` in `args`.
+> 2. **Explicit Flag**: You can pass `--extensions=polygres-cloud` in `args` or set `KRUSCH_EXTENSIONS=polygres-cloud`.
+> 3. **Standalone Companion Server**: Alternatively, launch Polygres Cloud as a dedicated companion MCP server via `npm run start:cloud` (`src/extensions/polygres-cloud/server.js`).
 
----
+Restart your IDE — your agent now has immediate access to the **13 core context tools** (plus the 5 Polygres Cloud tools, 18 tools total) with zero prompt bloat.
 
-## 💡 Practical Agent Workflows (Core Profile)
+## 💡 Practical Agent Workflows (Core Profile & Polygres)
 
 ### Workflow 1: Single-Turn Hybrid Retrieval (`krusch_context_retrieve`)
 ```javascript
@@ -238,49 +260,98 @@ await krusch_context_nugget_nudges({
 });
 ```
 
+### Workflow 5: Active Memory Hygiene (`supersede` & `invalidate`)
+```javascript
+// Supersede outdated documentation or rules with updated knowledge
+await krusch_context_supersede_memory({
+  id: 42,
+  category: "lessons",
+  content: "Use Polygres Cloud Runtime 0.5.0 for in-engine embeddings instead of local Ollama on dev boxes",
+  project: "krusch-context-mcp"
+});
+
+// Explicitly invalidate deprecated invariants or revoked secrets
+await krusch_context_invalidate_memory({
+  id: 17,
+  reason: "API key rotated and auth pattern deprecated"
+});
+```
+
+### Workflow 6: Polygres Cloud In-Engine Search & Quota
+```javascript
+// Check live generation/query microcredit allowance and remaining quota
+await polygres_cloud_usage();
+
+// In-engine semantic search over cloud collections (zero local GPU load)
+await polygres_cloud_search({
+  collection: "project_context",
+  text: "Postgres connection pooling timeouts",
+  limit: 5
+});
+```
+
 ---
 
 ## 📋 Complete Tool Reference
 
 For complete parameter types, input schemas, and JSON examples, see **[TOOL_REFERENCE.md](docs/TOOL_REFERENCE.md)**.
 
-| Profile | Category | Tool | Description |
-| :--- | :--- | :--- | :--- |
-| **`core`** | Retrieval | `krusch_context_retrieve` | Single-query hybrid vector + graph walk + token budget packing |
-| **`core`** | Memory | `krusch_context_add_memory` | Store persistent episodic memory (bug, lesson, priority) |
-| **`core`** | Memory | `krusch_context_search_memory`| Semantic search with recency decay |
-| **`core`** | State | `krusch_context_compile_state` | One-shot multi-scale project state compilation |
-| **`core`** | Nuggets | `krusch_context_nugget_remember`| Store key-value steering fact or preference |
-| **`core`** | Nuggets | `krusch_context_nugget_nudges` | Semantically retrieve steering facts for active task |
-| **`core`** | Codebase | `krusch_context_search_symbols`| Search extracted structural symbols across languages |
-| **`core`** | Codebase | `krusch_context_symbol_graph` | Walk symbol callers, imports, and dependencies |
-| **`core`** | Codebase | `krusch_context_search_code` | Hybrid dense pgvector + BM25 RRF search over blobs |
-| **`core`** | Health | `krusch_context_health` | Diagnostic check for DB pool, embeddings, and tables |
-| **`core`** | Safety | `krusch_context_proactive_nudge`| Trajectory threat auditor — flags rule or bug recurrence |
-| `extended` | Memory | `krusch_context_supersede_memory`| Temporal fact superseding with revision lineage |
-| `extended` | Memory | `krusch_context_invalidate_memory`| Invalidate obsolete memory record |
-| `extended` | Memory | `krusch_context_list_memories` | List recent memories filtered by category and project |
-| `extended` | Memory | `krusch_context_delete_memory` | Delete memory record by ID |
-| `extended` | Memory | `krusch_context_update_memory` | Update memory content, tags, or metadata |
-| `extended` | Memory | `krusch_context_consolidate` | Centroid-based semantic memory deduplication |
-| `extended` | Retrieval | `krusch_context_deep_search` | Composite search cross-referencing memory & code |
-| `extended` | Codebase | `krusch_context_list_repos` | Browse indexed repositories registered in PostgreSQL |
-| `extended` | Codebase | `krusch_context_read_tree` | Inspect repository directory trees in the Git DAG |
-| `extended` | Codebase | `krusch_context_read_blob` | Retrieve file content by blob hash or path |
-| `extended` | Codebase | `krusch_context_file_symbols` | List all symbols defined in a specific file |
-| `extended` | Nuggets | `krusch_context_nugget_forget` | Delete steering fact by key |
-| `extended` | Nuggets | `krusch_context_nugget_list` | List active steering nuggets for project |
-| `extended` | Thinking | `krusch_context_think` | Cited context synthesis, conflict detection & gap analysis |
-| `extended` | Skills | `krusch_context_list_skills` | Browse registered agent skills in homelab directory |
-| `extended` | Skills | `krusch_context_get_skill` | Retrieve complete skill prompt markdown instructions |
-| `extended` | Docs | `krusch_docs_list` | List ingested external documentation manuals |
-| `extended` | Docs | `krusch_docs_search` | Vector search within an ingested documentation manual |
-| `extended` | Session | `krusch_context_write_session_handoff`| Persist session handoff summary for background review |
-| `extended` | Session | `krusch_context_read_session_review`| Read review compiled by background companions |
-| `full` | Substrate | `krusch_context_write_state` ... `link_blob` | Company Brain v2 substrate tools (7 tools) |
-| `full` | AI Watch | `log_agent_failure` ... `evaluate_resilience` | Experimental SRE and research engines (18 tools) |
-| `full` | Cloud | `polygres_cloud_usage` ... `embedding_configs` | Polygres Cloud runtime and quota tools (5 tools) |
-| `full` | Aliases | `pg_git_search_symbols` ... `dependency_graph` | Standalone PG-Git backward compatibility aliases (3 tools) |
+### Core Profile (13 Tools — Sovereign Default)
+| Category | Tool | Description |
+| :--- | :--- | :--- |
+| **Retrieval** | `krusch_context_retrieve` | Polygres-style single-query hybrid vector + graph walk + token budget packing |
+| **Memory** | `krusch_context_add_memory` | Store persistent episodic memory (priorities, bugs, outcomes, lessons, activity) |
+| **Memory** | `krusch_context_supersede_memory` | Temporal fact superseding with lineage tracking (marks old record `SUPERSEDED`) |
+| **Memory** | `krusch_context_invalidate_memory` | Explicitly invalidate obsolete rules/facts (marks record `INVALIDATED`) |
+| **Memory** | `krusch_context_search_memory`| Semantic search with recency decay (excludes superseded/invalidated facts) |
+| **State** | `krusch_context_compile_state` | One-shot multi-scale project state compilation briefing |
+| **Nuggets** | `krusch_context_nugget_remember`| Store fast key-value steering fact or convention (project/user/agent) |
+| **Nuggets** | `krusch_context_nugget_nudges` | Semantically retrieve steering facts for the active task |
+| **Codebase** | `krusch_context_search_symbols`| Search extracted structural AST symbols across JS, TS, Python, Go, Rust |
+| **Codebase** | `krusch_context_symbol_graph` | Walk relational symbol dependency edges, inbound callers, and outbound imports |
+| **Codebase** | `krusch_context_search_code` | Hybrid dense pgvector + BM25 RRF search over Git blobs with age decay |
+| **Health** | `krusch_context_health` | Diagnostic health check for DB pool, embeddings, and repository status |
+| **Safety** | `krusch_context_proactive_nudge`| Proactive threat auditor — flags rule violations or known bug regressions |
+
+### ⚡ Polygres Cloud Companion Tools (5 Tools — Turnkey Default)
+*Auto-mounted whenever `POLYGRES_API_KEY` is present in your environment (providing a total of 18 tools out of the box), or run as a standalone companion server via `npm run start:cloud`.*
+
+| Category | Tool | Description |
+| :--- | :--- | :--- |
+| **Cloud Quota** | `polygres_cloud_usage` | Inspect live microcredit allowance, queries remaining, generation credits, and cost breakdown |
+| **Cloud Search** | `polygres_cloud_search` | In-engine semantic vector search over remote Polygres Cloud collections with metadata filtering |
+| **Cloud Catalog** | `polygres_cloud_models` | List remote in-database embedding models supported on Polygres Cloud |
+| **Cloud Engine** | `polygres_cloud_capabilities` | Verify active runtime engine features (HNSW vector indexing, text-in vectorization, hybrid search) |
+| **Cloud Sync** | `polygres_cloud_embedding_configs` | Inspect automated table-embedding configurations synchronized with Polygres Cloud |
+
+### Extended Core Inspection (12 Tools)
+*Enabled via `--profile=extended` or `KRUSCH_PROFILE=extended`*
+
+| Category | Tool | Description |
+| :--- | :--- | :--- |
+| **Memory** | `krusch_context_list_memories` | Chronological listing of memories filtered by category and project |
+| **Memory** | `krusch_context_delete_memory` | Delete a specific memory record by numeric ID |
+| **Memory** | `krusch_context_update_memory` | Update memory content, tags, or project assignment (triggers re-embedding) |
+| **Memory** | `krusch_context_consolidate` | Centroid-based semantic memory deduplication within category |
+| **Retrieval** | `krusch_context_deep_search` | Composite search cross-referencing all episodic categories and code blobs |
+| **Codebase** | `krusch_context_list_repos` | Browse indexed repositories registered in PostgreSQL Git DAG |
+| **Codebase** | `krusch_context_read_tree` | Inspect directory tree objects in the Git DAG |
+| **Codebase** | `krusch_context_read_blob` | Retrieve file content by blob SHA hash |
+| **Codebase** | `krusch_context_file_symbols` | List all extracted symbols for a specific blob SHA |
+| **Nuggets** | `krusch_context_nugget_forget` | Delete a steering fact by key |
+| **Nuggets** | `krusch_context_nugget_list` | Chronological list of active steering nuggets |
+| **Thinking** | `krusch_context_think` | Cited context synthesis, conflict detection & gap analysis |
+
+### Modular Companion Extensions (`src/extensions/`)
+*Run as standalone companion MCP servers or load dynamically via `--extensions=...`*
+
+| Extension | Standalone Launcher | Tools | Key Capabilities |
+| :--- | :--- | :---: | :--- |
+| **`polygres-cloud`** | `npm run start:cloud` | **5** | Live microcredit quota tracking (`usage`), in-engine semantic search (`search`), in-database model catalog (`models`), HNSW capabilities, and watched table embedding configs. *Auto-activates when `POLYGRES_API_KEY` is present.* |
+| **`company-brain`** | `npm run start:company-brain` | **8** | Company Brain v2 Substrate: optimistic concurrency memory (`write_state`), branching conflict resolution (`resolve_conflict`), version provenance (`get_provenance`), ontology management (`update_ontology`), role lenses (`search_lens`), and graph walks (`traverse_graph`). |
+| **`research`** | `npm run start:research` | **15** | AI Watch research suite: failure observability (`AgentDebugX`), DAG mutations (`DataFlow`), minimal cover reranking (`Setwise`), deep research state (`AREX`), context lifecycle (`ACM`), teacher distillation, and resilience gating. |
+| **`session-bridge`** | `npm run start:session` | **2** | Jean SRE companion bridge: autonomous session handoff recording (`write_session_handoff`) and idempotent review consumption (`read_session_review`). |
+| **`skills-docs`** | `npm run start:skills` | **5** | Agent skills registry (`list_skills`, `get_skill`), Diverse Skill Routing via DPP (`route_skills`), and ingested external documentation manuals (`docs_list`, `docs_search`). |
 
 ---
 
