@@ -15,6 +15,7 @@ import { loadSkills, listSkills, getSkill, routeSkills } from './skills-engine.j
 
 import fs from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { trace } from '@opentelemetry/api';
 import { initTracing } from './telemetry.js';
 
@@ -204,11 +205,59 @@ async function verifyDatabase() {
     }
 }
 
-const server = new Server({ name: "krusch-context-mcp", version: "1.4.0" }, { capabilities: { tools: {}, prompts: {} } });
+const server = new Server({ name: "krusch-context-mcp", version: "1.5.0" }, { capabilities: { tools: {}, prompts: {} } });
 
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
+// Profile assignments
+export const CORE_TOOLS = new Set([
+  "krusch_context_retrieve",
+  "krusch_context_add_memory",
+  "krusch_context_search_memory",
+  "krusch_context_compile_state",
+  "krusch_context_nugget_remember",
+  "krusch_context_nugget_nudges",
+  "krusch_context_search_symbols",
+  "krusch_context_symbol_graph",
+  "krusch_context_search_code",
+  "krusch_context_health",
+  "krusch_context_proactive_nudge"
+]);
+
+export const EXTENDED_ADDITIONAL_TOOLS = new Set([
+  "krusch_context_supersede_memory",
+  "krusch_context_invalidate_memory",
+  "krusch_context_list_memories",
+  "krusch_context_delete_memory",
+  "krusch_context_update_memory",
+  "krusch_context_consolidate",
+  "krusch_context_deep_search",
+  "krusch_context_list_repos",
+  "krusch_context_read_tree",
+  "krusch_context_read_blob",
+  "krusch_context_file_symbols",
+  "krusch_context_nugget_forget",
+  "krusch_context_nugget_list",
+  "krusch_context_think",
+  "krusch_context_list_skills",
+  "krusch_context_get_skill",
+  "krusch_docs_list",
+  "krusch_docs_search",
+  "krusch_context_write_session_handoff",
+  "krusch_context_read_session_review"
+]);
+
+export function getActiveProfile() {
+  const profileArg = process.argv.find(a => a.startsWith('--profile='));
+  const rawProfile = profileArg 
+    ? profileArg.split('=')[1] 
+    : (process.env.KRUSCH_PROFILE || 'core');
+  
+  const normalized = rawProfile.toLowerCase().trim();
+  if (normalized === 'full' || normalized === 'all') return 'full';
+  if (normalized === 'extended' || normalized === 'standard') return 'extended';
+  return 'core';
+}
+
+export const ALL_TOOLS = [
       {
         name: "krusch_context_retrieve",
         description: "Polygres-inspired unified context retrieval tool. Combines HNSW vector search, multi-hop graph walks, and server-side token budget packing into a single context payload.",
@@ -1053,8 +1102,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {}
         }
       }
-    ]
-  };
+];
+
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  const activeProfile = getActiveProfile();
+  let filteredTools = ALL_TOOLS;
+  if (activeProfile === 'core') {
+    filteredTools = ALL_TOOLS.filter(t => CORE_TOOLS.has(t.name));
+  } else if (activeProfile === 'extended') {
+    filteredTools = ALL_TOOLS.filter(t => CORE_TOOLS.has(t.name) || EXTENDED_ADDITIONAL_TOOLS.has(t.name));
+  }
+  return { tools: filteredTools };
 });
 
 server.setRequestHandler(ListPromptsRequestSchema, async () => {
@@ -1512,12 +1570,20 @@ async function main() {
 
   await loadSkills();
   await verifyDatabase();
+  const activeProfile = getActiveProfile();
+  const exposedCount = activeProfile === 'core' 
+    ? CORE_TOOLS.size 
+    : (activeProfile === 'extended' ? (CORE_TOOLS.size + EXTENDED_ADDITIONAL_TOOLS.size) : ALL_TOOLS.length);
+  console.error(`[krusch-context-mcp] Active profile: '${activeProfile}' (${exposedCount} of ${ALL_TOOLS.length} tools exposed to agent)`);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("[krusch-context-mcp] Server running on stdio");
 }
 
-main().catch(err => {
-  console.error("[Fatal]", err);
-  process.exit(1);
-});
+const isMain = process.argv[1] && (path.resolve(process.argv[1]) === fileURLToPath(import.meta.url));
+if (isMain) {
+  main().catch(err => {
+    console.error("[Fatal]", err);
+    process.exit(1);
+  });
+}

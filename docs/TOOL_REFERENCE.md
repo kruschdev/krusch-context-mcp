@@ -6,11 +6,23 @@
 
 ---
 
+## 🎯 Tool Profiles & Presets (`KRUSCH_PROFILE`)
+
+To prevent agent context exhaustion and tool selection degradation, tools are organized into three profile tiers:
+
+- **`core` (Default — 11 Tools)**: The lean, high-signal daily driver context engine. Includes `krusch_context_retrieve`, `add_memory`, `search_memory`, `compile_state`, `nugget_remember`, `nugget_nudges`, `search_symbols`, `symbol_graph`, `search_code`, `health`, and `proactive_nudge`.
+- **`extended` (31 Tools)**: Core plus complete memory lifecycle (`supersede`, `invalidate`, `list`, `delete`, `update`, `consolidate`), Git exploration (`list_repos`, `read_tree`, `read_blob`, `file_symbols`), skills registry, external docs, and session handoffs.
+- **`full` (64 Tools)**: All 64 tools including Company Brain v2 substrate, AI Watch research engines, and Polygres Cloud tools.
+
+Configure via `KRUSCH_PROFILE=core` in your `.env` or IDE MCP configuration, or pass `--profile=core` on the command line. Registered handlers for all tools remain executable on direct invocation regardless of the active profile.
+
+---
+
 ## 🏛️ Architecture & PG-Git Engine Integration
 
 Krusch Context MCP unifies **64 tools** into a single Model Context Protocol server. It natively incorporates the complete codebase indexing and retrieval engine from **[PG-Git](https://github.com/kruschdev/pg-git)** (`pg-git-mcp@1.1.0`):
 - **Native Git DAG Storage**: Stores Git trees, blobs, commits, and branches in PostgreSQL without requiring external file-system loose object scanning.
-- **AST Symbol Extraction**: Parses multi-language code files (JS, TS, Python, Go, Rust, Shell) to populate `code_symbols` and dependency edges in `code_symbol_edges`.
+- **Structural Symbol Extraction**: Zero-dependency structural regex and brace-matching parser for JS, TS, Python, Go, Rust, and Shell to populate `code_symbols` and dependency edges in `code_symbol_edges`.
 - **Hybrid RRF Search**: Merges dense pgvector cosine similarity with full-text lexical BM25 (`tsv` GIN index) using Reciprocal Rank Fusion and exponential temporal decay ($e^{-0.01t}$).
 - **Shared Schema & Dual-Surface Aliases**: Shares identical PostgreSQL tables (`repositories`, `blobs`, `code_symbols`, `code_symbol_edges`, `trees`, `commits`, `branches`) with standalone PG-Git. Exposes first-class `pg_git_*` aliases (`pg_git_search_symbols`, `pg_git_file_symbols`, `pg_git_dependency_graph`) so standalone PG-Git workflows run seamlessly without reconfiguring agent prompts.
 

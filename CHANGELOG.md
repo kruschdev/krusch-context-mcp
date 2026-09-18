@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Curated Tool Profiles (`KRUSCH_PROFILE`)**: Configurable profile tiers to prevent agent tool bloat and reduce system prompt token overhead by ~75%:
+  - `core` (Default, 11 tools): Daily driver context engine (`retrieve`, `add_memory`, `search_memory`, `compile_state`, `nugget_remember`, `nugget_nudges`, `search_symbols`, `symbol_graph`, `search_code`, `health`, `proactive_nudge`).
+  - `extended` (31 tools): Core + memory lifecycle, Git DAG inspection, skills registry, external docs, and session handoffs.
+  - `full` (64 tools): Complete research engine suite including Company Brain v2, AI Watch modules, and Polygres Cloud tools.
+- CLI argument `--profile=<tier>` support alongside `KRUSCH_PROFILE` environment variable.
+
+### Changed
+- **Local-First Positioning**: Reordered `README.md` and `.env.example` so self-hosted PostgreSQL + Ollama is the celebrated sovereign default; Polygres Cloud positioned as turnkey zero-GPU cloud alternative.
+- **Documentation & Nomenclature**: Clarified structural regex and brace-matching parser architecture in `ast-chunker.js` and restructured research paper citations into an honest foundations section.
+- **Test Harness**: Enhanced `tests/test_client.js` with default `KRUSCH_PROFILE: 'full'` and validated profile filtering.
+
 ## [1.5.0] - 2026-09-16
 
 ### Added
