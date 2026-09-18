@@ -77,7 +77,7 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 
 ```mermaid
 graph TD;
-    Agent[IDE Agent: Cursor / Claude Code / Windsurf] --> MCP{Krusch Context MCP<br/><b>Core: 11 Tools (Default)</b><br/>Full: 64 Tools};
+    Agent["IDE Agent: Cursor / Claude Code / Windsurf"] --> MCP{"Krusch Context MCP<br/><b>Core: 11 Tools (Default)</b><br/>Full: 64 Tools"};
 
     subgraph "Storage & Memory Layer"
         MCP -- "Self-Hosted / Local (Primary)" --> PG[("🐘 PostgreSQL + pgvector<br/>• Code Blobs, Trees, Commits<br/>• AST Symbols & Graph Edges<br/>• Episodic Memory & Nuggets")];
