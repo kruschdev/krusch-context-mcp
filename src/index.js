@@ -187,6 +187,8 @@ export function getActiveProfile() {
   const normalized = rawProfile.toLowerCase().trim();
   if (normalized === 'full' || normalized === 'all') return 'full';
   if (normalized === 'extended' || normalized === 'standard') return 'extended';
+  if (normalized === 'ecosystem' || normalized === 'cascade') return 'ecosystem';
+  if (normalized === 'router') return 'router';
   return 'core';
 }
 
@@ -199,6 +201,11 @@ export function getRequestedExtensions() {
   const profile = getActiveProfile();
   if (profile === 'full' || rawList.includes('all')) {
     return ['all'];
+  }
+  if (profile === 'ecosystem' || profile === 'router') {
+    // Curated small bundle: loads semantic-router with core tools (16 tools total) or standalone (router)
+    const exts = new Set(['semantic-router', ...rawList.filter(e => e !== 'none' && e !== 'no-polygres')]);
+    return Array.from(exts);
   }
 
   const exts = new Set(rawList.filter(e => e !== 'none' && e !== 'no-polygres'));
@@ -856,10 +863,15 @@ export let activeExtensions = [];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   const activeProfile = getActiveProfile();
-  let tools = [...CORE_TOOL_DEFINITIONS];
+  let tools = [];
 
-  if (activeProfile === 'extended' || activeProfile === 'full') {
-    tools.push(...EXTENDED_CORE_DEFINITIONS);
+  if (activeProfile === 'router') {
+    tools = CORE_TOOL_DEFINITIONS.filter(t => t.name === 'krusch_context_health');
+  } else {
+    tools = [...CORE_TOOL_DEFINITIONS];
+    if (activeProfile === 'extended' || activeProfile === 'full') {
+      tools.push(...EXTENDED_CORE_DEFINITIONS);
+    }
   }
 
   for (const ext of activeExtensions) {
@@ -1033,7 +1045,7 @@ async function main() {
   }
 
   const activeProfile = getActiveProfile();
-  let exposedCount = CORE_TOOLS.size;
+  let exposedCount = activeProfile === 'router' ? 1 : CORE_TOOLS.size;
   if (activeProfile === 'extended' || activeProfile === 'full') {
     exposedCount += EXTENDED_CORE_TOOLS.size;
   }
