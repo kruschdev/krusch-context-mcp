@@ -34,6 +34,7 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 | Profile / Mode | Tools Exposed | Default | System Prompt Cost | Intended Use |
 | :--- | :---: | :---: | :---: | :--- |
 | **`core`** *(Sovereign Default)* | **13 tools** | ✅ **Yes** | **~900 tokens** | High-signal daily drivers using local PostgreSQL + local Ollama: hybrid retrieval, episodic memory, active superseding & invalidation, state compilation, steering nuggets, structural symbol search, dependency graph, health, and proactive guardrails. |
+| **`ecosystem`** *(Cascade / Router)* | **16 tools** | ❌ No | **~1,150 tokens** | Curated daily drivers + L2 Neural Semantic Router (`krusch_context_semantic_route`, centroid registration). Bridges cascade routing with zero full-suite bloat. |
 | **`extended`** | **26 tools** | ❌ No | ~1,800 tokens | Adds full administrative memory inspection (`list`, `delete`, `update`, `consolidate`), Git tree/blob inspection, cited thinking, and alignment feedback. |
 | **`extensions`** | **Companion MCPs** | ❌ No | On-demand | Specialized domains running as independent companion servers or loaded dynamically via `--extensions=...` (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`, `semantic-router`). |
 | **`full`** | **61 tools** | ❌ No | ~4,200 tokens | Complete monolithic development suite with all 5 companion extensions loaded in-process. |
