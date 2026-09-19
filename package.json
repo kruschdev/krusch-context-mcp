@@ -4,6 +4,24 @@
   "type": "module",
   "description": "Sovereign 13-tool core MCP context engine (working memory, structural code retrieval, steering nuggets) with modular companion extensions.",
   "main": "src/index.js",
+  "bin": {
+    "krusch-context-mcp": "./src/index.js",
+    "krusch-semantic-router": "./src/extensions/semantic-router/server.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src",
+    "db",
+    "templates",
+    "scripts",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    ".env.example",
+    "docker-compose.yml"
+  ],
   "scripts": {
     "start": "node src/index.js",
     "start:research": "node src/extensions/research/server.js",
