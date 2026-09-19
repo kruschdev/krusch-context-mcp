@@ -116,6 +116,18 @@ export async function searchBlobs(queryOrVector, limit = 5, repositoryId, option
     let textQuery = null;
     let searchType = options.search_type || 'hybrid';
 
+    // Support string project name (e.g. 'krusch-pre-router') as repositoryId
+    if (typeof repositoryId === 'string' && isNaN(Number(repositoryId))) {
+        try {
+            const repoRes = await query('SELECT id FROM repositories WHERE name = $1 LIMIT 1', [repositoryId]);
+            repositoryId = repoRes.rows[0]?.id || null;
+        } catch (_) {
+            repositoryId = null;
+        }
+    } else if (repositoryId !== undefined && repositoryId !== null) {
+        repositoryId = Number(repositoryId);
+    }
+
     if (Array.isArray(queryOrVector)) {
         vector = queryOrVector;
         textQuery = options.query || null;
@@ -274,6 +286,17 @@ export async function searchBlobs(queryOrVector, limit = 5, repositoryId, option
  */
 export async function searchSymbols(queryText, limit = 10, repositoryId = null, options = {}) {
     const symbolType = options.symbol_type || null;
+
+    if (typeof repositoryId === 'string' && isNaN(Number(repositoryId))) {
+        try {
+            const repoRes = await query('SELECT id FROM repositories WHERE name = $1 LIMIT 1', [repositoryId]);
+            repositoryId = repoRes.rows[0]?.id || null;
+        } catch (_) {
+            repositoryId = null;
+        }
+    } else if (repositoryId !== undefined && repositoryId !== null) {
+        repositoryId = Number(repositoryId);
+    }
     
     let sql = `
         SELECT 
@@ -337,6 +360,17 @@ export async function getSymbolsForBlob(blobId) {
  * Get symbol and import dependency graph for a file or symbol identifier.
  */
 export async function getSymbolGraph(filePathOrSymbol, repositoryId = null, depth = 2) {
+    if (typeof repositoryId === 'string' && isNaN(Number(repositoryId))) {
+        try {
+            const repoRes = await query('SELECT id FROM repositories WHERE name = $1 LIMIT 1', [repositoryId]);
+            repositoryId = repoRes.rows[0]?.id || null;
+        } catch (_) {
+            repositoryId = null;
+        }
+    } else if (repositoryId !== undefined && repositoryId !== null) {
+        repositoryId = Number(repositoryId);
+    }
+
     // Query symbols matching either file_path or symbol_name
     const symParams = [filePathOrSymbol];
     let symSql = `

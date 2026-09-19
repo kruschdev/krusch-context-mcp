@@ -277,15 +277,15 @@ export async function unifiedRetrieve({ query, project, graph_hops = 1, limit_to
     // 4. Optional Direct Code Blob Search
     if (include_code) {
         try {
-            const codeBlobs = await searchBlobs(cleanedQuery || query, 5);
+            const codeBlobs = await searchBlobs(cleanedQuery || query, 5, resolvedProject);
             if (codeBlobs && Array.isArray(codeBlobs)) {
                 const codeItems = codeBlobs.map((blob, idx) => ({
                     id: `code-direct-${idx}`,
                     type: 'code',
-                    title: `Codebase: ${blob.path}`,
-                    content: blob.content || blob.snippet || '',
+                    title: `Codebase: ${blob.file_path || blob.file_name || blob.path}`,
+                    content: blob.content || blob.summary || blob.snippet || '',
                     score: 0.88 - (idx * 0.05),
-                    links: extractEntityLinks(blob.content)
+                    links: extractEntityLinks(blob.content || blob.summary || '')
                 }));
                 allCandidates.push(...codeItems);
             }
