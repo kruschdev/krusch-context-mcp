@@ -35,11 +35,11 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 | :--- | :---: | :---: | :---: | :--- |
 | **`core`** *(Sovereign Default)* | **13 tools** | ✅ **Yes** | **~900 tokens** | High-signal daily drivers using local PostgreSQL + local Ollama: hybrid retrieval, episodic memory, active superseding & invalidation, state compilation, steering nuggets, structural symbol search, dependency graph, health, and proactive guardrails. |
 | **`extended`** | **26 tools** | ❌ No | ~1,800 tokens | Adds full administrative memory inspection (`list`, `delete`, `update`, `consolidate`), Git tree/blob inspection, cited thinking, and alignment feedback. |
-| **`extensions`** | **Companion MCPs** | ❌ No | On-demand | Specialized domains running as independent companion servers or loaded dynamically via `--extensions=...` (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`). |
+| **`extensions`** | **Companion MCPs** | ❌ No | On-demand | Specialized domains running as independent companion servers or loaded dynamically via `--extensions=...` (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`, `semantic-router`). |
 | **`full`** | **61 tools** | ❌ No | ~4,200 tokens | Complete monolithic development suite with all 5 companion extensions loaded in-process. |
 
 > [!TIP]
-> **Modular Companion Pattern (Recommended)**: Run `krusch-context` for the core 13-tool daily memory loop, and launch companion servers (`npm run start:research`, `npm run start:cloud`, etc.) only for sessions that need specialized tools.
+> **Modular Companion Pattern (Recommended)**: Run `krusch-context` for the core 13-tool daily memory loop, and launch companion servers (`npm run start:research`, `npm run start:router`, `npm run start:cloud`, etc.) only for sessions that need specialized tools.
 > Direct tool calls to registered handlers always succeed even if omitted from `tools/list`, ensuring complete script and CI compatibility.
 
 ---
@@ -71,7 +71,8 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 * **Closed-Loop Alignment (`nudge_feedback`)**: Automatically captures developer approvals and corrections to refine future proactive guidance.
 
 ### 5. ⚡ Modular Companion Extensions & AI Watch Research Lab
-* **Modular Companion MCPs**: Run specialized domains as independent companion servers (`npm run start:research`, `npm run start:company-brain`, `npm run start:cloud`, `npm run start:skills`, `npm run start:session`) or load dynamically via `--extensions=...`.
+* **Modular Companion MCPs**: Run specialized domains as independent companion servers (`npm run start:research`, `npm run start:company-brain`, `npm run start:cloud`, `npm run start:skills`, `npm run start:session`, `npm run start:router`) or load dynamically via `--extensions=...`.
+* **L2 Neural Semantic Router (`npm run start:router`)**: 3 tools (`krusch_context_semantic_route`, `krusch_context_register_semantic_centroid`, `krusch_context_list_semantic_centroids`) providing pgvector HNSW cosine-distance routing for unstructured natural language prompts, bridging Stage-0 pre-router gate misses to domain specialists.
 * **AI Watch Research Lab (Opt-In Companion)**: ArXiv-grounded experimental modules (AgentDebugX failure observability, DataFlow DAG mutations, Setwise minimal covers, AREX recursive research, Teacher Memory Distillation, Resilience Gate) kept cleanly decoupled from the 13-tool daily driver loop.
 * **Turnkey Cloud Option**: Optional support for Polygres Cloud (`polygres_cloud_*`, 5 tools) providing zero-GPU in-engine embeddings, vector search, model catalog, and live microcredit tracking.
 

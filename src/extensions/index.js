@@ -8,6 +8,7 @@ import polygresCloud from './polygres-cloud/index.js';
 import sessionBridge from './session-bridge/index.js';
 import skillsDocs from './skills-docs/index.js';
 import research from './research/index.js';
+import semanticRouter from './semantic-router/index.js';
 
 const EXTENSIONS_REGISTRY = new Map([
   ['company-brain', companyBrain],
@@ -15,16 +16,19 @@ const EXTENSIONS_REGISTRY = new Map([
   ['session-bridge', sessionBridge],
   ['skills-docs', skillsDocs],
   ['research', research],
+  ['semantic-router', semanticRouter],
   // Friendly aliases
   ['ai-watch', research],
   ['v2', companyBrain],
   ['skills', skillsDocs],
   ['cloud', polygresCloud],
-  ['session', sessionBridge]
+  ['session', sessionBridge],
+  ['router', semanticRouter],
+  ['neural-router', semanticRouter]
 ]);
 
 export function getAvailableExtensionNames() {
-  return ['research', 'company-brain', 'polygres-cloud', 'session-bridge', 'skills-docs'];
+  return ['research', 'company-brain', 'polygres-cloud', 'session-bridge', 'skills-docs', 'semantic-router'];
 }
 
 export function resolveExtension(name) {
