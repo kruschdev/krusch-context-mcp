@@ -117,7 +117,16 @@ graph TD;
 
 ## 🚀 Quick Start
 
-### 1. Clone and Install
+### 1. Installation
+
+**Run directly via npx:**
+```bash
+npx krusch-context-mcp
+# Or companion L2 neural semantic router:
+npx krusch-semantic-router
+```
+
+**Or clone and install locally:**
 ```bash
 git clone https://github.com/kruschdev/krusch-context-mcp.git
 cd krusch-context-mcp
