@@ -7,69 +7,142 @@
 [![MCP: 5 Verbs](https://img.shields.io/badge/MCP-5%20Core%20Verbs-blue.svg)](docs/TOOL_REFERENCE.md)
 [![Storage: SQLite-First](https://img.shields.io/badge/Storage-SQLite--First%20(zero--Docker)-lightgrey.svg)](docs/ARCHITECTURE.md)
 
-**Krusch Context MCP** gives your AI coding agents (Cursor, Claude Code, Windsurf, Antigravity) persistent working memory across sessions. It remembers architectural decisions, project invariants, lessons, and bugs, flags near-duplicate memories, maintains lineage when rules are superseded or invalidated, and audits proposed changes against active constraints.
+**Krusch Context MCP** gives AI coding agents (Cursor, Claude Code, Windsurf, Antigravity) persistent working memory across sessions. It captures architectural decisions, invariants, lessons, and bug diagnoses, warns on near-duplicate memories, maintains temporal lineage when facts are superseded or invalidated, and audits diffs against active constraints.
 
-### 💾 Storage & Scope Reality
-- **Default (SQLite)**: Uses Node 22's built-in `node:sqlite` (`.agent/context.db`) with in-memory cosine similarity. Requires **zero Docker, zero PostgreSQL**, and zero native C++ compiles. Ideal for hundreds to low-thousands of project decisions, invariants, and steering nuggets.
-- **Codebase Search & AST**: Decoupled from this package. Code search belongs in `krusch-git` or the IDE's native search; `krusch-context-mcp` is purely memory hygiene and steering.
-- **PostgreSQL**: Optional drop-in adapter (`STORAGE_MODE=postgres`) when you outgrow local cosine or need multi-machine team sync with server-side pgvector HNSW indexing.
+---
+
+## 🚫 What This Is Not
+
+* **Not a codebase AST or Git indexer**: Code symbol search, call graphs, and Git DAG traversal belong in [`krusch-git`](https://github.com/kruschdev/krusch-git) or your IDE's native search.
+* **Not a 61-tool cafeteria**: Collapsed to strictly 5 canonical verbs (~350 prompt tokens) for boring reliability.
+* **Not a cloud SaaS platform**: Runs 100% locally on your machine with zero external cloud dependencies.
+* **Not a monolithic domain suite**: Legal compliance ([`krusch-law`](https://github.com/kruschdev/krusch-law)), document ingestion ([`krusch-nexus`](https://github.com/kruschdev/krusch-nexus)), and contract graphs ([`krusch-biz`](https://github.com/kruschdev/krusch-biz)) live in separate companion repositories.
 
 ---
 
 ## ⚡ 30-Second Quickstart
 
-Requires **Node.js >= 22.0.0**. Run this once inside any git repository:
+Requires **Node.js >= 22.0.0**. Run once inside your project repository:
 
 ```bash
 npx krusch-context-mcp init
 ```
 
-This single command:
-1. Validates Node >= 22.0.0 and initializes `.agent/context.db` via `node:sqlite`.
-2. Cleans any stale MCP tool schema files from local IDE cache.
-3. Creates or merges your local `.env`.
-4. Seeds your initial project context.
-5. Runs a diagnostic health check.
-6. Prints copy-paste JSON configurations for Cursor, Claude Code, and Claude Desktop.
+This command will:
+1. Validate Node >= 22.0.0 and initialize `.agent/context.db` via `node:sqlite`.
+2. Clear stale MCP tool schemas from local IDE caches.
+3. Create your project `.env` with sensible defaults.
+4. Seed initial project context and run a diagnostic health check.
+5. Print copy-paste JSON configurations for Cursor, Claude Code, and Claude Desktop.
 
 ---
 
 ## 🛠️ The 5-Verb Agent Loop
 
-Instead of cluttering the agent's context window with dozens of overlapping tools, Krusch Context MCP exposes strictly **5 canonical verbs** (~350 prompt tokens total):
+Krusch Context MCP exposes strictly **5 canonical verbs** designed to fit into standard coding workflows:
 
 | Verb | Short Alias | Purpose |
 | :--- | :--- | :--- |
 | **`krusch_context_retrieve`** | `retrieve` | Pulls active memories, steering rules, and project state briefings within a strict `limit_tokens` budget. Returns citations. |
-| **`krusch_context_remember`** | `remember` | Writes episodic facts and persistent steering nuggets. Detects near-duplicates (`similarity >= 0.85`) and proposes `revise(action: 'supersede')` without blocking contrasting rules. |
+| **`krusch_context_remember`** | `remember` | Writes episodic facts and steering nuggets. Detects near-duplicates (`similarity >= 0.85`) and proposes `revise(action: 'supersede')` without blocking contrasting rules. |
 | **`krusch_context_revise`** | `revise` | Updates stale knowledge (`supersede` with lineage tracking) or revokes obsolete rules (`invalidate` with mandatory reason). |
-| **`krusch_context_nudge`** | `nudge` | Pre-commit / pre-edit auditor that checks proposed diffs against active project invariants (max 1–3 findings). Trigger defaults to `pre_commit` or `manual`; rejects `every_turn`. |
+| **`krusch_context_nudge`** | `nudge` | Pre-commit auditor that checks proposed diffs against active project invariants (max 1–3 findings). Trigger defaults to `pre_commit` or `manual`; rejects `every_turn`. |
 | **`krusch_context_health`** | `health` | Reports storage mode, memory counts by closed taxonomy, and 30-day TTL decay review. |
 
-> [!NOTE]
-> **Backward Compatibility & Deprecation Window**: Direct calls to legacy tool names (`search_memory`, `compile_state`, `add_memory`, `supersede_memory`, `invalidate_memory`, `nugget_remember`, `proactive_nudge`) log a deprecation notice and route to the corresponding verb handler for one minor version. See [CHANGELOG.md](CHANGELOG.md) for the migration table.
+---
+
+## 🤖 Recommended Agent Protocol
+
+Coding agents should interact with memory at specific lifecycle boundaries:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. SESSION START                                            │
+│    Agent calls retrieve(query: '*', include_state: true)    │
+│    -> Obtains active invariants, recent decisions, blockers │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│ 2. DURING WORK                                              │
+│    Agent calls remember(content: '...', category: '...')    │
+│    -> If near-duplicate returned, agent calls revise(...)   │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│ 3. PRE-COMMIT / PRE-EDIT                                    │
+│    Agent calls nudge(trigger: 'pre_commit')                 │
+│    -> Audits code against active invariants (max 3 findings)│
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 🛡️ Safe Memory Writes for Agents
+## 🛡️ Safe Memory Writes: Closed Taxonomy & Deduplication
 
-To prevent episodic memory from turning into an unmaintained, hallucinated mess:
+To prevent memory hallucination and database pollution:
 
-1. **Closed Taxonomy**: Memories belong to a strict closed set of categories:
+1. **Closed Taxonomy**: Every write must use one of 5 categories:
    * `decision`: Architectural choices, design directions, trade-offs.
-   * `invariant`: Rules that must never be broken (e.g. "Always use node:sqlite, zero native compiles").
-   * `bug`: Solved edge cases and regressions to avoid repeating.
-   * `lesson`: Tactical insights learned during development.
-   * `blocker`: Active dependencies or operational impediments.
-2. **Non-Blocking Near-Duplicate Detection**: When calling `remember`, the engine computes vector similarity against active records. If similarity exceeds 0.85, the memory is saved, but the tool returns a warning with the candidate memory ID, similarity score, and a prompt proposing `revise(action: 'supersede', target_id: ...)`. This prevents false positives (e.g. "Use JWT in cookies" vs "Do not put JWT in cookies") from blocking valid contrasting writes.
-3. **Mandatory Invalidation Reasons**: Marking a rule as `INVALIDATED` strictly requires a non-empty `reason`.
-4. **Focused Invariant Audits**: `nudge` triggers on `pre_commit` or `manual` (`every_turn` is rejected to eliminate audit fatigue). Findings are strictly capped at 3 with concrete evidence. Feedback (`helpful`, `false_positive`) updates and persists rule weights in SQLite.
-5. **Provenance Tracking**: Every memory tracks `{ author: 'human' | 'agent', file, commit, pr, confidence }`.
-6. **30-Day TTL Decay Review**: Memories inactive or unreferenced for >30 days are flagged in `health` for developer review.
+   * `invariant`: Non-negotiable rules (e.g., "Use node:sqlite, zero native compiles").
+   * `bug`: Solved defects, regressions, and root-cause analyses.
+   * `lesson`: Tactical insights and framework discoveries.
+   * `blocker`: Active dependencies or external obstacles.
+2. **Near-Duplicate Detection**: If a proposed memory matches an existing active record ($\ge 0.85$ cosine similarity), the memory is saved with a warning proposing `revise(action: 'supersede', target_id: ...)`. This protects contrasting rules (e.g., "Allow CORS" vs "Do not allow CORS") while flagging twin facts.
+3. **Compulsory Invalidation Reasons**: Calling `revise(action: 'invalidate')` strictly requires a non-empty `reason`.
+4. **Focused Audits**: `nudge` caps findings at 3 with concrete evidence, rejecting `every_turn` triggers to eliminate auditor nagware.
 
 ---
 
-## 💻 Manual IDE Configuration
+## 🧠 Embedding Reality & Offline Mode
+
+* **Zero-GPU Default**: If neither Ollama nor an API key is present, the engine runs 100% offline using deterministic keyword extraction, recency scoring, and heuristic tag indexing.
+* **Local Ollama** (Optional): Set `OLLAMA_URL="http://127.0.0.1:11434"` with `EMBED_MODEL="bge-large"` (1024 dims).
+* **Remote Cloud** (Optional): Set `OPENROUTER_API_KEY="sk-..."` with `EMBED_MODEL="baai/bge-large-en-v1.5"` for zero-local-VRAM embeddings.
+
+---
+
+## 🐘 When Do You Need PostgreSQL?
+
+* **Use SQLite (Default)**: Perfect for single developers, local IDE sessions, and projects with hundreds to thousands of decisions. Zero Docker, zero setup.
+* **Use PostgreSQL (`STORAGE_MODE=postgres`)**: Required only when scaling to multi-agent swarms across different machines needing centralized persistence and server-side pgvector HNSW indexing.
+
+---
+
+## 🔄 Migration from v1.6 / v1.7
+
+* **Tool Aliases**: Legacy tool names (`add_memory`, `search_memory`, `compile_state`, `supersede_memory`, `invalidate_memory`, `proactive_nudge`) are automatically aliased to the 5 verbs with a deprecation notice.
+* **Database Path**: v1.7 used `.agent/memory.db`. v1.8.0 uses `.agent/context.db`. Run `npx krusch-context-mcp init` to migrate.
+* See [docs/MIGRATION.md](docs/MIGRATION.md) for the complete mapping table.
+
+---
+
+## 🧩 Sibling Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 AI Coding Agent (Cursor / Claude)           │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+               ┌───────────────┴───────────────┐
+               ▼                               ▼
+┌─────────────────────────────┐ ┌─────────────────────────────┐
+│  krusch-context-mcp (v1.8)  │ │   krusch-git (External)     │
+│   Project Memory & Steering │ │   Codebase RAG & AST Search │
+│       (5 Canonical Verbs)   │ │      (7 Specialized Tools)  │
+└──────────────┬──────────────┘ └─────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│     .agent/context.db       │
+│   (node:sqlite, Node ≥22)   │
+└─────────────────────────────┘
+```
+
+Other specialized tools ([`krusch-nexus`](https://github.com/kruschdev/krusch-nexus), [`krusch-law`](https://github.com/kruschdev/krusch-law), [`krusch-biz`](https://github.com/kruschdev/krusch-biz)) run as independent MCP servers in their own repositories.
+
+---
+
+## 💻 IDE Configuration
 
 ### Cursor (`.cursor/mcp.json`)
 ```json
@@ -85,7 +158,7 @@ To prevent episodic memory from turning into an unmaintained, hallucinated mess:
 
 ### Claude Code
 ```bash
-claude mcp add krusch-context npx krusch-context-mcp
+claude mcp add krusch-context -- npx -y krusch-context-mcp
 ```
 
 ### Claude Desktop (`claude_desktop_config.json`)
@@ -102,27 +175,22 @@ claude mcp add krusch-context npx krusch-context-mcp
 
 ---
 
-## 🧩 Scope & Related Repositories
-
-`krusch-context-mcp` does one job: **working memory, state briefings, and invariant steering** for coding agents.
-
-* **Codebase RAG & Git AST**: Handled separately by [`krusch-git`](https://github.com/kruschdev/krusch-git) or your IDE's native indexing.
-* **Specialized Domain Engines**: Document ingestion ([`krusch-nexus`](https://github.com/kruschdev/krusch-nexus)), statutory compliance ([`krusch-law`](https://github.com/kruschdev/krusch-law)), and contract graphs ([`krusch-biz`](https://github.com/kruschdev/krusch-biz)) run as independent MCP servers in their own repositories.
-
----
-
 ## 📚 Documentation & Specifications
 
-* **[Canonical Tool Reference](docs/TOOL_REFERENCE.md)**: Generated directly from tool code schemas (`npm run docs:generate`).
-* **[Architecture & Failure Modes](docs/ARCHITECTURE.md)**: 2-page specification covering SQLite/Postgres schemas, indexes, embedding dimension invariants, and error recovery.
-* **[Evaluation Baseline Notes](evals/README.md)**: Transparent description of preliminary fixtures and token-budget metrics.
+* **[Canonical Tool Reference](docs/TOOL_REFERENCE.md)**: Generated directly from live schemas (`npm run docs:generate`).
+* **[Architecture & Failure Modes](docs/ARCHITECTURE.md)**: 2-page specification covering schemas, indexes, and invariants.
+* **[Setup & Operations Guide](docs/SETUP.md)**: Zero-Docker setup and optional configurations.
+* **[Migration Guide](docs/MIGRATION.md)**: Step-by-step v1.5 → v1.6 → v1.7 → v1.8.0 mapping.
+* **[Episodic Memory Guide](docs/EPISODIC_MEMORY.md)**: Deep dive into the closed taxonomy and lifecycle.
+* **[Changelog](CHANGELOG.md)**: Version release notes.
+* **[Evaluation Baseline Notes](evals/README.md)**: Preliminary benchmark fixtures and token-budget metrics.
 
 ---
 
 ## 🧪 Testing
 
 ```bash
-# Run full unit & contract test suite (runs 100% on SQLite without Docker)
+# Run full unit & contract test suite (100% SQLite, zero Docker)
 npm test
 
 # Check storage and memory health

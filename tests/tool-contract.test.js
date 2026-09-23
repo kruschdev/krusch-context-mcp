@@ -8,7 +8,8 @@ import {
   CORE_TOOLS,
   EXTENDED_CORE_TOOLS,
   CORE_TOOL_DEFINITIONS,
-  EXTENDED_CORE_DEFINITIONS
+  EXTENDED_CORE_DEFINITIONS,
+  VERSION
 } from '../src/index.js';
 
 import { getAvailableExtensionNames } from '../src/extensions/index.js';
@@ -66,24 +67,51 @@ describe('Tool Contract & Profile Invariant Suite', () => {
     assert.equal(nameSet.size, 9, `Duplicate tool names found! Unique count: ${nameSet.size}`);
   });
 
-  it('Documentation must not contain stale tool-count claims', () => {
-    const filesToAudit = [
-      path.join(ROOT_DIR, 'docs', 'TOOL_REFERENCE.md')
+  it('Version consistency across package.json, code, and changelog', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf-8'));
+    assert.equal(pkg.version, VERSION, `package.json version (${pkg.version}) must match src/index.js VERSION (${VERSION})`);
+
+    const changelog = fs.readFileSync(path.join(ROOT_DIR, 'CHANGELOG.md'), 'utf-8');
+    assert.ok(changelog.includes(`## [${VERSION}]`), `CHANGELOG.md must contain heading for ## [${VERSION}]`);
+  });
+
+  it('README and TOOL_REFERENCE advertise exactly the 5 canonical verbs', () => {
+    const readme = fs.readFileSync(path.join(ROOT_DIR, 'README.md'), 'utf-8');
+    const toolRef = fs.readFileSync(path.join(ROOT_DIR, 'docs', 'TOOL_REFERENCE.md'), 'utf-8');
+
+    for (const verb of CORE_TOOLS) {
+      assert.ok(readme.includes(verb), `README.md must mention canonical verb: ${verb}`);
+      assert.ok(toolRef.includes(verb), `docs/TOOL_REFERENCE.md must document canonical verb: ${verb}`);
+    }
+  });
+
+  it('Live active documentation must not contain stale tool-count claims', () => {
+    const liveDocs = [
+      path.join(ROOT_DIR, 'README.md'),
+      path.join(ROOT_DIR, 'docs', 'TOOL_REFERENCE.md'),
+      path.join(ROOT_DIR, 'docs', 'SETUP.md'),
+      path.join(ROOT_DIR, 'docs', 'ARCHITECTURE.md'),
+      path.join(ROOT_DIR, 'docs', 'EPISODIC_MEMORY.md'),
+      path.join(ROOT_DIR, '.env.example')
     ];
 
     const forbiddenPatterns = [
-      { pattern: /64 tools/i, label: 'stale 64 tools claim' },
-      { pattern: /68 tools/i, label: 'stale 68 tools claim' },
-      { pattern: /61 tools/i, label: 'stale 61 tools claim' },
+      { pattern: /64\s+tools/i, label: 'stale 64 tools claim' },
+      { pattern: /68\s+tools/i, label: 'stale 68 tools claim' },
+      { pattern: /61\s+tools/i, label: 'stale 61 tools claim' },
+      { pattern: /37\s+tools/i, label: 'stale 37 tools claim' },
       { pattern: /26\s+tools/i, label: 'stale 26 tools claim' },
-      { pattern: /13\s+core\s+tools/i, label: 'stale 13 core tools claim' }
+      { pattern: /13\s+core\s+tools/i, label: 'stale 13 core tools claim' },
+      { pattern: /13\s+tools/i, label: 'stale 13 tools claim' },
+      { pattern: /sovereign\s+triad/i, label: 'stale sovereign triad claim' },
+      { pattern: /file:\/\/\/home\/krusch/i, label: 'leaked homelab file:/// link' }
     ];
 
-    for (const filePath of filesToAudit) {
+    for (const filePath of liveDocs) {
       if (!fs.existsSync(filePath)) continue;
       const content = fs.readFileSync(filePath, 'utf-8');
       for (const { pattern, label } of forbiddenPatterns) {
-        assert.ok(!pattern.test(content), `File ${path.basename(filePath)} contains forbidden pattern: ${label}`);
+        assert.ok(!pattern.test(content), `File ${path.relative(ROOT_DIR, filePath)} contains forbidden pattern: ${label}`);
       }
     }
   });

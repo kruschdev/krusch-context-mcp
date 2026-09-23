@@ -75,7 +75,7 @@ v1.8.0 collapses the tool surface to strictly 5 canonical verbs (`retrieve`, `re
 
 ### Changed
 - **Architectural Separation of Research Machinery**:
-  - Extracted 15 experimental research engines (AgentDebugX, DataFlow, Setwise, AREX, ACM, Teacher Distillation, Multi-Agent Resilience Gate) to the dedicated standalone companion package [`krusch-research-mcp`](file:///home/krusch/homelab/projects/krusch-research-mcp).
+  - Extracted 15 experimental research engines (AgentDebugX, DataFlow, Setwise, AREX, ACM, Teacher Distillation, Multi-Agent Resilience Gate) to the dedicated standalone companion package [`krusch-research-mcp`](https://github.com/kruschdev/krusch-research-mcp).
   - Folded in-memory token deduplication (`selectMinimalCoveringSet`) directly into `src/prune-helper.js` for server-side token budget packing in `unifiedRetrieve`.
   - Moved `src/extensions/company-brain/v2-engine.js` to internal `src/v2-engine.js` for interaction memory writes, eliminating exposed extension overhead.
   - Pruned stale companion servers (`skills-docs`, `session-bridge`, `company-brain`).

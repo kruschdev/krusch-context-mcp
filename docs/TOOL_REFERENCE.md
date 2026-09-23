@@ -16,6 +16,25 @@ The default profile exposes strictly **5 canonical verbs** (~350 prompt tokens) 
 
 ---
 
+## 🔄 Legacy Alias → New Verb Mapping
+
+For backward compatibility, legacy tool invocations are automatically intercepted and routed to the corresponding verb:
+
+| Legacy Tool (v1.6 / v1.7) | Canonical Replacement (v1.8.0) | Notes |
+| :--- | :--- | :--- |
+| `krusch_context_add_memory` | `krusch_context_remember({ content, category })` | Enforces closed taxonomy |
+| `krusch_context_nugget_remember` | `krusch_context_remember({ key, content })` | Sets persistent steering nugget |
+| `krusch_context_search_memory` | `krusch_context_retrieve({ query, mode: 'memory' })` | Token budget packed |
+| `krusch_context_compile_state` | `krusch_context_retrieve({ query: '*', include_state: true })` | Prepends state briefing |
+| `krusch_context_supersede_memory` | `krusch_context_revise({ action: 'supersede', target_id, content })` | Preserves temporal lineage |
+| `krusch_context_invalidate_memory` | `krusch_context_revise({ action: 'invalidate', target_id, reason })` | Mandatory reason required |
+| `krusch_context_nugget_forget` | `krusch_context_revise({ action: 'forget_nugget', key })` | Retires persistent nugget |
+| `krusch_context_proactive_nudge` | `krusch_context_nudge({ trigger: 'pre_commit', code })` | Capped at 3 findings |
+| `krusch_context_nudge_feedback` | `krusch_context_nudge({ action: 'feedback', rule_id, feedback })` | Dynamic weight adjustment |
+| `krusch_context_nugget_nudges` | `krusch_context_retrieve({ query, category: 'invariant' })` | Unified retrieval |
+
+---
+
 ## 🛠️ Detailed Verb Specifications
 
 ### `krusch_context_retrieve`
@@ -32,6 +51,20 @@ The default profile exposes strictly **5 canonical verbs** (~350 prompt tokens) 
 | `limit_tokens` | `number` | No | Maximum token budget to return (default: `4000`) |
 | `include_state` | `boolean` | No | Optionally prepend compiled state briefing (default: `false`) |
 | `project` | `string` | No | Target project (auto-detected if omitted) |
+
+#### Example Return Shape
+
+```markdown
+=== 🧠 Active Context Briefing ===
+📦 Persistent Invariants & Steering Rules:
+• [invariant] architecture.db_mode: SQLite by default with Node 22
+
+📝 Relevant Episodic Memories:
+[#42] (decision) | Relevance: 0.942 | file: src/index.js
+Decision to standardize on 5 canonical verbs.
+
+--- Budget: 412 / 4000 tokens used ---
+```
 
 ---
 
@@ -50,6 +83,23 @@ The default profile exposes strictly **5 canonical verbs** (~350 prompt tokens) 
 | `tags` | `array` | No | Optional descriptive tags |
 | `force` | `boolean` | No | If true, bypasses near-duplicate warnings (default: `false`) |
 | `project` | `string` | No | Target project |
+
+#### Example Return Shape
+
+```json
+{
+  "ok": true,
+  "id": 43,
+  "category": "decision",
+  "content": "Use node:sqlite exclusively without native C++ compilation.",
+  "warning": "near_duplicate (optional: if cosine >= 0.85)",
+  "candidate": {
+    "id": 12,
+    "similarity": 0.88,
+    "suggestion": "Call revise with action: 'supersede' to replace #12"
+  }
+}
+```
 
 ---
 
@@ -70,6 +120,18 @@ The default profile exposes strictly **5 canonical verbs** (~350 prompt tokens) 
 | `provenance` | `object` | No | Optional provenance metadata |
 | `project` | `string` | No | Target project |
 
+#### Example Return Shape
+
+```json
+{
+  "ok": true,
+  "action": "supersede",
+  "superseded_id": 12,
+  "new_id": 43,
+  "message": "Memory #12 marked as SUPERSEDED by #43. Lineage preserved."
+}
+```
+
 ---
 
 ### `krusch_context_nudge`
@@ -89,6 +151,25 @@ The default profile exposes strictly **5 canonical verbs** (~350 prompt tokens) 
 | `feedback` | `string` | No | Feedback rating to tune rule weights [helpful, unhelpful, false_positive] |
 | `project` | `string` | No | Target project |
 
+#### Example Return Shape
+
+```json
+{
+  "ok": true,
+  "trigger": "pre_commit",
+  "findings_count": 1,
+  "findings": [
+    {
+      "rule_id": "invariant-2",
+      "category": "invariant",
+      "severity": "warn",
+      "evidence": "Found better-sqlite3 in package.json",
+      "suggestion": "Standardize on node:sqlite built-in."
+    }
+  ]
+}
+```
+
 ---
 
 ### `krusch_context_health`
@@ -101,11 +182,31 @@ The default profile exposes strictly **5 canonical verbs** (~350 prompt tokens) 
 | :--- | :--- | :---: | :--- |
 | `project` | `string` | No | Target project |
 
+#### Example Return Shape
+
+```json
+{
+  "status": "healthy",
+  "version": "1.8.0",
+  "storage": "sqlite",
+  "database_path": "/workspace/.agent/context.db",
+  "counts": {
+    "total": 18,
+    "decision": 7,
+    "invariant": 4,
+    "bug": 3,
+    "lesson": 3,
+    "blocker": 1
+  },
+  "decay_review": []
+}
+```
+
 ---
 
-## 📋 Extended Admin Tools (`extended` profile)
+## 📋 Extended Admin Tools (`--profile=extended`)
 
-Tools available only when launched with `--profile=extended` for manual inspection and maintenance:
+Tools available only when launched with `--profile=extended` for manual maintenance:
 
 ### `krusch_context_list_memories`
 
