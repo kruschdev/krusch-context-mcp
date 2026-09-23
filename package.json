@@ -23,8 +23,7 @@
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
-    ".env.example",
-    "docker-compose.yml"
+    ".env.example"
   ],
   "scripts": {
     "start": "node bin/cli.js",
@@ -32,8 +31,6 @@
     "health": "node bin/cli.js health",
     "test": "node --test tests/*.test.js",
     "docs:generate": "node scripts/generate_docs.js",
-    "snapshot": "node scripts/snapshot.js",
-    "sync-all": "node scripts/sync_all_projects.js",
     "bench:memory": "node scripts/benchmark_memory_eval.js"
   },
   "keywords": [

@@ -79,7 +79,7 @@ export function getWorktreeStatus(cwd = process.cwd()) {
     return {
       isDirty: true,
       modifiedCount: count,
-      message: `⚠️ ${count} uncommitted or modified file(s) in working tree. Run 'npm run snapshot -- .' to synchronize PG-Git symbol graphs.`
+      message: `⚠️ ${count} uncommitted or modified file(s) in working tree.`
     };
   } catch (_) {
     return { isDirty: false, modifiedCount: 0, message: null };

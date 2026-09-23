@@ -49,6 +49,9 @@ Krusch Context MCP exposes strictly **5 canonical verbs** designed to fit into s
 | **`krusch_context_nudge`** | `nudge` | Pre-commit auditor that checks proposed diffs against active project invariants (max 1–3 findings). Trigger defaults to `pre_commit` or `manual`; rejects `every_turn`. |
 | **`krusch_context_health`** | `health` | Reports storage mode, memory counts by closed taxonomy, and 30-day TTL decay review. |
 
+> [!NOTE]
+> **Optional Admin Profile**: Launching with `--profile=extended` exposes 4 additional tools (`list_memories`, `delete_memory`, `consolidate`, `nugget_list`) for manual repository maintenance. The default agent loop remains strictly the 5 core verbs.
+
 ---
 
 ## 🤖 Recommended Agent Protocol

@@ -73,20 +73,19 @@ Tracks developer feedback on proactive auditor findings to dynamically tune rule
 
 ## 3. Embedding Dimension Invariant
 
-* **Canonical Model**: `bge-m3` via local Ollama (`http://localhost:11434`) or cloud endpoint.
-* **Vector Dimension**: **`1024`** float elements.
-* **Invariant**: All vector operations (in-memory cosine similarity and PostgreSQL pgvector HNSW indexes) require dimension consistency.
-* **Validation**: Startup diagnostics check embedding dimensions against the configured `EMBEDDING_DIM=1024`. Mismatched dimensions fail fast during `health` checks.
+* **Zero-GPU Default**: Deterministic lexical keyword matching, recency scoring, and heuristic tag indexing. Runs 100% offline without external services.
+* **Optional Dense Vectors**: Local Ollama (`bge-large` @ 1024 dims) or cloud OpenRouter (`baai/bge-large-en-v1.5` @ 1024 dims).
+* **Vector Dimension Invariant**: When vector embeddings are enabled, the vector dimension is strictly **`1024`** float elements. Startup diagnostics validate dimension consistency on `health` checks.
 
 ---
 
 ## 4. Operational Guardrails
 
-### 1. Duplicate Write Guard
+### 1. Non-Blocking Near-Duplicate Guard
 When calling `remember`:
 * The engine performs a semantic cosine similarity check across existing `ACTIVE` records in the project.
-* If similarity exceeds **`0.85`**, the write is intercepted with a warning suggesting `revise` with `action: 'supersede'` and providing the conflicting record ID.
-* Bypassed only when `force: true` is explicitly supplied.
+* If similarity exceeds **`0.85`**, the memory is saved, but the tool returns a warning with the candidate memory ID, similarity score, and a prompt proposing `revise(action: 'supersede', target_id: ...)`.
+* This non-blocking behavior avoids false-positive write rejections for contrasting rules (e.g., "Allow CORS" vs "Do not allow CORS") while steering agents to maintain clean knowledge graphs.
 
 ### 2. Mandatory Invalidation Reason
 Calling `revise` with `action: 'invalidate'` requires a non-empty `reason` string explaining why the rule or invariant was revoked. This reason is surfaced in compiled state briefings so agents understand what constraints were retired.
@@ -95,7 +94,7 @@ Calling `revise` with `action: 'invalidate'` requires a non-empty `reason` strin
 `retrieve` enforces strict server-side token budget adherence. Context items are sorted by relevance and packed until `limit_tokens` is reached. Subsequent candidates are trimmed to protect the LLM context window.
 
 ### 4. 30-Day TTL Decay Review
-Memories unreferenced or inactive for more than 30 days are surfaced in `health` and `compile_state` under the **Decay Review** section for developer evaluation.
+Memories unreferenced or inactive for more than 30 days are surfaced in `health` and `retrieve({ include_state: true })` under the **Decay Review** section for developer evaluation.
 
 ---
 
