@@ -82,28 +82,15 @@ export async function addMemory({
         throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
     }
 
-    // 2. Near-duplicate detection (skip if force: true or if explicitly superseding)
+    // 2. Near-duplicate detection (non-blocking: proposes revise with candidate id & cosine, does not reject write)
+    let nearDup = null;
     if (!force && !supersedes_id) {
-        const nearDup = await checkNearDuplicateMemory({
+        nearDup = await checkNearDuplicateMemory({
             project: targetProject,
             category: normCat,
             embedding: embeddingArray,
             threshold: 0.85
         });
-        if (nearDup) {
-            return {
-                content: [{
-                    type: "text",
-                    text: `⚠️ Near-duplicate memory detected (similarity: ${(nearDup.similarity * 100).toFixed(1)}%):\n` +
-                          `Existing Memory #${nearDup.id} [${nearDup.category}]: "${nearDup.content}"\n\n` +
-                          `If this updates that rule, use 'revise' with action: 'supersede', target_id: ${nearDup.id}.\n` +
-                          `To insert anyway, pass force: true.`
-                }],
-                isError: false,
-                warning: "near_duplicate",
-                duplicate_id: nearDup.id
-            };
-        }
     }
 
     // 3. Process tags
@@ -145,13 +132,32 @@ export async function addMemory({
         pushProjectMemory(targetProject, db).catch(() => {});
 
         const supersedeNote = supersedes_id ? ` (supersedes ID ${supersedes_id})` : '';
-        return {
+        const nearDupNote = nearDup 
+            ? `\n\n⚠️ Near-duplicate memory detected (${(nearDup.similarity * 100).toFixed(1)}% match with Memory #${nearDup.id} [${nearDup.category}]: "${nearDup.content}").\n` +
+              `If this memory supersedes or contradicts #${nearDup.id}, call 'revise' with action: 'supersede', target_id: ${nearDup.id}.`
+            : '';
+
+        const response = {
             content: [{
                 type: "text",
-                text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${targetProject} (${normCat})${supersedeNote}`
+                text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${targetProject} (${normCat}) #${newId}${supersedeNote}${nearDupNote}`
             }],
             id: newId
         };
+
+        if (nearDup) {
+            response.warning = 'near_duplicate';
+            response.candidate_id = nearDup.id;
+            response.candidate_content = nearDup.content;
+            response.similarity = nearDup.similarity;
+            response.suggested_action = {
+                tool: 'krusch_context_revise',
+                action: 'supersede',
+                target_id: nearDup.id
+            };
+        }
+
+        return response;
     }
 
     throw new McpError(ErrorCode.InternalError, "Failed to access local database");

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.8.0] - 2026-09-23
 
+### ⚠️ Breaking Changes & Migration Guide
+v1.8.0 collapses the tool surface to strictly 5 canonical verbs (`retrieve`, `remember`, `revise`, `nudge`, `health`). For backward compatibility, legacy tool invocations will log a deprecation warning and execute the appropriate verb for one minor release cycle.
+
+| Old Tool (v1.7.0) | v1.8.0 Canonical Replacement | Migration Notes |
+| :--- | :--- | :--- |
+| `krusch_context_add_memory` | `krusch_context_remember({ content, category })` | Closed taxonomy (`decision`, `bug`, `invariant`, `lesson`, `blocker`). Non-blocking near-duplicate check. |
+| `krusch_context_nugget_remember` | `krusch_context_remember({ key, content })` | Sets key-value persistent steering nugget. |
+| `krusch_context_search_memory` | `krusch_context_retrieve({ query, mode: 'memory' })` | Packed within `limit_tokens` budget. |
+| `krusch_context_compile_state` | `krusch_context_retrieve({ query: '*', include_state: true })` | State briefing prepended to retrieved context. |
+| `krusch_context_supersede_memory` | `krusch_context_revise({ action: 'supersede', target_id, content })` | Preserves temporal lineage links. |
+| `krusch_context_invalidate_memory` | `krusch_context_revise({ action: 'invalidate', target_id, reason })` | Strictly requires a non-empty `reason`. |
+| `krusch_context_nugget_forget` | `krusch_context_revise({ action: 'forget_nugget', key })` | Retires persistent nugget by key. |
+| `krusch_context_proactive_nudge` | `krusch_context_nudge({ trigger: 'pre_commit', code })` | Findings capped at 3. `every_turn` trigger is rejected. |
+| `krusch_context_nudge_feedback` | `krusch_context_nudge({ action: 'feedback', rule_id, feedback })` | Persists dynamic rule weights in SQLite. |
+| `krusch_context_nugget_nudges` | `krusch_context_retrieve({ query, category: 'invariant' })` | Unified retrieval with structured citations. |
+| `krusch_context_search_code` | Moved to dedicated `pg-git` or IDE search | Decoupled from memory engine. |
+| `krusch_context_search_symbols` | Moved to dedicated `pg-git` or IDE search | Decoupled from memory engine. |
+| `krusch_context_symbol_graph` | Moved to dedicated `pg-git` or IDE search | Decoupled from memory engine. |
+| `krusch_context_semantic_route` | Moved to standalone `krusch-router` | Decoupled from memory engine. |
+| Companion extensions (`law`, `nexus`, `biz`) | Standalone companion MCP servers | Run as independent processes. |
+
 ### Added
 - **5-Verb Canonical Tool Surface**:
   - Collapsed the MCP default tool menu to strictly 5 canonical verbs:

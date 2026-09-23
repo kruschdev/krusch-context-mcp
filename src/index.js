@@ -170,7 +170,8 @@ export const CORE_TOOL_DEFINITIONS = [
         action: { type: "string", enum: ['audit', 'feedback'], default: 'audit', description: "Action: audit against invariants or submit feedback" },
         code: { type: "string", description: "Code or diff snippet to audit" },
         file_path: { type: "string", description: "Optional target file path" },
-        hook: { type: "string", enum: ['pre-edit', 'pre-commit', 'manual'], default: 'manual' },
+        trigger: { type: "string", enum: ['pre_commit', 'pre_edit', 'manual'], default: 'manual', description: "Trigger point. Default: manual. ('every_turn' is disabled to prevent audit spam)" },
+        hook: { type: "string", enum: ['pre_commit', 'pre_edit', 'manual'], description: "Alias for trigger" },
         rule_id: { type: "string", description: "Rule or memory ID when providing feedback" },
         feedback: { type: "string", enum: ['helpful', 'unhelpful', 'false_positive'], description: "Feedback rating to tune rule weights" },
         project: { type: "string", description: "Target project" }
@@ -324,7 +325,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     // 2. krusch_context_remember (alias: remember, add_memory, nugget_remember)
-    if (name === "krusch_context_remember" || name === "remember" || name === "krusch_context_add_memory") {
+    if (name === "krusch_context_remember" || name === "remember") {
       if (args.key) {
         return await nuggetRemember({
           key: args.key,
@@ -334,6 +335,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
       }
       return await addMemory(args);
+    }
+    if (name === "krusch_context_add_memory") {
+      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: 'krusch_context_add_memory' is deprecated in v1.8.0. Use 'krusch_context_remember({ content, category })' instead.`);
+      return await addMemory(args);
+    }
+    if (name === "krusch_context_nugget_remember") {
+      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: 'krusch_context_nugget_remember' is deprecated in v1.8.0. Use 'krusch_context_remember({ key, content })' instead.`);
+      return await nuggetRemember({
+        key: args.key,
+        value: args.value || args.content,
+        kind: 'project',
+        active_project: args.project || args.active_project
+      });
     }
 
     // 3. krusch_context_revise (alias: revise, supersede_memory, invalidate_memory, nugget_forget)
@@ -363,23 +377,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // Legacy revise aliases
     if (name === "krusch_context_supersede_memory") {
+      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: 'krusch_context_supersede_memory' is deprecated in v1.8.0. Use 'krusch_context_revise({ action: "supersede", target_id, content })' instead.`);
       return await supersedeMemory(args);
     }
     if (name === "krusch_context_invalidate_memory") {
+      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: 'krusch_context_invalidate_memory' is deprecated in v1.8.0. Use 'krusch_context_revise({ action: "invalidate", target_id, reason })' instead.`);
       return await invalidateMemory(args);
     }
     if (name === "krusch_context_nugget_forget") {
+      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: 'krusch_context_nugget_forget' is deprecated in v1.8.0. Use 'krusch_context_revise({ action: "forget_nugget", key })' instead.`);
       return await nuggetForget(args);
     }
 
     // 4. krusch_context_nudge (alias: nudge, proactive_nudge, nugget_nudges, nudge_feedback)
-    if (name === "krusch_context_nudge" || name === "nudge" || name === "krusch_context_proactive_nudge") {
+    if (name === "krusch_context_nudge" || name === "nudge") {
+      return await handleProactiveNudge(args);
+    }
+    if (name === "krusch_context_proactive_nudge") {
+      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: 'krusch_context_proactive_nudge' is deprecated in v1.8.0. Use 'krusch_context_nudge({ trigger: "pre_commit", code })' instead.`);
       return await handleProactiveNudge(args);
     }
     if (name === "krusch_context_nudge_feedback") {
+      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: 'krusch_context_nudge_feedback' is deprecated in v1.8.0. Use 'krusch_context_nudge({ action: "feedback", rule_id, feedback })' instead.`);
       return await recordNudgeFeedback(args);
     }
     if (name === "krusch_context_nugget_nudges") {
+      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: 'krusch_context_nugget_nudges' is deprecated in v1.8.0. Use 'krusch_context_retrieve({ query, category: "invariant" })' instead.`);
       return await nuggetNudges(args);
     }
 
@@ -390,9 +413,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // Legacy retrieval & inspection aliases
     if (name === "krusch_context_search_memory") {
+      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: 'krusch_context_search_memory' is deprecated in v1.8.0. Use 'krusch_context_retrieve({ query, mode: "memory" })' instead.`);
       return await searchMemory(args);
     }
     if (name === "krusch_context_compile_state") {
+      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: 'krusch_context_compile_state' is deprecated in v1.8.0. Use 'krusch_context_retrieve({ query: "*", include_state: true })' instead.`);
       return await compileProjectState(args);
     }
     if (name === "krusch_context_list_memories") {

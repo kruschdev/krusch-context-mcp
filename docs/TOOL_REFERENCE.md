@@ -83,7 +83,8 @@ The default profile exposes strictly **5 canonical verbs** (~350 prompt tokens) 
 | `action` | `string` | No | Action: audit against invariants or submit feedback [audit, feedback] (default: `audit`) |
 | `code` | `string` | No | Code or diff snippet to audit |
 | `file_path` | `string` | No | Optional target file path |
-| `hook` | `string` | No |  [pre-edit, pre-commit, manual] (default: `manual`) |
+| `trigger` | `string` | No | Trigger point. Default: manual. ('every_turn' is disabled to prevent audit spam) [pre_commit, pre_edit, manual] (default: `manual`) |
+| `hook` | `string` | No | Alias for trigger [pre_commit, pre_edit, manual] |
 | `rule_id` | `string` | No | Rule or memory ID when providing feedback |
 | `feedback` | `string` | No | Feedback rating to tune rule weights [helpful, unhelpful, false_positive] |
 | `project` | `string` | No | Target project |

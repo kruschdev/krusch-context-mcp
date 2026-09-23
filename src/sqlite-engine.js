@@ -92,8 +92,9 @@ function resolveProjectPath(projectName) {
         return siblingPath;
     }
 
-    // 3. Fallback to cwd/.agent
-    return process.cwd();
+    // 3. Fallback to isolated user project directory
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '/tmp';
+    return path.join(homeDir, '.krusch-context', 'projects', projectName);
 }
 
 /**

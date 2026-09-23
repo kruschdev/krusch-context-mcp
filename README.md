@@ -1,30 +1,36 @@
 # Krusch Context MCP
 
+> Local MCP server: five tools to store, retrieve, and retire project decisions. SQLite by default.
+
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![MCP: 5 Verbs](https://img.shields.io/badge/MCP-5%20Core%20Verbs-blue.svg)](docs/TOOL_REFERENCE.md)
 [![Storage: SQLite-First](https://img.shields.io/badge/Storage-SQLite--First%20(zero--Docker)-lightgrey.svg)](docs/ARCHITECTURE.md)
 
-**Krusch Context MCP** gives your AI coding agents (Cursor, Claude Code, Windsurf, Antigravity) persistent working memory across sessions. It remembers architectural decisions, project invariants, lessons, and bugs, detects near-duplicate facts before writing, maintains lineage when rules are superseded or invalidated, and audits proposed changes against active constraints.
+**Krusch Context MCP** gives your AI coding agents (Cursor, Claude Code, Windsurf, Antigravity) persistent working memory across sessions. It remembers architectural decisions, project invariants, lessons, and bugs, flags near-duplicate memories, maintains lineage when rules are superseded or invalidated, and audits proposed changes against active constraints.
 
-Runs out of the box on Node 22's built-in `node:sqlite` (`.agent/context.db`) with **zero Docker and zero PostgreSQL setup**. When you need multi-developer or fleet-wide persistence across machines, it seamlessly connects to PostgreSQL.
+### 💾 Storage & Scope Reality
+- **Default (SQLite)**: Uses Node 22's built-in `node:sqlite` (`.agent/context.db`) with in-memory cosine similarity. Requires **zero Docker, zero PostgreSQL**, and zero native C++ compiles. Ideal for hundreds to low-thousands of project decisions, invariants, and steering nuggets.
+- **Codebase Search & AST**: Decoupled from this package. Code search belongs in `pg-git` or the IDE's native search; `krusch-context-mcp` is purely memory hygiene and steering.
+- **PostgreSQL**: Optional drop-in adapter (`STORAGE_MODE=postgres`) when you outgrow local cosine or need multi-machine team sync with server-side pgvector HNSW indexing.
 
 ---
 
 ## ⚡ 30-Second Quickstart
 
-Run this once inside any git repository:
+Requires **Node.js >= 22.0.0**. Run this once inside any git repository:
 
 ```bash
 npx krusch-context-mcp init
 ```
 
 This single command:
-1. Detects your workspace and initializes `.agent/context.db` via `node:sqlite`.
-2. Creates or merges your local `.env`.
-3. Seeds your initial project context.
-4. Runs a diagnostic health check.
-5. Prints copy-paste JSON configurations for Cursor, Claude Code, and Claude Desktop.
+1. Validates Node >= 22.0.0 and initializes `.agent/context.db` via `node:sqlite`.
+2. Cleans any stale MCP tool schema files from local IDE cache.
+3. Creates or merges your local `.env`.
+4. Seeds your initial project context.
+5. Runs a diagnostic health check.
+6. Prints copy-paste JSON configurations for Cursor, Claude Code, and Claude Desktop.
 
 ---
 
@@ -35,13 +41,13 @@ Instead of cluttering the agent's context window with dozens of overlapping tool
 | Verb | Short Alias | Purpose |
 | :--- | :--- | :--- |
 | **`krusch_context_retrieve`** | `retrieve` | Pulls active memories, steering rules, and project state briefings within a strict `limit_tokens` budget. Returns citations. |
-| **`krusch_context_remember`** | `remember` | Writes episodic facts and persistent steering nuggets. Automatically detects near-duplicates (`similarity >= 0.85`) and proposes `supersede` instead of inserting twins. |
+| **`krusch_context_remember`** | `remember` | Writes episodic facts and persistent steering nuggets. Detects near-duplicates (`similarity >= 0.85`) and proposes `revise(action: 'supersede')` without blocking contrasting rules. |
 | **`krusch_context_revise`** | `revise` | Updates stale knowledge (`supersede` with lineage tracking) or revokes obsolete rules (`invalidate` with mandatory reason). |
-| **`krusch_context_nudge`** | `nudge` | Pre-edit / pre-commit auditor that checks proposed diffs against active project invariants (max 1–3 findings), with feedback weighting. |
+| **`krusch_context_nudge`** | `nudge` | Pre-commit / pre-edit auditor that checks proposed diffs against active project invariants (max 1–3 findings). Trigger defaults to `pre_commit` or `manual`; rejects `every_turn`. |
 | **`krusch_context_health`** | `health` | Reports storage mode, memory counts by closed taxonomy, and 30-day TTL decay review. |
 
 > [!NOTE]
-> **Complete Backward Compatibility**: Direct calls to legacy tool names (`search_memory`, `compile_state`, `add_memory`, `supersede_memory`, `invalidate_memory`, `nugget_remember`, `proactive_nudge`) are automatically routed to the corresponding verb handler so existing scripts and client configurations continue working.
+> **Backward Compatibility & Deprecation Window**: Direct calls to legacy tool names (`search_memory`, `compile_state`, `add_memory`, `supersede_memory`, `invalidate_memory`, `nugget_remember`, `proactive_nudge`) log a deprecation notice and route to the corresponding verb handler for one minor version. See [CHANGELOG.md](CHANGELOG.md) for the migration table.
 
 ---
 
@@ -55,10 +61,11 @@ To prevent episodic memory from turning into an unmaintained, hallucinated mess:
    * `bug`: Solved edge cases and regressions to avoid repeating.
    * `lesson`: Tactical insights learned during development.
    * `blocker`: Active dependencies or operational impediments.
-2. **Near-Duplicate Protection**: When calling `remember`, the engine computes vector similarity against active records. If similarity exceeds 0.85, the tool warns the model, surfaces the existing record ID, and prompts the agent to call `revise(action: 'supersede', target_id: ...)`.
-3. **Mandatory Invalidation Reasons**: Marking a rule as `INVALIDATED` requires a justification. Revocations and reasons are displayed in compiled state briefings so agents understand retired constraints.
-4. **Provenance Tracking**: Every memory tracks `{ author: 'human' | 'agent', file, commit, pr, confidence }`.
-5. **30-Day TTL Decay Review**: Memories inactive or unreferenced for >30 days are flagged in `health` and `compile_state` for developer review.
+2. **Non-Blocking Near-Duplicate Detection**: When calling `remember`, the engine computes vector similarity against active records. If similarity exceeds 0.85, the memory is saved, but the tool returns a warning with the candidate memory ID, similarity score, and a prompt proposing `revise(action: 'supersede', target_id: ...)`. This prevents false positives (e.g. "Use JWT in cookies" vs "Do not put JWT in cookies") from blocking valid contrasting writes.
+3. **Mandatory Invalidation Reasons**: Marking a rule as `INVALIDATED` strictly requires a non-empty `reason`.
+4. **Focused Invariant Audits**: `nudge` triggers on `pre_commit` or `manual` (`every_turn` is rejected to eliminate audit fatigue). Findings are strictly capped at 3 with concrete evidence. Feedback (`helpful`, `false_positive`) updates and persists rule weights in SQLite.
+5. **Provenance Tracking**: Every memory tracks `{ author: 'human' | 'agent', file, commit, pr, confidence }`.
+6. **30-Day TTL Decay Review**: Memories inactive or unreferenced for >30 days are flagged in `health` for developer review.
 
 ---
 

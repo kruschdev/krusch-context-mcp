@@ -89,7 +89,8 @@ export async function unifiedRetrieve({
     category = null,
     limit_tokens = 4000,
     project = null,
-    include_state = false
+    include_state = false,
+    _embedding = null
 }) {
     const targetProject = project || detectCurrentProject();
     const items = [];
@@ -108,8 +109,8 @@ export async function unifiedRetrieve({
         stateHeader = stateText + "\n\n---\n\n";
     }
 
-    // 2. Fetch seed embedding for semantic matching
-    const embeddingArray = await getEmbedding(query);
+    // 2. Fetch seed embedding for semantic matching (or use precomputed _embedding)
+    const embeddingArray = _embedding || await getEmbedding(query);
 
     // 3. Search project memories from local SQLite cache
     if (targetProject) {
@@ -135,8 +136,20 @@ export async function unifiedRetrieve({
                             score = cosineSimilarity(embeddingArray, vec);
                         } catch {}
                     }
-                    if (r.content.toLowerCase().includes(query.toLowerCase())) {
-                        score = Math.max(score, 0.75);
+                    const lowerContent = r.content.toLowerCase();
+                    const lowerQuery = query.toLowerCase();
+                    if (lowerContent.includes(lowerQuery)) {
+                        score = Math.max(score, 0.85);
+                    } else {
+                        // Multi-term keyword overlap
+                        const terms = lowerQuery.split(/\s+/).filter(t => t.length > 2);
+                        if (terms.length > 0) {
+                            const matches = terms.filter(t => lowerContent.includes(t)).length;
+                            if (matches > 0) {
+                                const overlap = matches / terms.length;
+                                score = Math.max(score, 0.5 + overlap * 0.35);
+                            }
+                        }
                     }
                     if (score > 0.4) {
                         items.push({

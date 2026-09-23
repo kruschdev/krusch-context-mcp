@@ -83,16 +83,28 @@ export async function handleProactiveNudge({
     history,
     code,
     file_path,
-    hook = 'manual',
+    hook,
+    trigger = 'manual',
     rule_id,
     feedback,
     project
 }) {
     const targetProject = project || detectCurrentProject();
+    const effectiveTrigger = (trigger || hook || 'manual').toLowerCase();
 
     // 1. If action is feedback, record and return
     if (action === 'feedback' || (rule_id && feedback)) {
         return await recordNudgeFeedback({ rule_id, feedback, project: targetProject });
+    }
+
+    // 2. Reject/no-op on every_turn to avoid tool call explosion & audit fatigue
+    if (effectiveTrigger === 'every_turn') {
+        return { 
+            content: [{ 
+                type: "text", 
+                text: "NO_NUDGES_REQUIRED (auditing disabled on every_turn to avoid spam; run on pre_commit or manual)" 
+            }] 
+        };
     }
 
     // 2. Parse candidate text to audit

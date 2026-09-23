@@ -21,23 +21,13 @@ export function getStorageMode() {
     if (activeStorageMode) return activeStorageMode;
 
     const envMode = (process.env.STORAGE_MODE || '').toLowerCase().trim();
-    if (envMode === 'sqlite') {
-        activeStorageMode = 'sqlite';
-        return activeStorageMode;
-    }
     if (envMode === 'postgres') {
         activeStorageMode = 'postgres';
         return activeStorageMode;
     }
 
-    // Default heuristic: If DATABASE_URL or explicit host is provided and reachable, postgres is allowed.
-    // Otherwise, SQLite is the default.
-    if (process.env.DATABASE_URL || (process.env.DB_HOST && process.env.DB_HOST !== 'localhost')) {
-        activeStorageMode = 'postgres';
-    } else {
-        // Safe default: SQLite-first
-        activeStorageMode = process.env.DB_PASSWORD ? 'postgres' : 'sqlite';
-    }
+    // Default is strictly SQLite-first (zero-Docker default)
+    activeStorageMode = 'sqlite';
     return activeStorageMode;
 }
 
@@ -217,9 +207,8 @@ export async function checkNearDuplicateMemory({ project, category, embedding, t
     const rows = db.prepare(`
         SELECT id, content, category, embedding
         FROM ide_agent_memory
-        WHERE (project = ? OR project IS NULL)
-          AND status = 'ACTIVE'
-    `).all(project || null);
+        WHERE status = 'ACTIVE'
+    `).all();
 
 
     let bestMatch = null;

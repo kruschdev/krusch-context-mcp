@@ -17,6 +17,15 @@ import { getHealthStats, addMemory } from '../src/memory-engine.js';
 import { getSqliteDb } from '../src/storage-adapter.js';
 import { detectCurrentProject } from '../src/project-helper.js';
 
+// 0. Support matrix check: Node >= 22 required for native node:sqlite (DatabaseSync)
+const nodeVersion = process.versions.node;
+const majorVersion = parseInt(nodeVersion.split('.')[0], 10);
+if (majorVersion < 22) {
+    console.error(`\x1b[31m❌ Error: krusch-context-mcp v${VERSION} requires Node.js >= 22.0.0 for native SQLite (node:sqlite).\x1b[0m`);
+    console.error(`Current version: v${nodeVersion}. Please upgrade Node before running.`);
+    process.exit(1);
+}
+
 const cmd = process.argv[2];
 
 if (cmd === 'init') {
@@ -37,8 +46,44 @@ if (cmd === 'init') {
     });
 }
 
+function cleanStaleMcpSchemas() {
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    const mcpDirs = [
+        path.join(homeDir, '.gemini', 'antigravity-ide', 'mcp', 'krusch-context-mcp'),
+        path.join(homeDir, '.gemini', 'antigravity', 'mcp', 'krusch-context-mcp')
+    ];
+    const coreNames = new Set([
+        'krusch_context_retrieve',
+        'krusch_context_remember',
+        'krusch_context_revise',
+        'krusch_context_nudge',
+        'krusch_context_health'
+    ]);
+
+    let cleaned = 0;
+    for (const d of mcpDirs) {
+        if (fs.existsSync(d)) {
+            try {
+                for (const file of fs.readdirSync(d)) {
+                    if (file.endsWith('.json')) {
+                        const name = file.replace('.json', '');
+                        if (!coreNames.has(name)) {
+                            fs.unlinkSync(path.join(d, file));
+                            cleaned++;
+                        }
+                    }
+                }
+            } catch {}
+        }
+    }
+    if (cleaned > 0) {
+        console.log(`🧹 Cleaned ${cleaned} stale MCP tool schema files from local IDE cache.`);
+    }
+}
+
 async function runInit() {
     console.log(`\n🚀 Initializing Krusch Context MCP v${VERSION}...\n`);
+    cleanStaleMcpSchemas();
 
     const cwd = process.cwd();
     let isGit = false;
