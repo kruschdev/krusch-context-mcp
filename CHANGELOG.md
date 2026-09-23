@@ -22,9 +22,9 @@ v1.8.0 collapses the tool surface to strictly 5 canonical verbs (`retrieve`, `re
 | `krusch_context_proactive_nudge` | `krusch_context_nudge({ trigger: 'pre_commit', code })` | Findings capped at 3. `every_turn` trigger is rejected. |
 | `krusch_context_nudge_feedback` | `krusch_context_nudge({ action: 'feedback', rule_id, feedback })` | Persists dynamic rule weights in SQLite. |
 | `krusch_context_nugget_nudges` | `krusch_context_retrieve({ query, category: 'invariant' })` | Unified retrieval with structured citations. |
-| `krusch_context_search_code` | Moved to dedicated `pg-git` or IDE search | Decoupled from memory engine. |
-| `krusch_context_search_symbols` | Moved to dedicated `pg-git` or IDE search | Decoupled from memory engine. |
-| `krusch_context_symbol_graph` | Moved to dedicated `pg-git` or IDE search | Decoupled from memory engine. |
+| `krusch_context_search_code` | Moved to dedicated `krusch-git` or IDE search | Decoupled from memory engine. |
+| `krusch_context_search_symbols` | Moved to dedicated `krusch-git` or IDE search | Decoupled from memory engine. |
+| `krusch_context_symbol_graph` | Moved to dedicated `krusch-git` or IDE search | Decoupled from memory engine. |
 | `krusch_context_semantic_route` | Moved to standalone `krusch-router` | Decoupled from memory engine. |
 | Companion extensions (`law`, `nexus`, `biz`) | Standalone companion MCP servers | Run as independent processes. |
 
@@ -53,7 +53,7 @@ v1.8.0 collapses the tool surface to strictly 5 canonical verbs (`retrieve`, `re
 ### Changed
 - **Excised Non-Memory Engines**:
   - Quarantined companion extension bridges (`law`, `nexus`, `biz`, `polygres-cloud`, `semantic-router`) to their independent standalone repositories.
-  - Moved Codebase RAG and AST chunking (`ast-chunker.js`, `git-engine.js`) to dedicated `pg-git` repository.
+  - Moved Codebase RAG and AST chunking (`ast-chunker.js`, `git-engine.js`) to dedicated `krusch-git` repository.
   - Purged dead re-exports (`v2-engine.js`, `think-engine.js`, `polygres-cloud.js`, `session-engine.js`, `skills-engine.js`).
   - Rewrote `README.md` to be an honest, grounded 1-page guide without marketing buzzwords ("sovereign triad", "holographic", arXiv jargon).
 - **Storage Layer Evolution**:

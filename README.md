@@ -11,7 +11,7 @@
 
 ### 💾 Storage & Scope Reality
 - **Default (SQLite)**: Uses Node 22's built-in `node:sqlite` (`.agent/context.db`) with in-memory cosine similarity. Requires **zero Docker, zero PostgreSQL**, and zero native C++ compiles. Ideal for hundreds to low-thousands of project decisions, invariants, and steering nuggets.
-- **Codebase Search & AST**: Decoupled from this package. Code search belongs in `pg-git` or the IDE's native search; `krusch-context-mcp` is purely memory hygiene and steering.
+- **Codebase Search & AST**: Decoupled from this package. Code search belongs in `krusch-git` or the IDE's native search; `krusch-context-mcp` is purely memory hygiene and steering.
 - **PostgreSQL**: Optional drop-in adapter (`STORAGE_MODE=postgres`) when you outgrow local cosine or need multi-machine team sync with server-side pgvector HNSW indexing.
 
 ---
@@ -106,7 +106,7 @@ claude mcp add krusch-context npx krusch-context-mcp
 
 `krusch-context-mcp` does one job: **working memory, state briefings, and invariant steering** for coding agents.
 
-* **Codebase RAG & Git AST**: Handled separately by [`pg-git`](https://github.com/kruschdev/pg-git) or your IDE's native indexing.
+* **Codebase RAG & Git AST**: Handled separately by [`krusch-git`](https://github.com/kruschdev/krusch-git) or your IDE's native indexing.
 * **Specialized Domain Engines**: Document ingestion ([`krusch-nexus`](https://github.com/kruschdev/krusch-nexus)), statutory compliance ([`krusch-law`](https://github.com/kruschdev/krusch-law)), and contract graphs ([`krusch-biz`](https://github.com/kruschdev/krusch-biz)) run as independent MCP servers in their own repositories.
 
 ---
