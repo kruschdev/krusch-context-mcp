@@ -31,7 +31,7 @@ v1.8.0 collapses the tool surface to strictly 5 canonical verbs (`retrieve`, `re
 ### Added
 - **5-Verb Canonical Tool Surface**:
   - Collapsed the MCP default tool menu to strictly 5 canonical verbs:
-    1. `retrieve` (`krusch_context_retrieve`): Hybrid context & state briefing retrieval with strict `limit_tokens` budget packing and structured citations.
+    1. `retrieve` (`krusch_context_retrieve`): Project memory, persistent steering nuggets, and state briefing retrieval with strict `limit_tokens` budget packing and structured citations.
     2. `remember` (`krusch_context_remember`): Unified write API for episodic memory and steering nuggets with near-duplicate detection (`cosine >= 0.85`), closed taxonomy (`decision`, `bug`, `invariant`, `lesson`, `blocker`), and provenance tracking.
     3. `revise` (`krusch_context_revise`): Temporal superseding (with lineage links) or explicit invalidations (with mandatory reason).
     4. `nudge` (`krusch_context_nudge`): Lightweight invariant auditor (max 1–3 findings with code evidence) and feedback weight adjustment.
@@ -57,7 +57,9 @@ v1.8.0 collapses the tool surface to strictly 5 canonical verbs (`retrieve`, `re
   - Purged dead re-exports (`v2-engine.js`, `think-engine.js`, `polygres-cloud.js`, `session-engine.js`, `skills-engine.js`).
   - Rewrote `README.md` to be an honest, grounded 1-page guide without marketing buzzwords ("sovereign triad", "holographic", arXiv jargon).
 - **Storage Layer Evolution**:
-  - Migrated from `better-sqlite3` to Node 22 native `node:sqlite` (`DatabaseSync`), eliminating native C++ compilation dependencies.
+  - Migrated from `better-sqlite3` to Node 22 native `node:sqlite` (`DatabaseSync`).
+  - Dropped `better-sqlite3`, `ml-pca`, and `@opentelemetry/*` packages. Zero native C++ compilation dependencies.
+  - Added `engines.node >= 22.0.0` in `package.json`.
   - Added `src/storage-adapter.js` supporting dual-mode persistence (`node:sqlite` default, PostgreSQL fleet mode optional).
 
 ## [1.7.0] - 2026-09-23

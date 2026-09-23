@@ -2,10 +2,13 @@
   "name": "krusch-context-mcp",
   "version": "1.8.0",
   "type": "module",
-  "description": "Universal Memory & Steering Engine for AI Agents (5-verb core, near-duplicate protection, SQLite-first default, durable fleet persistence).",
+  "description": "Local MCP server: five tools to store, retrieve, and retire project decisions. SQLite by default.",
   "main": "src/index.js",
   "bin": {
     "krusch-context-mcp": "bin/cli.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
   },
   "publishConfig": {
     "access": "public"
@@ -42,22 +45,15 @@
     "cursor-ide",
     "claude-code",
     "windsurf",
-    "semantic-search",
-    "pgvector",
     "episodic-memory",
-    "memory-hygiene"
+    "memory-hygiene",
+    "sqlite"
   ],
   "author": "kruschdev",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/resources": "^2.7.1",
-    "@opentelemetry/sdk-trace-base": "^2.7.1",
-    "@opentelemetry/sdk-trace-node": "^2.7.1",
-    "better-sqlite3": "^11.0.0",
     "dotenv": "^16.4.7",
-    "ml-pca": "^4.1.1",
     "pg": "^8.20.0"
   },
   "overrides": {

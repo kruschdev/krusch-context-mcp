@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -20,11 +20,11 @@ const PROJECTS = process.env.SYNC_PROJECTS
         : []);
 
 function clearProjectDb(project) {
-    const dbPath = path.join(PROJECTS_DIR, project, '.agent', 'memory.db');
+    const dbPath = path.join(PROJECTS_DIR, project, '.agent', 'context.db');
     if (fs.existsSync(dbPath)) {
         try {
-            const db = new Database(dbPath);
-            db.pragma('journal_mode = WAL');
+            const db = new DatabaseSync(dbPath);
+            db.exec('PRAGMA journal_mode = WAL;');
             
             console.log(`[${project}] Clearing embeddings in ide_agent_memory...`);
             const res1 = db.prepare(`UPDATE ide_agent_memory SET embedding = NULL`).run();

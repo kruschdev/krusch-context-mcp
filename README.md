@@ -102,30 +102,12 @@ claude mcp add krusch-context npx krusch-context-mcp
 
 ---
 
-## 🏛️ The Krusch Architecture: Separation of Concerns
+## 🧩 Scope & Related Repositories
 
-Each system in the architecture has one job:
+`krusch-context-mcp` does one job: **working memory, state briefings, and invariant steering** for coding agents.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                 krusch-context-mcp (This Repo)              │
-│       Universal Memory & Steering Engine for All Agents     │
-│       (retrieve, remember, revise, nudge, health)           │
-└───────┬───────────────────┬───────────────────┬─────────────┘
-        │                   │                   │
-        ▼                   ▼                   ▼
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│    pg-git    │    │  krusch-law  │    │  krusch-biz  │
-│  Codebase &  │    │  Statutory & │    │ Commercial & │
-│   Git RAG    │    │  Ordinance   │    │ Contract RAG │
-└──────────────┘    └──────────────┘    └──────────────┘
-```
-
-* **`krusch-context`** *(this repo)*: The shared memory and invariant brain across all sessions.
-* **`pg-git`**: Dedicated structural Git & code chunk indexer.
-* **`krusch-law`**: Standalone legal compliance and statutory RAG MCP.
-* **`krusch-biz`**: Standalone commercial contract & SLA conflict graph MCP.
-* **`krusch-nexus`**: Standalone document citation spine & ingestion MCP.
+* **Codebase RAG & Git AST**: Handled separately by [`pg-git`](https://github.com/kruschdev/pg-git) or your IDE's native indexing.
+* **Specialized Domain Engines**: Document ingestion ([`krusch-nexus`](https://github.com/kruschdev/krusch-nexus)), statutory compliance ([`krusch-law`](https://github.com/kruschdev/krusch-law)), and contract graphs ([`krusch-biz`](https://github.com/kruschdev/krusch-biz)) run as independent MCP servers in their own repositories.
 
 ---
 
