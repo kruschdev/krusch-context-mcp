@@ -14,6 +14,10 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '..', '.env'), quiet: true });
 
+export const STATUTORY_PATTERN = /(?:§|Section|\bCal\.?\s*Civ\.?|\bOMC|\bLAMC|\bU\.?S\.?C\.?)\s*[\d\.]+/i;
+export const COMMERCIAL_PATTERN = /(?:MSA|SLA|NDA|Master Services Agreement|Service Level Agreement|Non-Disclosure|Limitation of Liability|Net \d+|Payment Terms|Indemnification)/i;
+export const CITATION_PATTERN = /(?:workspace\s+['"][^'"]+['"]|cite span|char_start|char_end|page \d+ of |scan(?:ned)? document|pdf exhibit)/i;
+
 /**
  * Multi-Agent Resilience Gate Evaluation (arXiv: 2609.17320).
  * Audits inter-agent handoff traces for error cascades, circular deadlocks, and credential leakage.
