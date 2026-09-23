@@ -5,7 +5,8 @@ GEMINI_INFLIGHT.md
 INFLIGHT.md
 *SESSION_REVIEW.md
 spec.md
-AGENTS.md
+/AGENTS.md
+!templates/AGENTS.md
 .agent/
 scratch_*.js
 scripts/scratch/

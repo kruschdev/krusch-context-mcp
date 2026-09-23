@@ -1,62 +1,57 @@
 # Claude Code Agent Protocol (`krusch-context-mcp`)
 
-This project uses `krusch-context-mcp` for cross-session working memory, structural code symbol graphs, and persistent steering rules.
+This project uses `krusch-context-mcp` for cross-session working memory, architectural decisions, and invariant steering.
 
-## Standard Tool Calling Lifecycle
+## Required Agent Lifecycle
 
-### 1. At Start of Work / New Session
-Call `krusch_context_retrieve` with `include_state: true` to hydrate current project state alongside code context in a single turn (workspace project is automatically detected if omitted):
+### 1. Session Start (Hydrate State)
+At the start of your turn or session, call `krusch_context_retrieve` to load project constraints:
 ```javascript
 krusch_context_retrieve({
-  query: "<task context>",
+  query: "*",
   include_state: true,
-  graph_hops: 2,
-  limit_tokens: 3500,
-  include_code: true
+  limit_tokens: 4000
 });
 ```
-Or inspect the compiled state briefing standalone (`project` is optional with auto-detection):
-```javascript
-krusch_context_compile_state({});
-```
 
-### 2. Before Non-Trivial Code Modifications
-Call `krusch_context_retrieve` to fetch unified vector context, symbol graphs, and relevant past memories packed within your token budget:
+### 2. During Work (Record Key Decisions & Bugs)
+When you decide an architectural pattern or resolve a defect, persist it via `krusch_context_remember`:
 ```javascript
-krusch_context_retrieve({
-  query: "<task context>",
-  project: "<project_name>",
-  graph_hops: 2,
-  limit_tokens: 3500,
-  include_code: true
+krusch_context_remember({
+  category: "decision", // 'decision' | 'invariant' | 'bug' | 'lesson' | 'blocker'
+  content: "Use node:sqlite DatabaseSync built-in; zero native compilation dependencies."
 });
 ```
-Call `krusch_context_nugget_nudges` to check for steering rules and architectural conventions:
+If a `near_duplicate` warning is returned, evaluate whether to update the existing record with `krusch_context_revise`:
 ```javascript
-krusch_context_nugget_nudges({ query: "<task context>" });
+krusch_context_revise({
+  action: "supersede",
+  target_id: 12,
+  content: "Updated invariant rule with latest findings.",
+  category: "invariant"
+});
 ```
 
-### 3. When Facts or Architectural Decisions Change
-Maintain clean knowledge lineage with active superseding and invalidation:
+### 3. Retiring Outdated Rules
+When an invariant or rule is revoked, invalidate it with an explicit reason:
 ```javascript
-// Supersede outdated rules with new authoritative truth
-krusch_context_supersede_memory({
-  id: <old_id>,
-  category: "lessons",
-  content: "<new fact>",
-  project: "<project_name>"
+krusch_context_revise({
+  action: "invalidate",
+  target_id: 8,
+  reason: "Replaced custom mutex with atomic SQLite transactions."
 });
+```
 
-// Explicitly invalidate revoked secrets or obsolete invariants
-krusch_context_invalidate_memory({
-  id: <old_id>,
-  reason: "<why obsolete>"
+### 4. Pre-Commit Verification
+Before declaring a coding task complete, run the invariant audit:
+```javascript
+krusch_context_nudge({
+  trigger: "pre_commit"
 });
+```
 
-// Record key milestone outcomes or discovered bug solutions
-krusch_context_add_memory({
-  category: "lessons",
-  content: "...",
-  project: "<project_name>"
-});
+### 5. Memory Health Check
+Review stored memory taxonomy and decay candidates:
+```javascript
+krusch_context_health({});
 ```

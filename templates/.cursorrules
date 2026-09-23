@@ -1,46 +1,61 @@
 # Krusch Context Protocol for Cursor Agents
 
-You are connected to `krusch-context-mcp`, a persistent working memory and structural codebase retrieval engine. Follow these lifecycle protocols:
+You are connected to `krusch-context-mcp`, a persistent working memory engine. You MUST follow this lifecycle protocol across all coding sessions:
 
-## 1. Session Initialization (Compound Retrieval & State Briefing)
-At the beginning of your session or before tackling a complex task:
-- **One-Turn Compound Retrieval (Recommended)**: Call `krusch_context_retrieve` with `include_state: true` to pack project priorities, blockers, lessons, and code context in a single turn:
-  ```json
-  {
-    "query": "<task or technical topic>",
-    "include_state": true,
-    "graph_hops": 2,
-    "limit_tokens": 3500,
-    "include_code": true
-  }
-  ```
-  *(Note: `project` is automatically detected from your workspace directory if omitted!)*
-- **Or Standalone State Briefing**: Call `krusch_context_compile_state` (`project` is optional with auto-detection):
-  ```json
-  {}
-  ```
-- Review recent priorities, unresolved blockers, worktree freshness alerts, and recent lessons learned before planning or writing code.
+## 1. Session Start: State Hydration
+At the beginning of your session or before starting a new task, call `krusch_context_retrieve` with `include_state: true`:
+```json
+{
+  "query": "*",
+  "include_state": true,
+  "limit_tokens": 4000
+}
+```
+*Review the active project invariants, recent architectural decisions, open blockers, and decay review items before proposing edits.*
 
-## 2. Code Context & Graph Grounding
-Before proposing architectural edits or deep multi-file changes:
-- Call `krusch_context_retrieve`:
-  ```json
-  {
-    "query": "<task or technical topic>",
-    "project": "<project_name>",
-    "graph_hops": 2,
-    "limit_tokens": 3500,
-    "include_code": true
-  }
-  ```
-- Use `krusch_context_search_symbols` and `krusch_context_symbol_graph` to inspect inbound callers and outbound imports rather than guessing file locations.
+## 2. During Work: Recording Critical Knowledge
+Whenever you make a lasting architectural choice, resolve an elusive regression, or establish a non-negotiable rule, call `krusch_context_remember`:
+```json
+{
+  "category": "decision",
+  "content": "<concrete explanation of the design choice or invariant>"
+}
+```
+*Category MUST be one of*: `decision | invariant | bug | lesson | blocker`.
 
-## 3. Active Knowledge Hygiene (Keep Memory Clean)
-Do not let stale facts or obsolete assumptions pollute memory:
-- **New Milestones or Solved Blockers**: Call `krusch_context_add_memory` (`category: "lessons"` or `"outcomes"`).
-- **Changed Architecture or Revised Decisions**: Call `krusch_context_supersede_memory` specifying the old memory `id` with the new authoritative `content`.
-- **Revoked Secrets, Removed Endpoints, Abandoned Rules**: Call `krusch_context_invalidate_memory` with the old `id` and `reason` so it is never retrieved again.
-- **Persistent Project Rules**: Call `krusch_context_nugget_remember` (`kind: "project"`, `key: "<rule-slug>"`, `value: "<rule>"`).
+### Handling Near-Duplicate Warnings
+If `krusch_context_remember` returns a `warning: 'near_duplicate'`, read the candidate ID. If your new knowledge updates or replaces that candidate, call `krusch_context_revise`:
+```json
+{
+  "action": "supersede",
+  "target_id": <candidate_id>,
+  "content": "<updated authoritative rule>",
+  "category": "decision"
+}
+```
 
-## 4. Pre-Commit Verification
-- Call `krusch_context_nugget_nudges(query="...")` to verify current changes adhere to recorded project conventions.
+## 3. Retiring Stale Knowledge
+If a rule, secret, endpoint, or constraint is revoked, call `krusch_context_revise` with `action: 'invalidate'` and a mandatory reason:
+```json
+{
+  "action": "invalidate",
+  "target_id": <old_id>,
+  "reason": "<why this rule or invariant is no longer valid>"
+}
+```
+
+## 4. Pre-Commit / Pre-Edit Audit
+Before committing code or submitting final multi-file edits, audit your changes against recorded project invariants with `krusch_context_nudge`:
+```json
+{
+  "trigger": "pre_commit",
+  "code": "<diff or modified code snippet>"
+}
+```
+*Address any high-severity invariant violations before finishing.*
+
+## 5. Diagnostic Hygiene
+To verify store health or check for decaying memories (>30 days), call `krusch_context_health`:
+```json
+{}
+```

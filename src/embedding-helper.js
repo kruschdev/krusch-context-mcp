@@ -17,7 +17,7 @@ export async function getOllamaEmbedding(text, priority = PRIORITY.LOW) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 60000);
             try {
-                const model = process.env.EMBED_MODEL || 'bge-large';
+                const model = process.env.EMBED_MODEL || process.env.EMBEDDING_MODEL || 'bge-large';
                 const res = await fetch(`${endpoint}/api/embeddings`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -84,14 +84,14 @@ export function getEmbeddingProvider() {
     const customUrl = process.env.EMBEDDING_URL;
     const dimensions = getConfiguredEmbeddingDim();
     if (openrouterKey || (customUrl && customUrl.includes('openrouter.ai'))) {
-        const model = process.env.EMBED_MODEL || 'baai/bge-large-en-v1.5';
+        const model = process.env.EMBED_MODEL || process.env.EMBEDDING_MODEL || 'baai/bge-large-en-v1.5';
         return { provider: 'openrouter', model, dimensions, name: `OpenRouter Cloud (${model}, ${dimensions}d)` };
     }
     if (customUrl) {
-        const model = process.env.EMBED_MODEL || 'custom';
+        const model = process.env.EMBED_MODEL || process.env.EMBEDDING_MODEL || 'custom';
         return { provider: 'custom', model, dimensions, name: `Custom Endpoint (${model}, ${dimensions}d)` };
     }
-    const model = process.env.EMBED_MODEL || 'bge-large';
+    const model = process.env.EMBED_MODEL || process.env.EMBEDDING_MODEL || 'bge-large';
     return { provider: 'ollama', model, dimensions, name: `Local Ollama (${model}, ${dimensions}d)` };
 }
 
@@ -105,7 +105,7 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     const customUrl = process.env.EMBEDDING_URL || (openrouterKey ? 'https://openrouter.ai/api/v1/embeddings' : null);
     const apiKey = process.env.EMBEDDING_API_KEY || openrouterKey || null;
-    const model = process.env.EMBED_MODEL || (openrouterKey ? 'baai/bge-large-en-v1.5' : 'bge-large');
+    const model = process.env.EMBED_MODEL || process.env.EMBEDDING_MODEL || (openrouterKey ? 'baai/bge-large-en-v1.5' : 'bge-large');
 
     if (customUrl) {
         try {

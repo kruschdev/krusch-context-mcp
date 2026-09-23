@@ -11,11 +11,15 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import { runServer, VERSION } from '../src/index.js';
 import { getHealthStats, addMemory } from '../src/memory-engine.js';
 import { getSqliteDb } from '../src/storage-adapter.js';
 import { detectCurrentProject } from '../src/project-helper.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // 0. Support matrix check: Node >= 22 required for native node:sqlite (DatabaseSync)
 const nodeVersion = process.versions.node;
@@ -114,11 +118,9 @@ async function runInit() {
 
     const defaultVars = [
         ['STORAGE_MODE', 'sqlite'],
-        ['KRUSCH_PROFILE', 'core'],
-        ['OLLAMA_BASE_URL', 'http://localhost:11434'],
-        ['EMBEDDING_PROVIDER', 'ollama'],
-        ['EMBEDDING_MODEL', 'bge-m3'],
-        ['EMBEDDING_DIM', '1024']
+        ['OLLAMA_URL', 'http://127.0.0.1:11434'],
+        ['EMBED_MODEL', 'bge-large'],
+        ['EMBED_DIMS', '1024']
     ];
 
     let updated = false;
@@ -149,11 +151,21 @@ async function runInit() {
         } catch {}
     }
 
-    // 4. Run diagnostic health
+    // 4. Install agent operating protocol (AGENTS.md)
+    const agentsPath = path.join(gitRoot, 'AGENTS.md');
+    const templateAgentsPath = path.join(__dirname, '..', 'templates', 'AGENTS.md');
+    if (!fs.existsSync(agentsPath) && fs.existsSync(templateAgentsPath)) {
+        fs.copyFileSync(templateAgentsPath, agentsPath);
+        console.log(`🤖 Agent operating protocol installed at \x1b[32mAGENTS.md\x1b[0m`);
+    } else if (fs.existsSync(agentsPath)) {
+        console.log(`🤖 Agent operating protocol already present at \x1b[36mAGENTS.md\x1b[0m`);
+    }
+
+    // 5. Run diagnostic health
     const health = await getHealthStats({ project: projectName });
     console.log(`\n${health.content[0].text}\n`);
 
-    // 5. Print copy-paste IDE configs
+    // 6. Print copy-paste IDE configs
     console.log(`========================================================================`);
     console.log(`🎉 \x1b[32mReady! Copy and paste this into your IDE configuration:\x1b[0m\n`);
 
@@ -180,6 +192,8 @@ async function runInit() {
         }
     }, null, 2));
 
+    console.log(`💡 \x1b[36mAgent Protocol\x1b[0m: AGENTS.md has been seeded in your project root.`);
+    console.log(`   Optional IDE rules are also available in templates/.cursorrules and templates/CLAUDE.md.\n`);
     console.log(`========================================================================\n`);
     process.exit(0);
 }

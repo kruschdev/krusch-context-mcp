@@ -115,4 +115,28 @@ describe('Tool Contract & Profile Invariant Suite', () => {
       }
     }
   });
+
+  it('Agent templates exist and enforce the 5-verb protocol', () => {
+    const templates = [
+      path.join(ROOT_DIR, 'templates', 'AGENTS.md'),
+      path.join(ROOT_DIR, 'templates', '.cursorrules'),
+      path.join(ROOT_DIR, 'templates', 'CLAUDE.md')
+    ];
+
+    for (const templatePath of templates) {
+      assert.ok(fs.existsSync(templatePath), `Template must exist: ${templatePath}`);
+      const content = fs.readFileSync(templatePath, 'utf-8');
+      assert.ok(content.includes('retrieve'), `${path.basename(templatePath)} must include retrieve`);
+      assert.ok(content.includes('remember'), `${path.basename(templatePath)} must include remember`);
+      assert.ok(content.includes('revise'), `${path.basename(templatePath)} must include revise`);
+      assert.ok(content.includes('nudge'), `${path.basename(templatePath)} must include nudge`);
+      assert.ok(!content.includes('bge-m3'), `${path.basename(templatePath)} must not reference bge-m3`);
+    }
+  });
+
+  it('CLI default configuration specifies bge-large and zero bge-m3 references', () => {
+    const cliContent = fs.readFileSync(path.join(ROOT_DIR, 'bin', 'cli.js'), 'utf-8');
+    assert.ok(cliContent.includes("bge-large"), 'bin/cli.js must default to bge-large');
+    assert.ok(!cliContent.includes("bge-m3"), 'bin/cli.js must not reference bge-m3');
+  });
 });

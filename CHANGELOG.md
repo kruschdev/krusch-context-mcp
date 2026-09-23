@@ -38,7 +38,11 @@ v1.8.0 collapses the tool surface to strictly 5 canonical verbs (`retrieve`, `re
     5. `health` (`krusch_context_health`): Operational health, storage mode, category counts, and 30-day TTL decay review.
 - **Zero-Docker On-Ramp (`npx krusch-context-mcp init`)**:
   - Implemented `bin/cli.js` providing instant workspace setup using Node 22 built-in `node:sqlite` (`.agent/context.db`).
-  - Automatically writes `.env`, seeds starter context, verifies health, and outputs copy-paste MCP configs for Cursor, Claude Code, and Claude Desktop.
+  - Automatically writes `.env`, seeds starter context, installs `AGENTS.md` protocol in the project root, verifies health, and outputs copy-paste MCP configs for Cursor, Claude Code, and Claude Desktop.
+- **Agent Operating Protocol Templates (`templates/`)**:
+  - Added `templates/AGENTS.md`, `templates/.cursorrules`, and `templates/CLAUDE.md` providing concrete tool-calling instructions for agents to follow the 5-verb lifecycle.
+- **Canonical Embedding Standardization**:
+  - Standardized on `bge-large` (1024-d) with local Ollama (`OLLAMA_URL`) or cloud OpenRouter, preserving offline lexical fallback when no embedding service is configured.
 - **Safe Memory Writes**:
   - Enforced closed taxonomy (`decision`, `bug`, `invariant`, `lesson`, `blocker`).
   - Implemented semantic near-duplicate detection (`cosine >= 0.85`) warning before twin insertion and proposing `revise(action: 'supersede')`.
