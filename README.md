@@ -102,9 +102,9 @@ claude mcp add krusch-context npx krusch-context-mcp
 
 ---
 
-## 🏛️ Homelab Architecture: Separation of Concerns
+## 🏛️ The Krusch Architecture: Separation of Concerns
 
-Each system in the homelab has one job:
+Each system in the architecture has one job:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
