@@ -1,1050 +1,558 @@
-import { pool } from '../db/pool.js';
-import { getEmbedding, PRIORITY } from './embedding-helper.js';
+/**
+ * @module memory-engine
+ * Universal Memory & Steering Engine for AI Agents.
+ * Implements:
+ * 1. Safe episodic memory CRUD with strict closed taxonomy
+ * 2. Temporal superseding with lineage tracking
+ * 3. Explicit invalidation requiring mandatory reason
+ * 4. Near-duplicate detection (threshold 0.85) proposing supersede
+ * 5. Full provenance recording (author, file, commit, pr, confidence)
+ * 6. 30-day TTL decay review
+ */
 
+import { pool } from '../db/pool.js';
+import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
+import { checkNearDuplicateMemory, getStorageMode } from './storage-adapter.js';
 import { generateTagsFromLLM } from './llm-tags.js';
 import { isPgContextEnabled, syncPgContextPoints } from './pgcontext-helper.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
 
-/**
- * Filter memory records to return only valid, non-superseded, non-invalidated records.
- * (MobileMem - arXiv: 2608.13606).
- */
-export function filterActiveMemories(memories = [], options = {}) {
-    if (!Array.isArray(memories)) return [];
-
-    const strictLineage = options.strictLineage !== false;
-    const supersededIds = new Set();
-    const invalidatedIds = new Set();
-
-    for (const mem of memories) {
-        if (mem.supersedesId != null) supersededIds.add(mem.supersedesId);
-        if (mem.supersedes_id != null) supersededIds.add(mem.supersedes_id);
-        if (Array.isArray(mem.supersedesIds)) mem.supersedesIds.forEach(id => supersededIds.add(id));
-        if (Array.isArray(mem.supersedes_ids)) mem.supersedes_ids.forEach(id => supersededIds.add(id));
-        if (mem.status === 'SUPERSEDED') supersededIds.add(mem.id);
-        if (mem.status === 'INVALIDATED') invalidatedIds.add(mem.id);
-    }
-
-    return memories.filter(mem => {
-        if (mem.status === 'INVALIDATED' || mem.status === 'SUPERSEDED' || mem.status === 'STALE_PENDING_REVIEW') return false;
-        if (strictLineage && supersededIds.has(mem.id)) return false;
-        if (invalidatedIds.has(mem.id)) return false;
-        return true;
-    });
-}
-
+export const CLOSED_CATEGORIES = new Set(['decision', 'bug', 'invariant', 'lesson', 'blocker']);
 const DECAY_RATE = 0.01;
-const AUTO_TAG = true; // Hardcoded for context MCP
-
+const AUTO_TAG = true;
 
 /**
- * Persists a memory to the local project-specific SQLite cache and queues for async sync.
- * Supports temporal fact superseding.
- * @param {string} project - Project name.
- * @param {string} category - Category.
- * @param {string} content - Memory content.
- * @param {string|null} finalTags - JSON string array of tags.
- * @param {string} embeddingStr - Vector representation.
- * @param {number|null} [supersedes_id=null] - Optional ID of memory being superseded.
- * @returns {Promise<{content: Array}>}
+ * Normalizes user-supplied category to the strict closed set.
  */
-async function _addProjectMemory(project, category, content, finalTags, embeddingStr, supersedes_id = null) {
-    const db = await getProjectDb(project);
-    if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${project} not found.` }] };
+export function normalizeCategory(category) {
+    if (!category) return 'lesson';
+    const lower = category.toLowerCase().trim();
+    if (CLOSED_CATEGORIES.has(lower)) return lower;
     
-    const info = db.prepare(`
-        INSERT INTO ide_agent_memory (category, content, tags, embedding, status, supersedes_id)
-        VALUES (?, ?, ?, ?, 'ACTIVE', ?)
-    `).run(category, content, finalTags, embeddingStr, supersedes_id);
+    // Map legacy terms gracefully
+    if (lower === 'priorities' || lower === 'priority') return 'decision';
+    if (lower === 'outcomes' || lower === 'outcome') return 'lesson';
+    if (lower === 'activity' || lower === 'activities') return 'lesson';
+    if (lower === 'lessons') return 'lesson';
+    if (lower === 'bugs') return 'bug';
+    if (lower === 'invariants') return 'invariant';
+    if (lower === 'blockers') return 'blocker';
+    if (lower === 'decisions') return 'decision';
 
-    const newId = info.lastInsertRowid;
-    if (supersedes_id) {
-        try {
-            db.prepare(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = ? WHERE id = ?`).run(newId, supersedes_id);
-            const oldRow = db.prepare(`SELECT pg_id FROM ide_agent_memory WHERE id = ?`).get(supersedes_id);
-            if (oldRow && oldRow.pg_id) {
-                const client = await pool.connect();
-                try {
-                    await client.query("UPDATE ide_agent_memory SET status = 'SUPERSEDED' WHERE id = $1", [oldRow.pg_id]);
-                } finally {
-                    client.release();
-                }
-            }
-        } catch (err) {
-            console.warn(`[memory-engine] SQLite supersede update warning: ${err.message}`);
-        }
-    }
-    
-    try {
-        await pushProjectMemory(project, db);
-    } catch (e) {
-        console.error(`[memory-engine] Push failed for ${project}:`, e);
-    }
-    const supersedeNote = supersedes_id ? ` (supersedes ID ${supersedes_id})` : '';
-    return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${project} (${category})${supersedeNote}` }] };
+    throw new McpError(
+        ErrorCode.InvalidParams,
+        `Invalid category '${category}'. Permitted closed set: ${[...CLOSED_CATEGORIES].join(', ')}.`
+    );
 }
 
 /**
- * Persists a memory to the global Postgres fleet memory store.
- * Supports temporal fact superseding.
- * @param {string} category - Category.
- * @param {string} content - Memory content.
- * @param {string|null} finalTags - JSON string array of tags.
- * @param {string} embeddingStr - Vector representation.
- * @param {number|null} [supersedes_id=null] - Optional ID of memory being superseded.
- * @returns {Promise<{content: Array}>}
+ * Filter memories to return only active, non-superseded, non-invalidated records.
  */
-async function _addGlobalMemory(category, content, finalTags, embeddingStr, supersedes_id = null) {
-    const client = await pool.connect();
-    try {
-        const res = await client.query(`
-            INSERT INTO ide_agent_memory (project, category, content, embedding, tags, status, supersedes_id)
-            VALUES (NULL, $1, $2, $3::vector, $4, 'ACTIVE', $5)
-            RETURNING id
-        `, [category, content, embeddingStr, finalTags, supersedes_id]);
-        
-        const newId = res.rows[0]?.id;
-        if (newId && supersedes_id) {
-            try {
-                await client.query(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = $1 WHERE id = $2`, [newId, supersedes_id]);
-            } catch (err) {
-                console.warn(`[memory-engine] Postgres supersede update warning: ${err.message}`);
-            }
-        }
-
-        if (newId) {
-            await syncPgContextPoints(pool, 'ide_agent_memory', [newId]);
-        }
-    } finally {
-        client.release();
-    }
-    const supersedeNote = supersedes_id ? ` (supersedes ID ${supersedes_id})` : '';
-    return { content: [{ type: "text", text: `[krusch-context] ✅ Successfully saved GLOBAL memory to category: ${category}${supersedeNote}` }] };
+export function filterActiveMemories(memories = []) {
+    if (!Array.isArray(memories)) return [];
+    return memories.filter(m => m.status === 'ACTIVE' || (!m.status && !m.superseded_by && !m.supersedes_id));
 }
 
 /**
- * Adds a new episodic memory to the persistent IDE database.
- * Supports MobileMem temporal fact superseding (arXiv: 2608.13606).
- * @param {object} params
- * @param {string} params.category - Category of memory ('priorities', 'bugs', 'outcomes', 'lessons', 'activity')
- * @param {string} params.content - Text content of the memory
- * @param {string[]} [params.tags] - Optional user-defined tags
- * @param {string} [params.project] - Optional project association (saves to local SQLite if provided)
- * @param {number} [params.supersedes_id] - Optional ID of previous memory this fact replaces/supersedes
- * @param {number[]} [params._embedding] - Optional pre-computed embedding to avoid redundant LLM calls
- * @returns {Promise<{content: Array}>} MCP tool response
+ * Adds or remembers a memory with duplicate check and provenance.
  */
-export async function addMemory({ category, content, tags, project, active_project, supersedes_id, _embedding }) {
-    if (!category || !content) throw new McpError(ErrorCode.InvalidParams, "Missing params");
+export async function addMemory({
+    category,
+    content,
+    tags,
+    project,
+    active_project,
+    supersedes_id,
+    provenance,
+    force = false,
+    _embedding
+}) {
+    if (!content || typeof content !== 'string' || !content.trim()) {
+        throw new McpError(ErrorCode.InvalidParams, "Parameter 'content' must be non-empty text");
+    }
+
+    const normCat = normalizeCategory(category);
+    const targetProject = project || active_project || detectCurrentProject();
     
-    const targetProject = project || active_project || null;
+    // 1. Compute embedding
     const embeddingArray = _embedding || await getEmbedding(content);
-    if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
+    if (!embeddingArray) {
+        throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
+    }
 
+    // 2. Near-duplicate detection (skip if force: true or if explicitly superseding)
+    if (!force && !supersedes_id) {
+        const nearDup = await checkNearDuplicateMemory({
+            project: targetProject,
+            category: normCat,
+            embedding: embeddingArray,
+            threshold: 0.85
+        });
+        if (nearDup) {
+            return {
+                content: [{
+                    type: "text",
+                    text: `⚠️ Near-duplicate memory detected (similarity: ${(nearDup.similarity * 100).toFixed(1)}%):\n` +
+                          `Existing Memory #${nearDup.id} [${nearDup.category}]: "${nearDup.content}"\n\n` +
+                          `If this updates that rule, use 'revise' with action: 'supersede', target_id: ${nearDup.id}.\n` +
+                          `To insert anyway, pass force: true.`
+                }],
+                isError: false,
+                warning: "near_duplicate",
+                duplicate_id: nearDup.id
+            };
+        }
+    }
+
+    // 3. Process tags
     let finalTags = tags ? JSON.stringify(tags) : null;
     if (!finalTags && AUTO_TAG) {
         finalTags = await generateTagsFromLLM(content, { asJson: true });
     }
 
+    // 4. Provenance
+    const provPayload = provenance ? JSON.stringify({
+        file: provenance.file || null,
+        commit: provenance.commit || null,
+        pr: provenance.pr || null,
+        author: provenance.author || 'agent',
+        confidence: provenance.confidence ?? 1.0,
+        recorded_at: new Date().toISOString()
+    }) : JSON.stringify({ author: 'agent', confidence: 1.0, recorded_at: new Date().toISOString() });
+
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 
-    if (targetProject) {
-        return await _addProjectMemory(targetProject, category, content, finalTags, embeddingStr, supersedes_id || null);
-    }
-    return await _addGlobalMemory(category, content, finalTags, embeddingStr, supersedes_id || null);
-}
+    // 5. Insert into SQLite project DB
+    const db = await getProjectDb(targetProject);
+    if (db) {
+        const info = db.prepare(`
+            INSERT INTO ide_agent_memory (category, content, tags, embedding, status, supersedes_id, provenance)
+            VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?)
+        `).run(normCat, content, finalTags, embeddingStr, supersedes_id || null, provPayload);
 
-/**
- * Performs semantic search on global Postgres memories.
- * @param {string} category - Category to search.
- * @param {number[]} embeddingArray - Query embedding vector.
- * @param {number} limit - Result count limit.
- * @returns {Promise<Array>} Ranked and decayed memory objects.
- */
-async function _searchGlobalMemory(category, embeddingArray, limit, active_project) {
-    const client = await pool.connect();
-    try {
-        const embeddingStr = `[${embeddingArray.join(',')}]`;
-
-        if (isPgContextEnabled()) {
+        const newId = info.lastInsertRowid;
+        if (supersedes_id) {
             try {
-                const filterJson = JSON.stringify({ must: [{ key: "category", match: category }] });
-                let projectFilter = 'WHERE m.project IS NULL';
-                const queryParams = [embeddingStr, filterJson, limit, DECAY_RATE];
-                if (active_project) {
-                    projectFilter = 'WHERE (m.project = $5 OR m.project IS NULL)';
-                    queryParams.push(active_project);
-                }
-
-                const res = await client.query(`
-                    WITH pgctx_matches AS (
-                        SELECT source_key::int as id, score as distance
-                        FROM pgcontext.search(
-                            'ide_agent_memory',
-                            $1::vector,
-                            $2,
-                            100
-                        )
-                    )
-                    SELECT 
-                        m.id, m.project, m.content, m.tags, m.created_at,
-                        (1 - p.distance) * exp(-$4::float * EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - m.created_at))/86400) as similarity
-                    FROM pgctx_matches p
-                    JOIN ide_agent_memory m ON m.id = p.id
-                    ${projectFilter}
-                    ORDER BY similarity DESC
-                    LIMIT $3
-                `, queryParams);
-                return res.rows.map(r => ({ ...r, source: 'global' }));
-            } catch (pgctxErr) {
-                console.error('[memory-engine] pgContext search fallback to standard vector search:', pgctxErr.message);
+                db.prepare(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = ? WHERE id = ?`).run(newId, supersedes_id);
+            } catch (err) {
+                console.warn(`[memory-engine] SQLite supersede update warning: ${err.message}`);
             }
         }
 
-        const queryParams = [embeddingStr, category, limit, DECAY_RATE];
-        let projectFilter = 'AND project IS NULL';
-        if (active_project) {
-            projectFilter = 'AND (project = $5 OR project IS NULL)';
-            queryParams.push(active_project);
-        }
-        const res = await client.query(`
-            WITH semantic_matches AS (
-                SELECT id, project, content, tags, created_at, status, supersedes_id, superseded_by, valid_until, embedding <=> $1::vector as distance
-                FROM ide_agent_memory
-                WHERE category = $2 ${projectFilter}
-                ORDER BY embedding <=> $1::vector
-                LIMIT 100
-            )
-            SELECT 
-                id, project, content, tags, created_at, status, supersedes_id, superseded_by, valid_until,
-                (1 - distance) * exp(-$4::float * EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at))/86400) as similarity
-            FROM semantic_matches
-            ORDER BY similarity DESC
-            LIMIT $3
-        `, queryParams);
-        return res.rows.map(r => ({ ...r, source: 'global' }));
-    } finally {
-        client.release();
-    }
-}
+        // Push behind if postgres available
+        pushProjectMemory(targetProject, db).catch(() => {});
 
-/**
- * Performs semantic search on local SQLite project memories.
- * @param {string} active_project - Target project string.
- * @param {string} category - Category to search.
- * @param {number[]} embeddingArray - Query embedding vector.
- * @param {number} limit - Result count limit.
- * @returns {Promise<Array>} Ranked and decayed memory objects.
- */
-async function _searchProjectMemory(active_project, category, embeddingArray, limit) {
-    if (!active_project) return [];
-    const db = await getProjectDb(active_project);
-    if (!db) return [];
-    
-    // NOTE: Full-table scan with in-JS cosine — scales to ~500 memories per project-category
-    const rows = db.prepare(`SELECT id, category, content, tags, embedding, created_at, status, supersedes_id, superseded_by, valid_until FROM ide_agent_memory WHERE category = ?`).all(category);
-    const now = Date.now();
-    return rows.map(r => {
-        let rowEmb = [];
-        try { 
-            const parsed = JSON.parse(r.embedding); 
-            if (Array.isArray(parsed)) rowEmb = parsed;
-        } catch(e) { 
-            console.warn(`[krusch-context] Warning: Failed to parse JSON embedding for memory ID ${r.id}`); 
-        }
-        const sim = cosineSimilarity(embeddingArray, rowEmb);
-        const dateStr = r.created_at || new Date().toISOString();
-        const date = dateStr.includes('Z') ? new Date(dateStr) : new Date(dateStr + 'Z');
-        const ageDays = (now - date.getTime()) / (1000 * 60 * 60 * 24);
-        const decay = Math.exp(-DECAY_RATE * ageDays);
-        // +0.3 bias intentionally boosts project-local results to prefer local context
+        const supersedeNote = supersedes_id ? ` (supersedes ID ${supersedes_id})` : '';
         return {
-            id: r.id, project: active_project, content: r.content, tags: r.tags,
-            status: r.status || 'ACTIVE', supersedes_id: r.supersedes_id, superseded_by: r.superseded_by, valid_until: r.valid_until,
-            created_at: r.created_at, similarity: (sim + 0.3) * decay, source: 'project'
+            content: [{
+                type: "text",
+                text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${targetProject} (${normCat})${supersedeNote}`
+            }],
+            id: newId
         };
-    }).sort((a, b) => b.similarity - a.similarity).slice(0, limit);
-}
-
-async function _keywordSearchGlobal(category, query, limit, active_project) {
-    const client = await pool.connect();
-    try {
-        const queryParams = [category, `%${query}%`, limit];
-        const res = await client.query(`
-            SELECT id, project, content, tags, created_at, status, supersedes_id, superseded_by, valid_until, 1.0 as similarity
-            FROM ide_agent_memory
-            WHERE category = $1 AND project IS NULL AND content ILIKE $2
-            ORDER BY created_at DESC
-            LIMIT $3
-        `, queryParams);
-        return res.rows.map(r => ({ ...r, source: 'global' }));
-    } finally {
-        client.release();
     }
+
+    throw new McpError(ErrorCode.InternalError, "Failed to access local database");
 }
 
-async function _keywordSearchProject(active_project, category, query, limit) {
-    if (!active_project) return [];
-    const db = await getProjectDb(active_project);
-    if (!db) return [];
-    const rows = db.prepare(`
-        SELECT id, category, content, tags, created_at, status, supersedes_id, superseded_by, valid_until 
-        FROM ide_agent_memory 
-        WHERE category = ? AND content LIKE ?
-        ORDER BY created_at DESC
-        LIMIT ?
-    `).all(category, `%${query}%`, limit);
-    return rows.map(r => ({
-        id: r.id, project: active_project, content: r.content, tags: r.tags,
-        status: r.status || 'ACTIVE', supersedes_id: r.supersedes_id, superseded_by: r.superseded_by, valid_until: r.valid_until,
-        created_at: r.created_at, similarity: 1.0, source: 'project'
-    }));
-}
 
-async function _tagSearchGlobal(category, tag, limit, active_project) {
-    const client = await pool.connect();
-    try {
-        const queryParams = [category, `%${tag}%`, limit];
-        const res = await client.query(`
-            SELECT id, project, content, tags, created_at, status, supersedes_id, superseded_by, valid_until, 1.0 as similarity
-            FROM ide_agent_memory
-            WHERE category = $1 AND project IS NULL AND (tags ILIKE $2 OR tags LIKE $2)
-            ORDER BY created_at DESC
-            LIMIT $3
-        `, queryParams);
-        return res.rows.map(r => ({ ...r, source: 'global' }));
-    } finally {
-        client.release();
-    }
-}
-
-async function _tagSearchProject(active_project, category, tag, limit) {
-    if (!active_project) return [];
-    const db = await getProjectDb(active_project);
-    if (!db) return [];
-    const rows = db.prepare(`
-        SELECT id, category, content, tags, created_at, status, supersedes_id, superseded_by, valid_until 
-        FROM ide_agent_memory 
-        WHERE category = ? AND tags LIKE ?
-        ORDER BY created_at DESC
-        LIMIT ?
-    `).all(category, `%${tag}%`, limit);
-    return rows.map(r => ({
-        id: r.id, project: active_project, content: r.content, tags: r.tags,
-        status: r.status || 'ACTIVE', supersedes_id: r.supersedes_id, superseded_by: r.superseded_by, valid_until: r.valid_until,
-        created_at: r.created_at, similarity: 1.0, source: 'project'
-    }));
-}
-
-async function db_fetch_provenance(memory_id) {
-    const client = await pool.connect();
-    try {
-        const query = `
-            WITH RECURSIVE provenance_tree AS (
-                SELECT id, parent_id, version_id, author_id, source_ref, created_at, content, status
-                FROM interaction_memory
-                WHERE id = $1
-                UNION ALL
-                SELECT m.id, m.parent_id, m.version_id, m.author_id, m.source_ref, m.created_at, m.content, m.status
-                FROM interaction_memory m
-                INNER JOIN provenance_tree pt ON pt.parent_id = m.id
-            )
-            SELECT id, version_id, author_id, created_at, content, status 
-            FROM provenance_tree 
-            WHERE id != $1
-            ORDER BY version_id DESC;
-        `;
-        const res = await client.query(query, [memory_id]);
-        return res.rows;
-    } catch(err) {
-        console.warn(`[krusch-context] Provenance expansion failed for memory ID ${memory_id}: ${err.message}`);
-        return [];
-    } finally {
-        client.release();
-    }
-}
-
-async function db_fetch_linked_blobs(memory_id) {
-    const client = await pool.connect();
-    try {
-        const res = await client.query(`
-            SELECT blob_id, relationship 
-            FROM memory_to_blob_edges 
-            WHERE memory_id = $1
-            ORDER BY created_at DESC
-        `, [memory_id]);
-        return res.rows;
-    } catch(err) {
-        console.warn(`[krusch-context] Linked blobs query failed for memory ID ${memory_id}: ${err.message}`);
-        return [];
-    } finally {
-        client.release();
-    }
+/**
+ * Supersedes an outdated memory with updated knowledge.
+ */
+export async function supersedeMemory({ id, category, content, project, active_project, tags, provenance }) {
+    if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing parameter 'id'");
+    if (!content) throw new McpError(ErrorCode.InvalidParams, "Missing parameter 'content'");
+    return await addMemory({
+        category,
+        content,
+        tags,
+        project: project || active_project,
+        supersedes_id: id,
+        provenance,
+        force: true
+    });
 }
 
 /**
- * Searches the persistent IDE database via semantic embeddings, keywords, or tags.
- * Supports MobileMem active lineage filtering (arXiv: 2608.13606) & GRASP context-expansion.
- * @param {object} params
- * @param {string} params.category - Category to search
- * @param {string} params.query - Search query string
- * @param {number} [params.limit=3] - Max results to return
- * @param {string} [params.active_project] - Project context for SQLite isolation
- * @param {number[]} [params._embedding] - Optional pre-computed embedding
- * @param {string} [params.search_type='semantic'] - 'semantic', 'keyword', or 'tag'
- * @param {boolean} [params.include_history=false] - If true, traverses and appends version parent history
- * @param {boolean} [params.include_linked_blobs=false] - If true, retrieves linked git file blobs
- * @param {boolean} [params.include_superseded=false] - If true, returns superseded/invalidated records
- * @returns {Promise<{content: Array}>} MCP tool response
+ * Explicitly invalidates a memory with a mandatory reason.
  */
-export async function searchMemory({ category, query, limit = 3, active_project, project, _embedding, search_type = 'semantic', include_history = false, include_linked_blobs = false, include_superseded = false }) {
-    if (!category || !query) throw new McpError(ErrorCode.InvalidParams, "Missing category or query params");
-
-    const targetProject = active_project || project || null;
-    let pgResults = [];
-    let sqliteResults = [];
-
-    if (search_type === 'keyword') {
-        pgResults = await _keywordSearchGlobal(category, query, limit, targetProject);
-        sqliteResults = await _keywordSearchProject(targetProject, category, query, limit);
-    } else if (search_type === 'tag') {
-        pgResults = await _tagSearchGlobal(category, query, limit, targetProject);
-        sqliteResults = await _tagSearchProject(targetProject, category, query, limit);
-    } else {
-        // default semantic search
-        const embeddingArray = _embedding || await getEmbedding(query, PRIORITY.HIGH);
-        if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
-        pgResults = await _searchGlobalMemory(category, embeddingArray, limit, targetProject);
-        sqliteResults = await _searchProjectMemory(targetProject, category, embeddingArray, limit);
+export async function invalidateMemory({ id, reason, project, active_project }) {
+    if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing parameter 'id'");
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        throw new McpError(
+            ErrorCode.InvalidParams,
+            "Invalidation requires a non-empty 'reason' describing why this memory is obsolete/deprecated."
+        );
     }
 
-    let allCandidates = [...pgResults, ...sqliteResults];
+    const targetProject = project || active_project || detectCurrentProject();
+    const db = await getProjectDb(targetProject);
+    if (db) {
+        db.prepare(`
+            UPDATE ide_agent_memory 
+            SET status = 'INVALIDATED', invalidated_reason = ? 
+            WHERE id = ?
+        `).run(reason.trim(), id);
+
+        return {
+            content: [{
+                type: "text",
+                text: `[krusch-context] 🗑️ Memory #${id} marked as INVALIDATED.\nReason: "${reason.trim()}"`
+            }]
+        };
+    }
+
+    throw new McpError(ErrorCode.InternalError, "Failed to access local database");
+}
+
+/**
+ * Searches memories using semantic and keyword matching.
+ */
+export async function searchMemory({
+    category,
+    query,
+    limit = 5,
+    project,
+    active_project,
+    include_superseded = false,
+    _embedding
+}) {
+    if (!query) throw new McpError(ErrorCode.InvalidParams, "Missing parameter 'query'");
+    const targetProject = project || active_project || detectCurrentProject();
+    const normCat = category ? normalizeCategory(category) : null;
+
+    const db = await getProjectDb(targetProject);
+    if (!db) return { content: [{ type: "text", text: "No memories found (database unavailable)." }] };
+
+    let sql = `SELECT id, category, content, tags, status, supersedes_id, superseded_by, created_at, embedding FROM ide_agent_memory`;
+    const conditions = [];
+    const params = [];
+
     if (!include_superseded) {
-        allCandidates = filterActiveMemories(allCandidates);
+        conditions.push(`status = 'ACTIVE'`);
+    }
+    if (normCat) {
+        conditions.push(`category = ?`);
+        params.push(normCat);
+    }
+    if (conditions.length > 0) {
+        sql += ` WHERE ` + conditions.join(' AND ');
+    }
+    sql += ` ORDER BY created_at DESC`;
+
+    const rows = db.prepare(sql).all(...params);
+    const embeddingArray = _embedding || await getEmbedding(query);
+
+    const scored = rows.map(r => {
+        let score = 0.5;
+        if (embeddingArray && r.embedding) {
+            try {
+                const vec = typeof r.embedding === 'string' ? JSON.parse(r.embedding) : r.embedding;
+                score = cosineSimilarity(embeddingArray, vec);
+            } catch {}
+        }
+        if (r.content.toLowerCase().includes(query.toLowerCase())) {
+            score = Math.max(score, 0.8);
+        }
+        return { ...r, score };
+    }).sort((a, b) => b.score - a.score).slice(0, limit);
+
+    if (scored.length === 0) {
+        return { content: [{ type: "text", text: `=== 🧠 Memory Retrieval: "${query}" (0 results) ===\n\nNo memories found matching "${query}".` }] };
     }
 
-    const results = allCandidates
-        .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, limit);
 
-    if (results.length === 0) {
-        return { content: [{ type: "text", text: `=== 🧠 Memory Retrieval (${search_type}): ${category} ===\n\nNo active results found.` }] };
+    let output = `=== 🧠 Memory Retrieval: "${query}" (${scored.length} results) ===\n\n`;
+    for (const s of scored) {
+        const badge = s.status === 'SUPERSEDED' ? ' [SUPERSEDED]' : '';
+        output += `* **#${s.id}** [${s.category}]${badge} (Score: ${(s.score * 100).toFixed(1)}%): ${s.content}\n`;
     }
 
-    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-    let output = `=== 🧠 Memory Retrieval (${search_type}): ${category} ===\n`;
-    for (const r of results) {
-        let tagsStr = '';
-        if (r.tags) {
-            try { 
-                const parsed = typeof r.tags === 'string' ? JSON.parse(r.tags) : r.tags;
-                if (Array.isArray(parsed)) {
-                    tagsStr = ` [Tags: ${parsed.join(', ')}]`; 
-                }
-            } catch(e) { 
-                tagsStr = ` [Tags: ${r.tags}]`; 
-            }
-        }
-        const dateStr = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : 'unknown';
-        const projectStr = r.source === 'project' ? ` | Project: ${r.project}` : ' | Global';
-        const statusStr = r.status && r.status !== 'ACTIVE' ? ` | [${r.status}]` : '';
-        const lineageStr = r.supersedes_id ? ` (Supersedes: #${r.supersedes_id})` : '';
-        
-        output += `\n--- Match (Score: ${Number(r.similarity).toFixed(2)}) | ID: ${r.id} | Date: ${dateStr}${projectStr}${statusStr}${lineageStr}${tagsStr} ---\n${r.content}\n`;
-
-        // GRASP Expansion: Include lineage history
-        if (include_history && UUID_REGEX.test(r.id)) {
-            const history = await db_fetch_provenance(r.id);
-            if (history && history.length > 0) {
-                output += `\n  📜 [Provenance History / Lineage]:\n`;
-                for (const h of history) {
-                    const hDate = new Date(h.created_at).toISOString().split('T')[0];
-                    output += `    └─ Ver ${h.version_id} (${hDate}) by ${h.author_id}: "${h.content.substring(0, 150)}..." [Status: ${h.status}]\n`;
-                }
-            }
-        }
-
-        // GRASP Expansion: Include linked codebase files (blobs)
-        if (include_linked_blobs && UUID_REGEX.test(r.id)) {
-            const blobs = await db_fetch_linked_blobs(r.id);
-            if (blobs && blobs.length > 0) {
-                output += `\n  📄 [Linked Codebase References]:\n`;
-                for (const b of blobs) {
-                    output += `    └─ Git Blob SHA: ${b.blob_id} [Relation: ${b.relationship}]\n`;
-                }
-            }
-        }
-    }
     return { content: [{ type: "text", text: output }] };
+
 }
 
 /**
- * Supersedes an existing memory fact with updated knowledge.
- * @param {object} params
- * @param {number} params.id - Target memory ID to supersede
- * @param {string} params.category - Category of memory
- * @param {string} params.content - New updated content
- * @param {string} [params.project] - Optional project association
- * @param {string[]} [params.tags] - Optional tags
- * @returns {Promise<{content: Array}>}
+ * Returns memories unreferenced or older than 30 days for decay review.
  */
-export async function supersedeMemory({ id, category, content, project, active_project, tags }) {
-    if (!id || !category || !content) throw new McpError(ErrorCode.InvalidParams, "Missing id, category, or content params");
-    return await addMemory({ category, content, tags, project: project || active_project, supersedes_id: id });
+export async function getStaleMemories({ project, days = 30 } = {}) {
+    const targetProject = project || detectCurrentProject();
+    const db = await getProjectDb(targetProject);
+    if (!db) return [];
+
+    const rows = db.prepare(`
+        SELECT id, category, content, created_at
+        FROM ide_agent_memory
+        WHERE status = 'ACTIVE'
+          AND created_at < datetime('now', '-' || ? || ' days')
+        ORDER BY created_at ASC
+        LIMIT 10
+    `).all(days);
+
+    return rows;
 }
 
 /**
- * Explicitly marks a memory record as INVALIDATED (e.g. revoked secret, deprecated invariant).
- * @param {object} params
- * @param {number} params.id - Memory ID to invalidate
- * @param {string} [params.project] - Project association
- * @param {string} [params.reason="Explicitly invalidated by agent"] - Reason for invalidation
- * @returns {Promise<{content: Array}>}
- */
-export async function invalidateMemory({ id, project, active_project, reason = "Explicitly invalidated by agent" }) {
-    if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing id param");
-    const targetProject = project || active_project || null;
-    if (targetProject) {
-        const db = await getProjectDb(targetProject);
-        if (db) {
-            db.prepare(`UPDATE ide_agent_memory SET status = 'INVALIDATED' WHERE id = ?`).run(id);
-            const row = db.prepare(`SELECT pg_id FROM ide_agent_memory WHERE id = ?`).get(id);
-            if (row && row.pg_id) {
-                const client = await pool.connect();
-                try {
-                    await client.query(`UPDATE ide_agent_memory SET status = 'INVALIDATED' WHERE id = $1`, [row.pg_id]);
-                } finally {
-                    client.release();
-                }
-            }
-        }
-    } else {
-        const client = await pool.connect();
-        try {
-            await client.query(`UPDATE ide_agent_memory SET status = 'INVALIDATED' WHERE id = $1`, [id]);
-        } finally {
-            client.release();
-        }
-    }
-    return { content: [{ type: "text", text: `[krusch-context] 🗑️ Successfully marked memory ID ${id} as INVALIDATED (${reason})` }] };
-}
-
-/**
- * Lists memories without semantic search (chronological order).
- * @param {object} params
- * @param {string} params.category - Category to list
- * @param {string} [params.project] - Optional project filter
- * @param {number} [params.limit=10] - Max results to return
- * @returns {Promise<{content: Array}>} MCP tool response
- */
-export async function listMemories({ category, project, active_project, limit = 10 }) {
-    if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
-
-    const targetProject = project || active_project || null;
-    let results = [];
-    
-    if (targetProject) {
-        const db = await getProjectDb(targetProject);
-        if (db) {
-            results = db.prepare(`SELECT id, content, tags, created_at FROM ide_agent_memory WHERE category = ? ORDER BY created_at DESC LIMIT ?`).all(category, limit);
-            results = results.map(r => ({ ...r, project: targetProject, source: 'project' }));
-        }
-    } else {
-        const client = await pool.connect();
-        try {
-            const res = await client.query(`SELECT id, project, content, tags, created_at FROM ide_agent_memory WHERE category = $1 AND project IS NULL ORDER BY created_at DESC LIMIT $2`, [category, limit]);
-            results = res.rows.map(r => ({ ...r, source: 'global' }));
-        } finally {
-            client.release();
-        }
-    }
-
-    if (results.length === 0) {
-        return { content: [{ type: "text", text: `=== 📋 Memory List: ${category} ===\n\nNo memories found.` }] };
-    }
-
-    let output = `=== 📋 Memory List: ${category} (${results.length} results) ===\n`;
-    for (const r of results) {
-        let tagsStr = '';
-        if (r.tags) {
-            try { tagsStr = ` [Tags: ${JSON.parse(r.tags).join(', ')}]`; } catch(e) { console.warn(`[krusch-context] Warning: Failed to parse JSON tags for memory ID ${r.id}`); }
-        }
-        const dateStr = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : 'unknown';
-        const projectStr = r.source === 'project' ? ` | Project: ${r.project}` : ' | Global';
-        output += `\n--- ID: ${r.id} | Date: ${dateStr}${projectStr}${tagsStr} ---\n${r.content}\n`;
-    }
-    return { content: [{ type: "text", text: output }] };
-}
-
-/**
- * Proactively compiles recent project state into a unified markdown document.
- * Uses a single PG pool connection for all queries to prevent pool exhaustion.
- * @param {object} params
- * @param {string} params.project - Target project string.
- * @returns {Promise<{content: Array}>} MCP tool response
+ * Compiles a consolidated project state briefing.
  */
 export async function compileProjectState({ project, active_project } = {}) {
     const targetProject = project || active_project || detectCurrentProject();
-    if (!targetProject) throw new McpError(ErrorCode.InvalidParams, "Missing project (could not auto-detect active project)");
-
-    const state = { priorities: [], outcomes: [], activity: [], lessons: [], nudges: [] };
     const db = await getProjectDb(targetProject);
 
-    const fetchCategory = async (client, category, limit) => {
-        let results = [];
-        if (db) {
-            const localRows = db.prepare(`SELECT content, created_at FROM ide_agent_memory WHERE category = ? ORDER BY created_at DESC LIMIT ?`).all(category, limit);
-            results.push(...localRows.map(r => ({ ...r, source: 'project' })));
-        }
-        
-        // Also fetch global lessons/priorities as a fallback to ensure we have context
-        try {
-            const res = await client.query(`SELECT content, created_at FROM ide_agent_memory WHERE category = $1 AND project IS NULL ORDER BY created_at DESC LIMIT $2`, [category, limit]);
-            results.push(...res.rows.map(r => ({ ...r, source: 'global' })));
-        } catch (e) {
-            console.warn(`[krusch-context] Warning: Global fetch failed for ${category} (${e.message})`);
-        }
-        
-        return results.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, limit);
-    };
+    const decisions = [];
+    const invariants = [];
+    const bugs = [];
+    const lessons = [];
+    const nuggets = [];
+    const invalidated = [];
 
-    const client = await pool.connect();
-    try {
-        state.priorities = await fetchCategory(client, 'priorities', 5);
-        state.outcomes = await fetchCategory(client, 'outcomes', 5);
-        state.activity = await fetchCategory(client, 'activity', 3);
-        state.lessons = await fetchCategory(client, 'lessons', 5);
+    if (db) {
+        const rows = db.prepare(`
+            SELECT id, category, content, status, invalidated_reason, created_at
+            FROM ide_agent_memory
+            ORDER BY created_at DESC
+        `).all();
 
-        if (db) {
-            const nudgeRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets WHERE kind IN ('project', 'agent')`).all();
-            state.nudges.push(...nudgeRows);
-        }
-        try {
-            const res = await client.query(`SELECT key, value, kind FROM ide_agent_nuggets WHERE kind IN ('project', 'agent') AND (project = $1 OR project IS NULL)`, [targetProject]);
-            state.nudges.push(...res.rows);
-        } catch (e) {
-            console.warn(`[krusch-context] Warning: Global nudges fetch failed (${e.message})`);
+        for (const r of rows) {
+            if (r.status === 'INVALIDATED') {
+                if (invalidated.length < 5) invalidated.push(r);
+                continue;
+            }
+            if (r.status !== 'ACTIVE') continue;
+
+            if (r.category === 'decision') decisions.push(r);
+            else if (r.category === 'invariant') invariants.push(r);
+            else if (r.category === 'bug' || r.category === 'blocker') bugs.push(r);
+            else lessons.push(r);
         }
 
-        state.actionable = [];
-        try {
-            // Fetch actionable states for this project from v2 memory
-            const res = await client.query(`
-                SELECT id, category, content, created_at, ontology_tags 
-                FROM interaction_memory 
-                WHERE status = 'active' 
-                AND (project = $1 OR $1 = ANY(ontology_tags))
-                AND ontology_tags && ARRAY['commitment', 'escalation', 'decision']::text[]
-                ORDER BY created_at DESC LIMIT 5
-            `, [targetProject]);
-            state.actionable = res.rows;
-        } catch (e) {
-            console.warn(`[krusch-context] Warning: Actionable states fetch failed (${e.message})`);
-        }
-    } finally {
-        client.release();
+        const nugRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets`).all();
+        nuggets.push(...nugRows);
     }
 
-    const uniqueNudgesMap = new Map();
-    for (const n of state.nudges) {
-        if (!uniqueNudgesMap.has(n.key)) uniqueNudgesMap.set(n.key, n);
-    }
-    const uniqueNudges = Array.from(uniqueNudgesMap.values());
+    const stale = await getStaleMemories({ project: targetProject, days: 30 });
 
     let output = `# 🧠 Compiled Project State: ${targetProject}\n\n`;
 
-    output += `## 🎯 Priorities (Current Focus)\n`;
-    if (state.priorities.length === 0) output += `- No recent priorities found.\n`;
-    for (const p of state.priorities) {
-        const prefix = p.source === 'project' ? '' : '[GLOBAL] ';
-        output += `- ${prefix}${p.content}\n`;
-    }
+    output += `## 🎯 Decisions & Priorities (${decisions.length})\n`;
+    if (decisions.length === 0) output += `- No active decisions or priorities recorded.\n`;
+    for (const d of decisions.slice(0, 5)) output += `- **#${d.id}**: ${d.content}\n`;
     output += `\n`;
 
-    output += `## 📌 Outcomes (What just happened)\n`;
-    if (state.outcomes.length === 0) output += `- No recent outcomes found.\n`;
-    for (const o of state.outcomes) {
-        const prefix = o.source === 'project' ? '' : '[GLOBAL] ';
-        output += `- ${prefix}${o.content}\n`;
-    }
+
+    output += `## 🛡️ Project Invariants (${invariants.length})\n`;
+    if (invariants.length === 0) output += `- No invariants recorded.\n`;
+    for (const inv of invariants.slice(0, 5)) output += `- **#${inv.id}**: ${inv.content}\n`;
     output += `\n`;
 
-    output += `## 📖 Lessons (Architectural Rules)\n`;
-    if (state.lessons.length === 0) output += `- No recent lessons found.\n`;
-    for (const l of state.lessons) {
-        const prefix = l.source === 'project' ? '' : '[GLOBAL] ';
-        output += `- ${prefix}${l.content}\n`;
-    }
+    output += `## 🐛 Known Bugs & Blockers (${bugs.length})\n`;
+    if (bugs.length === 0) output += `- Zero active blockers.\n`;
+    for (const b of bugs.slice(0, 5)) output += `- **#${b.id}** [${b.category}]: ${b.content}\n`;
     output += `\n`;
 
-    output += `## 💎 Nudges (Conventions)\n`;
-    if (uniqueNudges.length === 0) output += `- No nudges found.\n`;
-    for (const n of uniqueNudges) output += `- [${n.kind}] **${n.key}**: ${n.value}\n`;
+    output += `## 📖 Core Lessons (${lessons.length})\n`;
+    if (lessons.length === 0) output += `- No lessons recorded yet.\n`;
+    for (const l of lessons.slice(0, 5)) output += `- **#${l.id}**: ${l.content}\n`;
     output += `\n`;
 
-    output += `## ⚡ Actionable Commitments & Conflicts\n`;
-    if (state.actionable.length === 0) output += `- No active commitments or escalations found.\n`;
-    for (const a of state.actionable) {
-        const tags = a.ontology_tags ? `[${a.ontology_tags.join(', ')}] ` : '';
-        output += `- ${tags}${a.content}\n`;
+    if (nuggets.length > 0) {
+        output += `## ⚡ Steering Nuggets (${nuggets.length})\n`;
+        for (const n of nuggets) output += `- **${n.key}**: ${n.value}\n`;
+        output += `\n`;
     }
 
-    const worktree = getWorktreeStatus();
-    if (worktree.isDirty) {
-        output += `\n---\n> ${worktree.message}\n`;
+    if (invalidated.length > 0) {
+        output += `## 🚫 Recently Invalidated Rules (${invalidated.length})\n`;
+        for (const inv of invalidated) {
+            output += `- ~~#${inv.id} (${inv.category})~~ — *Revocation Reason*: ${inv.invalidated_reason || 'Deprecated'}\n`;
+        }
+        output += `\n`;
+    }
+
+    if (stale.length > 0) {
+        output += `## ⏳ Decay Review (${stale.length} items >30 days old)\n`;
+        for (const s of stale) {
+            output += `- Memory #${s.id} [${s.category}]: "${s.content.substring(0, 80)}..." (Review if still valid)\n`;
+        }
+        output += `\n`;
     }
 
     return { content: [{ type: "text", text: output }] };
 }
 
 /**
- * Internal helper to delete a memory from the local SQLite project cache.
- * @param {number} id - Memory ID.
- * @param {string} source_project - Project name.
- * @returns {Promise<{content: Array}>}
+ * Returns health diagnostic statistics.
  */
-async function _deleteProjectMemory(id, source_project) {
-    const db = await getProjectDb(source_project);
-    if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${source_project} not found.` }] };
-    
-    const res = db.prepare(`DELETE FROM ide_agent_memory WHERE id = ?`).run(id);
-    if (res.changes === 0) {
-        return { content: [{ type: "text", text: `[krusch-context] ⚠️ No SQLite memory found with ID: ${id} in project: ${source_project}` }] };
-    }
-    return { content: [{ type: "text", text: `[krusch-context] 🗑️ Deleted SQLite memory ID: ${id}` }] };
-}
+export async function getHealthStats({ project } = {}) {
+    const targetProject = project || detectCurrentProject();
+    const mode = getStorageMode();
+    const db = await getProjectDb(targetProject);
 
-/**
- * Internal helper to delete a memory from the global Postgres store.
- * @param {number} id - Memory ID.
- * @returns {Promise<{content: Array}>}
- */
-async function _deleteGlobalMemory(id) {
-    const client = await pool.connect();
-    try {
-        const res = await client.query(`DELETE FROM ide_agent_memory WHERE id = $1 AND project IS NULL RETURNING id`, [id]);
-        if (res.rowCount === 0) {
-            return { content: [{ type: "text", text: `[krusch-context] ⚠️ No Global PG memory found with ID: ${id}` }] };
-        }
-    } finally {
-        client.release();
-    }
-    return { content: [{ type: "text", text: `[krusch-context] 🗑️ Deleted Global PG memory ID: ${id}` }] };
-}
+    let activeCount = 0;
+    let supersededCount = 0;
+    let invalidatedCount = 0;
+    let nuggetCount = 0;
+    const categoryCounts = {};
 
-/**
- * Deletes a memory by ID.
- * @param {object} params
- * @param {number} params.id - ID of the memory to delete
- * @param {string} [params.source_project] - Project context for SQLite isolation
- * @returns {Promise<{content: Array}>} MCP tool response
- */
-export async function deleteMemory({ id, source_project, project, active_project }) {
-    if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
-    const targetProject = source_project || project || active_project || null;
-    if (targetProject) return await _deleteProjectMemory(id, targetProject);
-    return await _deleteGlobalMemory(id);
-}
-
-/**
- * Internal helper to update a memory in the local SQLite project cache.
- * @param {number} id - Memory ID.
- * @param {string} [content] - Optional new content.
- * @param {string[]} [tags] - Optional new tags.
- * @param {string} source_project - Project name.
- * @returns {Promise<{content: Array}>}
- */
-async function _updateProjectMemory(id, content, tags, source_project) {
-    const db = await getProjectDb(source_project);
-    if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${source_project} not found.` }] };
-    
-    const setClauses = [];
-    const params = [];
-    
-    if (content) {
-        const embeddingArray = await getEmbedding(content);
-        if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
-        setClauses.push(`content = ?`);
-        params.push(content);
-        setClauses.push(`embedding = ?`);
-        params.push(`[${embeddingArray.join(',')}]`);
-    }
-    if (tags) {
-        setClauses.push(`tags = ?`);
-        params.push(JSON.stringify(tags));
-    }
-    
-    if (setClauses.length > 0) {
-        params.push(id);
-        const res = db.prepare(`UPDATE ide_agent_memory SET ${setClauses.join(', ')} WHERE id = ?`).run(...params);
-        if (res.changes === 0) return { content: [{ type: "text", text: `[krusch-context] ⚠️ No memory found with ID: ${id} in project: ${source_project}` }] };
-        return { content: [{ type: "text", text: `[krusch-context] ✏️ Updated SQLite memory ID: ${id}` }] };
-    }
-    return { content: [{ type: "text", text: `[krusch-context] ✏️ Project reassignment not supported for SQLite memories yet.` }] };
-}
-
-/**
- * Internal helper to update a memory in the global Postgres store.
- * @param {number} id - Memory ID.
- * @param {string} [content] - Optional new content.
- * @param {string[]} [tags] - Optional new tags.
- * @returns {Promise<{content: Array}>}
- */
-async function _updateGlobalMemory(id, content, tags, project) {
-    const client = await pool.connect();
-    try {
-        const setClauses = [];
-        const params = [];
-        let idx = 1;
-
-        if (content) {
-            const embeddingArray = await getEmbedding(content);
-            if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
-            setClauses.push(`content = $${idx++}`);
-            params.push(content);
-            setClauses.push(`embedding = $${idx++}::vector`);
-            params.push(`[${embeddingArray.join(',')}]`);
-        }
-        if (tags) {
-            setClauses.push(`tags = $${idx++}`);
-            params.push(JSON.stringify(tags));
-        }
-        if (project !== undefined) {
-            setClauses.push(`project = $${idx++}`);
-            params.push(project);
-        }
-        
-        params.push(id);
-        const res = await client.query(
-            `UPDATE ide_agent_memory SET ${setClauses.join(', ')} WHERE id = $${idx} AND project IS NULL RETURNING id`,
-            params
-        );
-        if (res.rowCount === 0) {
-            return { content: [{ type: "text", text: `[krusch-context] ⚠️ No Global PG memory found with ID: ${id}` }] };
-        }
-    } finally {
-        client.release();
-    }
-    return { content: [{ type: "text", text: `[krusch-context] ✏️ Updated Global PG memory ID: ${id}` }] };
-}
-
-/**
- * Updates an existing memory's content, tags, or project.
- * @param {object} params
- * @param {number} params.id - Memory ID to update
- * @param {string} [params.content] - New content (triggers re-embedding)
- * @param {string[]} [params.tags] - New tags
- * @param {string} [params.project] - New project assignment
- * @param {string} [params.source_project] - Project context for SQLite isolation
- * @returns {Promise<{content: Array}>} MCP tool response
- */
-export async function updateMemory({ id, content, tags, project, source_project, active_project }) {
-    if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing memory ID");
-    if (!content && !tags && (project === undefined)) {
-        throw new McpError(ErrorCode.InvalidParams, "Must provide at least one field to update (content, tags, or project)");
-    }
-
-    const targetSource = source_project || active_project || null;
-    if (targetSource) return await _updateProjectMemory(id, content, tags, targetSource);
-    return await _updateGlobalMemory(id, content, tags, project);
-}
-
-/**
- * Calculates an L2-normalized centroid between two vector arrays for consolidation.
- * @param {string} embStrA - JSON string representation of vector A.
- * @param {string} embStrB - JSON string representation of vector B.
- * @returns {string|null} JSON string of the newly normalized centroid vector, or null on failure.
- */
-function _calculateCentroidStr(embStrA, embStrB) {
-    let arrA = [];
-    let arrB = [];
-    try {
-        const parsedA = JSON.parse(embStrA);
-        const parsedB = JSON.parse(embStrB);
-        if (Array.isArray(parsedA)) arrA = parsedA;
-        if (Array.isArray(parsedB)) arrB = parsedB;
-    } catch(e) {
-        console.warn(`[krusch-context] Warning: Failed to parse embeddings for centroid calculation: ${e.message}`);
-        return null;
-    }
-    
-    if (!arrA.length || !arrB.length) return null;
-    const len = Math.min(arrA.length, arrB.length);
-    
-    let centroid = [];
-    for(let i=0; i<len; i++) {
-        centroid.push(arrA[i] + arrB[i]);
-    }
-    
-    const norm = Math.sqrt(centroid.reduce((sum, val) => sum + val * val, 0));
-    if (norm === 0) return `[${centroid.join(',')}]`;
-    return `[${centroid.map(val => val / norm).join(',')}]`;
-}
-
-/**
- * Resolves a duplicate pair into a merge result. Pure function — no side effects.
- * Keeps the newer record, appends the older's content, computes L2-normalized centroid.
- * @param {object} pair - Pair with id_a, id_b, content_a, content_b, created_a, created_b, emb_a, emb_b.
- * @returns {{keepId: *, dropId: *, mergedContent: string, embeddingStr: string}|null} Null if centroid failed.
- */
-function _mergeMemoryPair(pair) {
-    const keepId = pair.created_a > pair.created_b ? pair.id_a : pair.id_b;
-    const dropId = keepId === pair.id_a ? pair.id_b : pair.id_a;
-    const keepContent = keepId === pair.id_a ? pair.content_a : pair.content_b;
-    const dropContent = keepId === pair.id_a ? pair.content_b : pair.content_a;
-
-    const mergedContent = `${keepContent}\n\n[Consolidated from ID ${dropId}]: ${dropContent}`;
-    const embeddingStr = _calculateCentroidStr(pair.emb_a, pair.emb_b);
-    if (!embeddingStr) {
-        console.warn(`[krusch-context] Skipping merge of IDs ${keepId}/${dropId}: centroid calculation failed`);
-        return null;
-    }
-    return { keepId, dropId, mergedContent, embeddingStr };
-}
-
-/**
- * Consolidates matching semantic memories in the local SQLite project cache.
- * @param {string} category - Category to search within.
- * @param {string} project - Project name.
- * @param {number} threshold - Cosine distance threshold.
- * @param {boolean} dry_run - Preview without merging.
- * @returns {Promise<{content: Array}>}
- */
-async function _consolidateSqlite(category, project, threshold, dry_run) {
-    const db = await getProjectDb(project);
-    if (!db) return { content: [{ type: "text", text: `[krusch-context] ⚠️ Project ${project} not found.` }] };
-    
-    const rows = db.prepare(`SELECT id, content, tags, embedding, created_at FROM ide_agent_memory WHERE category = ? AND embedding IS NOT NULL`).all(category);
-    // Scaling guard: O(n²) pairwise comparison
-    if (rows.length > 500) {
-        return { content: [{ type: "text", text: `[krusch-context] ⚠️ Too many memories (${rows.length}) for in-memory consolidation. Filter by project.` }] };
-    }
-    const pairs = [];
-    for (let i = 0; i < rows.length; i++) {
-        for (let j = i + 1; j < rows.length; j++) {
-            let embA = [], embB = [];
-            try { 
-                const pa = JSON.parse(rows[i].embedding); 
-                const pb = JSON.parse(rows[j].embedding); 
-                if(Array.isArray(pa)) embA = pa;
-                if(Array.isArray(pb)) embB = pb;
-            } catch(e) { continue; }
-            if(!embA.length || !embB.length) continue;
-            
-            const distance = 1 - cosineSimilarity(embA, embB);
-            if (distance < threshold) {
-                pairs.push({
-                    id_a: rows[i].id, content_a: rows[i].content, created_a: rows[i].created_at, emb_a: rows[i].embedding,
-                    id_b: rows[j].id, content_b: rows[j].content, created_b: rows[j].created_at, emb_b: rows[j].embedding,
-                    distance
-                });
+    if (db) {
+        const memRows = db.prepare(`SELECT category, status FROM ide_agent_memory`).all();
+        for (const r of memRows) {
+            if (r.status === 'ACTIVE') {
+                activeCount++;
+                categoryCounts[r.category] = (categoryCounts[r.category] || 0) + 1;
+            } else if (r.status === 'SUPERSEDED') {
+                supersededCount++;
+            } else if (r.status === 'INVALIDATED') {
+                invalidatedCount++;
             }
         }
+        const nugRow = db.prepare(`SELECT count(*) as count FROM ide_agent_nuggets`).get();
+        nuggetCount = nugRow ? nugRow.count : 0;
     }
-    
-    pairs.sort((a, b) => a.distance - b.distance);
-    if (pairs.length === 0) return { content: [{ type: "text", text: `[krusch-context] ✅ No duplicate SQLite memories found in category: ${category} (threshold: ${threshold})` }] };
-    
+
+    const stale = await getStaleMemories({ project: targetProject, days: 30 });
+    const worktree = getWorktreeStatus();
+
+    let output = `# 🩺 Krusch Context Health Status\n\n`;
+    output += `* **Storage Mode**: \`${mode}\` (${mode === 'sqlite' ? '.agent/context.db' : 'PostgreSQL'})\n`;
+    output += `* **Active Project**: \`${targetProject}\`\n`;
+    output += `* **Worktree Dirty**: ${worktree.isDirty ? `⚠️ Yes (${worktree.modifiedCount} uncommitted files)` : `✅ Clean`}\n`;
+    output += `* **Active Memories**: ${activeCount}\n`;
+    for (const cat of CLOSED_CATEGORIES) {
+        output += `  - ${cat}: ${categoryCounts[cat] || 0}\n`;
+    }
+    output += `* **Superseded Lineage**: ${supersededCount}\n`;
+    output += `* **Invalidated Records**: ${invalidatedCount}\n`;
+    output += `* **Steering Nuggets**: ${nuggetCount}\n`;
+    if (stale.length > 0) {
+        output += `* **Decay Review**: ⏳ ${stale.length} memories have not been referenced in >30 days.\n`;
+    } else {
+        output += `* **Decay Review**: ✅ All active memories fresh (<30 days).\n`;
+    }
+
+    return {
+        content: [{ type: "text", text: output }],
+        stats: {
+            storageMode: mode,
+            project: targetProject,
+            activeCount,
+            supersededCount,
+            invalidatedCount,
+            nuggetCount,
+            staleCount: stale.length
+        }
+    };
+}
+
+/**
+ * Lists memories chronologically (Admin tool for extended profile).
+ */
+export async function listMemories({ category, project, active_project, limit = 10 } = {}) {
+    const targetProject = project || active_project || detectCurrentProject();
+    const db = await getProjectDb(targetProject);
+    if (!db) return { content: [{ type: "text", text: "Database not available." }] };
+
+    let sql = `SELECT id, category, content, tags, status, created_at FROM ide_agent_memory`;
+    const params = [];
+    if (category) {
+        sql += ` WHERE category = ?`;
+        params.push(normalizeCategory(category));
+    }
+    sql += ` ORDER BY created_at DESC LIMIT ?`;
+    params.push(limit);
+
+    const rows = db.prepare(sql).all(...params);
+    if (rows.length === 0) {
+        return { content: [{ type: "text", text: `No memories found${category ? ` in category ${category}` : ''}.` }] };
+    }
+
+    let output = `=== 📋 Memory List (${rows.length} records) ===\n\n`;
+    for (const r of rows) {
+        output += `* **#${r.id}** [${r.category}] (${r.status}): ${r.content}\n`;
+    }
+    return { content: [{ type: "text", text: output }] };
+}
+
+/**
+ * Hard-deletes a memory record (Admin tool for extended profile).
+ */
+export async function deleteMemory({ id, project, active_project } = {}) {
+    if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing parameter 'id'");
+    const targetProject = project || active_project || detectCurrentProject();
+    const db = await getProjectDb(targetProject);
+    if (db) {
+        db.prepare(`DELETE FROM ide_agent_memory WHERE id = ?`).run(id);
+        return { content: [{ type: "text", text: `[krusch-context] 🗑️ Deleted memory record #${id}` }] };
+    }
+    throw new McpError(ErrorCode.InternalError, "Database unavailable");
+}
+
+/**
+ * Updates a memory record's content and tags (Admin tool for extended profile).
+ */
+export async function updateMemory({ id, content, tags, project, active_project } = {}) {
+    if (!id || !content) throw new McpError(ErrorCode.InvalidParams, "Missing id or content");
+    const targetProject = project || active_project || detectCurrentProject();
+    const db = await getProjectDb(targetProject);
+    if (db) {
+        const emb = await getEmbedding(content);
+        const embStr = emb ? `[${emb.join(',')}]` : null;
+        const tagStr = tags ? JSON.stringify(tags) : null;
+        db.prepare(`UPDATE ide_agent_memory SET content = ?, tags = ?, embedding = ? WHERE id = ?`).run(content, tagStr, embStr, id);
+        return { content: [{ type: "text", text: `[krusch-context] ✅ Updated memory record #${id}` }] };
+    }
+    throw new McpError(ErrorCode.InternalError, "Database unavailable");
+}
+
+/**
+ * Consolidates duplicate memories within a category (Admin tool for extended profile).
+ */
+export async function consolidateMemories({ category, project, active_project, threshold = 0.15, dry_run = false } = {}) {
+    if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
+    const targetProject = project || active_project || detectCurrentProject();
+    const normCat = normalizeCategory(category);
+    const db = await getProjectDb(targetProject);
+    if (!db) return { content: [{ type: "text", text: "Database unavailable" }] };
+
+    const rows = db.prepare(`SELECT id, content, embedding FROM ide_agent_memory WHERE category = ? AND status = 'ACTIVE'`).all(normCat);
+    const pairs = [];
+
+    for (let i = 0; i < rows.length; i++) {
+        for (let j = i + 1; j < rows.length; j++) {
+            if (!rows[i].embedding || !rows[j].embedding) continue;
+            try {
+                const vecA = JSON.parse(rows[i].embedding);
+                const vecB = JSON.parse(rows[j].embedding);
+                const sim = cosineSimilarity(vecA, vecB);
+                const dist = 1 - sim;
+                if (dist <= threshold) {
+                    pairs.push({ a: rows[i], b: rows[j], dist });
+                }
+            } catch {}
+        }
+    }
+
+    if (pairs.length === 0) {
+        return { content: [{ type: "text", text: `✅ No duplicate memories found in category '${normCat}' (threshold: ${threshold})` }] };
+    }
+
     if (dry_run) {
-        let output = `=== 🔍 Consolidation Preview (SQLite): ${category} (${pairs.length} pairs) ===\n`;
+        let output = `=== 🔍 Consolidation Preview (${pairs.length} duplicate pairs) ===\n\n`;
         for (const p of pairs) {
-            output += `\n--- Distance: ${p.distance.toFixed(3)} ---\n  ID ${p.id_a}: ${p.content_a.substring(0, 100)}...\n  ID ${p.id_b}: ${p.content_b.substring(0, 100)}...\n`;
+            output += `* Distance: ${p.dist.toFixed(3)}\n  - #${p.a.id}: "${p.a.content.substring(0, 60)}..."\n  - #${p.b.id}: "${p.b.content.substring(0, 60)}..."\n`;
         }
         return { content: [{ type: "text", text: output }] };
     }
-    
-    const merged = new Set();
-    let mergeCount = 0;
-    const mergeTx = db.transaction(() => {
-        for (const p of pairs) {
-            if (merged.has(p.id_a) || merged.has(p.id_b)) continue;
-            const result = _mergeMemoryPair(p);
-            if (!result) continue;
-            
-            db.prepare(`UPDATE ide_agent_memory SET content = ?, embedding = ? WHERE id = ?`).run(result.mergedContent, result.embeddingStr, result.keepId);
-            db.prepare(`DELETE FROM ide_agent_memory WHERE id = ?`).run(result.dropId);
-            merged.add(result.dropId);
-            mergeCount++;
-        }
-    });
-    mergeTx();
-    return { content: [{ type: "text", text: `[krusch-context] 🔗 Consolidated ${mergeCount} duplicate pairs in SQLite category: ${category}` }] };
-}
 
-/**
- * Consolidates matching semantic memories in the global Postgres store.
- * @param {string} category - Category to search within.
- * @param {number} threshold - Cosine distance threshold.
- * @param {boolean} dry_run - Preview without merging.
- * @returns {Promise<{content: Array}>}
- */
-async function _consolidatePostgres(category, threshold, dry_run) {
-    const client = await pool.connect();
-    try {
-        const sql = `
-            WITH candidates AS (
-                SELECT id, content, tags, project, created_at, embedding
-                FROM ide_agent_memory
-                WHERE category = $1 AND embedding IS NOT NULL AND project IS NULL
-            )
-            SELECT 
-                a.id AS id_a, a.content AS content_a, a.created_at AS created_a, a.embedding AS emb_a,
-                b.id AS id_b, b.content AS content_b, b.created_at AS created_b, b.embedding AS emb_b,
-                a.embedding <=> b.embedding AS distance
-            FROM candidates a
-            JOIN candidates b ON a.id < b.id
-            WHERE a.embedding <=> b.embedding < $2
-            ORDER BY distance ASC
-            LIMIT 20
-        `;
-        const res = await client.query(sql, [category, threshold]);
-        const pairs = res.rows;
-
-        if (pairs.length === 0) return { content: [{ type: "text", text: `[krusch-context] ✅ No duplicate Global PG memories found in category: ${category} (threshold: ${threshold})` }] };
-
-        if (dry_run) {
-            let output = `=== 🔍 Consolidation Preview (Global PG): ${category} (${pairs.length} pairs) ===\n`;
-            for (const p of pairs) {
-                output += `\n--- Distance: ${Number(p.distance).toFixed(3)} ---\n  ID ${p.id_a} (${new Date(p.created_a).toISOString().split('T')[0]}): ${p.content_a.substring(0, 100)}...\n  ID ${p.id_b} (${new Date(p.created_b).toISOString().split('T')[0]}): ${p.content_b.substring(0, 100)}...\n`;
-            }
-            return { content: [{ type: "text", text: output }] };
-        }
-
-        const merged = new Set();
-        let mergeCount = 0;
-        for (const p of pairs) {
-            if (merged.has(p.id_a) || merged.has(p.id_b)) continue;
-            const result = _mergeMemoryPair(p);
-            if (!result) continue;
-            
-            await client.query(`UPDATE ide_agent_memory SET content = $1, embedding = $2::vector WHERE id = $3`, [result.mergedContent, result.embeddingStr, result.keepId]);
-            await client.query(`DELETE FROM ide_agent_memory WHERE id = $1`, [result.dropId]);
-            merged.add(result.dropId);
-            mergeCount++;
-        }
-        return { content: [{ type: "text", text: `[krusch-context] 🔗 Consolidated ${mergeCount} duplicate Global PG pairs in category: ${category}` }] };
-    } finally {
-        client.release();
+    let mergedCount = 0;
+    for (const p of pairs) {
+        // Mark the newer one as superseded by the older one
+        db.prepare(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = ? WHERE id = ?`).run(p.a.id, p.b.id);
+        mergedCount++;
     }
+
+    return { content: [{ type: "text", text: `🔗 Consolidated ${mergedCount} duplicate pairs in category '${normCat}'.` }] };
 }
 
-/**
- * Finds and merges semantically duplicate memories within a category.
- * @param {object} params
- * @param {string} params.category - Category to consolidate
- * @param {string} [params.project] - Optional project filter for SQLite consolidation
- * @param {number} [params.threshold=0.15] - Cosine distance threshold for duplicates
- * @param {boolean} [params.dry_run=false] - Preview matches without merging
- * @returns {Promise<{content: Array}>} MCP tool response
- */
-export async function consolidateMemories({ category, project, active_project, threshold = 0.15, dry_run = false }) {
-    if (!category) throw new McpError(ErrorCode.InvalidParams, "Missing category");
-    const targetProject = project || active_project || null;
-    if (targetProject) {
-        return await _consolidateSqlite(category, targetProject, threshold, dry_run);
-    }
-    return await _consolidatePostgres(category, threshold, dry_run);
-}

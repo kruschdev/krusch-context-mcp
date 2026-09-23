@@ -18,9 +18,11 @@ test('SQLite project-scoped memory isolation', async (t) => {
             category: 'lessons',
             content: 'Testing project separation with SQLite! This should only appear for krusch-nexus.',
             project: 'krusch-nexus',
-            tags: ['test', 'sqlite']
+            tags: ['test', 'sqlite'],
+            force: true
         });
         const text = res.content[0].text;
+
         assert.ok(text.includes('SQLite project DB'), `Expected SQLite confirmation, got: ${text}`);
     });
 

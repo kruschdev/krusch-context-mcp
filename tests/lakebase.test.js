@@ -21,9 +21,11 @@ test('Lakebase pull/push sync pipeline', async (t) => {
             category: 'lessons',
             content: testContent,
             tags: ['test', 'lakebase'],
-            _embedding: new Array(1024).fill(0.1) // dummy embedding
+            _embedding: new Array(1024).fill(0.1), // dummy embedding
+            force: true
         });
         const text = res.content[0].text;
+
         assert.ok(text.includes('SQLite project DB'), `Expected SQLite confirmation, got: ${text}`);
     });
 

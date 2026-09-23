@@ -1,23 +1,22 @@
 /**
  * @module unified-retrieval
- * Polygres-inspired Unified Context Retrieval Engine for krusch-context-mcp.
+ * Unified Context Retrieval Engine for krusch-context-mcp.
  * Implements:
- * 1. HNSW Vector Seed Search (via pgcontext / pgvector)
- * 2. Multi-Hop Relational Graph Traversal (graph_hops = 0, 1, 2)
- * 3. Combined Recency × Relevance Scoring
- * 4. Server-Side Token Budget Accumulator (limit_tokens)
+ * 1. Hybrid Semantic + Lexical Retrieval over Project Memories & Steering Nuggets
+ * 2. State Briefing Integration
+ * 3. Token Budget Accumulator (limit_tokens) with Strict Pruning
+ * 4. Structured Citations Manifest
  */
 
 import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { isPgContextEnabled } from './pgcontext-helper.js';
-import { searchBlobs } from './git-engine.js';
-import { selectMinimalCoveringSet, prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from './prune-helper.js';
+import { prunePreSynthesis } from './prune-helper.js';
 import { detectCurrentProject } from './project-helper.js';
-import { compileProjectState } from './memory-engine.js';
+import { compileProjectState, searchMemory } from './memory-engine.js';
+import { getProjectDb, cosineSimilarity } from './sqlite-engine.js';
 
-
-const DECAY_RATE = 0.01; // Exponential time decay rate per day
+const DECAY_RATE = 0.01;
 
 /**
  * Estimates token count for a text string (~4 characters per token).
@@ -31,19 +30,20 @@ export function estimateTokens(text) {
 
 /**
  * Packs ranked context items into a single Markdown payload respecting limit_tokens.
- * Applies Pre-Synthesis pruning to strip boilerplate lines.
- * @param {Array<{type: string, title: string, content: string, score: number}>} items 
+ * Returns both formatted Markdown and a structured citations manifest.
+ * @param {Array<{type: string, id: any, title: string, content: string, score: number, category?: string, key?: string}>} items 
  * @param {number} limitTokens 
- * @returns {{contextText: string, packedCount: number, totalTokens: number}}
+ * @returns {{contextText: string, packedCount: number, totalTokens: number, citations: Array}}
  */
 export function packTokenBudget(items, limitTokens = 4000) {
     const sorted = [...items].sort((a, b) => b.score - a.score);
     
     let currentTokens = 0;
     const packed = [];
+    const citations = [];
     
     for (const item of sorted) {
-        const header = `### [${item.type.toUpperCase()}] ${item.title} (Relevance: ${(item.score * 100).toFixed(1)}%)\n`;
+        const header = `### [${item.type.toUpperCase()}] ${item.title} (Score: ${(item.score * 100).toFixed(1)}%)\n`;
         const cleanedBody = prunePreSynthesis(item.content || '').trim() + '\n\n';
         const itemTokens = estimateTokens(header + cleanedBody);
         
@@ -53,280 +53,137 @@ export function packTokenBudget(items, limitTokens = 4000) {
         
         packed.push(header + cleanedBody);
         currentTokens += itemTokens;
+        citations.push({
+            type: item.type,
+            id: item.id || null,
+            category: item.category || null,
+            key: item.key || null,
+            title: item.title,
+            score: Number(item.score.toFixed(3))
+        });
     }
 
     const contextText = packed.join('---\n');
     return {
         contextText,
         packedCount: packed.length,
-        totalTokens: currentTokens
+        totalTokens: currentTokens,
+        citations
     };
 }
 
 /**
- * Extracts potential file paths or entity links referenced in text content.
- * @param {string} content 
- * @returns {string[]} File paths or references
+ * Unified Context Retrieval Entry Point.
+ * @param {object} args
+ * @param {string} args.query - Natural language query or topic
+ * @param {string} [args.mode='hybrid'] - 'hybrid' | 'memory' | 'state'
+ * @param {string} [args.category] - Optional closed category filter: decision, bug, invariant, lesson, blocker
+ * @param {number} [args.limit_tokens=4000] - Hard upper limit on tokens returned
+ * @param {string} [args.project] - Optional project context (auto-detected if omitted)
+ * @param {boolean} [args.include_state=false] - Prepend compiled project state briefing
+ * @returns {Promise<{content: Array, citations: Array}>}
  */
-function extractEntityLinks(content) {
-    if (!content) return [];
-    // Match unix paths like /path/to/file or relative src/file.ext
-    const pathRegex = /(?:\/[\w.-]+)+|(?:[\w.-]+\/(?:[\w.-]+\/)*[\w.-]+\.[a-zA-Z0-9]+)/g;
-    const matches = content.match(pathRegex) || [];
-    return [...new Set(matches)].filter(m => m.length > 3);
-}
+export async function unifiedRetrieve({
+    query,
+    mode = 'hybrid',
+    category = null,
+    limit_tokens = 4000,
+    project = null,
+    include_state = false
+}) {
+    const targetProject = project || detectCurrentProject();
+    const items = [];
 
-/**
- * Retrieves seed episodic memories from PostgreSQL.
- * @param {number[]} embeddingArray 
- * @param {string|null} project 
- * @param {number} limit 
- * @returns {Promise<Array>}
- */
-async function getSeedMemories(embeddingArray, project, limit = 10) {
-    const client = await pool.connect();
-    try {
-        const embeddingStr = `[${embeddingArray.join(',')}]`;
-        let query, params;
-        
-        if (project) {
-            query = `
-                SELECT id, category, content, project, tags, created_at,
-                       (1 - (embedding <=> $1::vector)) as similarity,
-                       EXTRACT(EPOCH FROM (NOW() - created_at))/86400 as age_days
-                FROM ide_agent_memory
-                WHERE (project = $2 OR project IS NULL)
-                ORDER BY embedding <=> $1::vector ASC
-                LIMIT $3
-            `;
-            params = [embeddingStr, project, limit];
-        } else {
-            query = `
-                SELECT id, category, content, project, tags, created_at,
-                       (1 - (embedding <=> $1::vector)) as similarity,
-                       EXTRACT(EPOCH FROM (NOW() - created_at))/86400 as age_days
-                FROM ide_agent_memory
-                ORDER BY embedding <=> $1::vector ASC
-                LIMIT $2
-            `;
-            params = [embeddingStr, limit];
-        }
-
-        const res = await client.query(query, params);
-        return res.rows.map(row => {
-            const decay = Math.exp(-DECAY_RATE * (row.age_days || 0));
-            const score = (row.similarity || 0) * decay;
+    // 1. If mode === 'state' or include_state is requested, compile state briefing
+    let stateHeader = "";
+    if (mode === 'state' || include_state) {
+        const stateRes = await compileProjectState({ project: targetProject });
+        const stateText = stateRes?.content?.[0]?.text || "";
+        if (mode === 'state') {
             return {
-                id: `mem-${row.id}`,
-                rawId: row.id,
-                type: 'memory',
-                title: `${row.category}${row.project ? ` (${row.project})` : ''}`,
-                content: row.content,
-                score,
-                links: extractEntityLinks(row.content)
+                content: [{ type: "text", text: stateText }],
+                citations: [{ type: "state", project: targetProject }]
             };
-        });
-    } finally {
-        client.release();
-    }
-}
-
-/**
- * Retrieves seed project steering nuggets from PostgreSQL.
- * @param {number[]} embeddingArray 
- * @param {string|null} project 
- * @param {number} limit 
- * @returns {Promise<Array>}
- */
-async function getSeedNuggets(embeddingArray, project, limit = 5) {
-    const client = await pool.connect();
-    try {
-        const embeddingStr = `[${embeddingArray.join(',')}]`;
-        let query = `
-            SELECT id, key, value, kind, project,
-                   (1 - (embedding <=> $1::vector)) as similarity
-            FROM ide_agent_nuggets
-            WHERE embedding IS NOT NULL
-        `;
-        const params = [embeddingStr];
-
-        if (project) {
-            query += ` AND (project = $2 OR project IS NULL OR kind = 'global')`;
-            params.push(project);
         }
-        query += ` ORDER BY embedding <=> $1::vector ASC LIMIT $${params.length + 1}`;
-        params.push(limit);
-
-        const res = await client.query(query, params);
-        return res.rows.map(row => ({
-            id: `nugget-${row.id}`,
-            type: 'nugget',
-            title: `Steering Nugget: ${row.key}`,
-            content: row.value,
-            score: (row.similarity || 0.8) * 1.1, // Small preference boost for nudges
-            links: extractEntityLinks(row.value)
-        }));
-    } catch (_) {
-        return [];
-    } finally {
-        client.release();
+        stateHeader = stateText + "\n\n---\n\n";
     }
-}
 
-/**
- * Performs Multi-Hop Graph Traversal to resolve linked codebase snippets and parent references.
- * @param {Array} seedItems 
- * @param {number} hops 
- * @returns {Promise<Array>} Expanded items including graph neighbors
- */
-async function traverseGraphNeighbors(seedItems, hops = 1) {
-    if (hops <= 0) return seedItems;
+    // 2. Fetch seed embedding for semantic matching
+    const embeddingArray = await getEmbedding(query);
 
-    const visitedIds = new Set(seedItems.map(i => i.id));
-    const extraItems = [];
-
-    for (const seed of seedItems) {
-        if (!seed.links || seed.links.length === 0) continue;
-
-        for (const refPath of seed.links) {
-            const graphNodeId = `code-${refPath}`;
-            if (visitedIds.has(graphNodeId)) continue;
-            visitedIds.add(graphNodeId);
-
-            try {
-                // Hop 1: Code blob lookup via native git-engine
-                const blobs = await searchBlobs(refPath, 1);
-                if (blobs && blobs.length > 0) {
-                    const blob = blobs[0];
-                    extraItems.push({
-                        id: graphNodeId,
-                        type: 'code_graph_neighbor',
-                        title: `Graph Hop [1]: ${blob.path || refPath}`,
-                        content: blob.content || blob.summary || `Referenced file: ${refPath}`,
-                        score: seed.score * 0.85, // Hop 1 proximity decay factor
-                        links: extractEntityLinks(blob.content)
-                    });
+    // 3. Search project memories from local SQLite cache
+    if (targetProject) {
+        try {
+            const db = await getProjectDb(targetProject);
+            if (db) {
+                let memSql = `
+                    SELECT id, category, content, tags, created_at, embedding
+                    FROM ide_agent_memory
+                    WHERE status = 'ACTIVE'
+                `;
+                const params = [];
+                if (category) {
+                    memSql += ` AND category = ?`;
+                    params.push(category);
                 }
-            } catch (_) {
-                // Ignore missing file references
-            }
-        }
-    }
-
-    // Hop 2: Traversal from Hop 1 neighbors
-    if (hops >= 2 && extraItems.length > 0) {
-        const hop1Neighbors = [...extraItems];
-        for (const neighbor of hop1Neighbors) {
-            if (!neighbor.links || neighbor.links.length === 0) continue;
-            for (const subRef of neighbor.links) {
-                const subNodeId = `code-hop2-${subRef}`;
-                if (visitedIds.has(subNodeId)) continue;
-                visitedIds.add(subNodeId);
-
-                try {
-                    const subBlobs = await searchBlobs(subRef, 1);
-                    if (subBlobs && subBlobs.length > 0) {
-                        const blob = subBlobs[0];
-                        extraItems.push({
-                            id: subNodeId,
-                            type: 'code_graph_neighbor_l2',
-                            title: `Graph Hop [2]: ${blob.path || subRef}`,
-                            content: blob.content || blob.summary || `2nd-degree referenced file: ${subRef}`,
-                            score: neighbor.score * 0.80, // Hop 2 proximity decay factor
-                            links: []
+                const rows = db.prepare(memSql).all(...params);
+                for (const r of rows) {
+                    let score = 0.5;
+                    if (embeddingArray && r.embedding) {
+                        try {
+                            const vec = typeof r.embedding === 'string' ? JSON.parse(r.embedding) : r.embedding;
+                            score = cosineSimilarity(embeddingArray, vec);
+                        } catch {}
+                    }
+                    if (r.content.toLowerCase().includes(query.toLowerCase())) {
+                        score = Math.max(score, 0.75);
+                    }
+                    if (score > 0.4) {
+                        items.push({
+                            type: 'memory',
+                            id: r.id,
+                            category: r.category,
+                            title: `Memory #${r.id} (${r.category})`,
+                            content: r.content,
+                            score
                         });
                     }
-                } catch (_) {}
+                }
+
+                // Search steering nuggets
+                const nugRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets`).all();
+                for (const n of nugRows) {
+                    let score = 0.4;
+                    if (n.key.toLowerCase().includes(query.toLowerCase()) || n.value.toLowerCase().includes(query.toLowerCase())) {
+                        score = 0.8;
+                    }
+                    items.push({
+                        type: 'nugget',
+                        key: n.key,
+                        title: `Nugget: ${n.key} (${n.kind})`,
+                        content: n.value,
+                        score
+                    });
+                }
             }
+        } catch (e) {
+            console.warn(`[unified-retrieval] SQLite retrieval warning: ${e.message}`);
         }
     }
 
-    return [...seedItems, ...extraItems];
-}
+    // 4. Pack token budget strictly
+    const availableTokens = Math.max(500, limit_tokens - estimateTokens(stateHeader));
+    const packed = packTokenBudget(items, availableTokens);
 
-/**
- * Unified Context Retrieval Entry Point.
- * @param {object} params
- * @param {string} params.query - Search query
- * @param {string} [params.project] - Active project scope
- * @param {number} [params.graph_hops=1] - Hops for graph expansion (0..2)
- * @param {number} [params.limit_tokens=4000] - Hard token budget
- * @param {boolean} [params.include_state=false] - Whether to prepend compiled project state briefing
- * @param {boolean} [params.setwise_rerank=false] - Whether to apply Setwise minimal cover
- * @returns {Promise<{content: Array}>} MCP Tool Output
- */
-export async function unifiedRetrieve({ query, project, graph_hops = 1, limit_tokens = 4000, include_code = true, include_state = false, setwise_rerank = false }) {
-    if (!query) return { content: [{ type: "text", text: "Error: Missing required query parameter." }] };
-
-    const resolvedProject = project || detectCurrentProject();
-
-    // 1. Stage-Aware Pre-Retrieval Pruning (arXiv: 2608.08389)
-    const cleanedQuery = prunePreRetrieval(query);
-
-    // 2. Generate query embedding
-    const queryEmbedding = await getEmbedding(cleanedQuery || query);
-    if (!queryEmbedding) return { content: [{ type: "text", text: "Error: Failed to generate query embedding." }] };
-
-    // 3. Fetch seed nodes (Memories + Steering Nuggets)
-    const seedMemories = await getSeedMemories(queryEmbedding, resolvedProject, 10);
-    const seedNuggets = await getSeedNuggets(queryEmbedding, resolvedProject, 5);
-    
-    let allCandidates = [...seedMemories, ...seedNuggets];
-
-    // 4. Optional Direct Code Blob Search
-    if (include_code) {
-        try {
-            const codeBlobs = await searchBlobs(cleanedQuery || query, 5, resolvedProject);
-            if (codeBlobs && Array.isArray(codeBlobs)) {
-                const codeItems = codeBlobs.map((blob, idx) => ({
-                    id: `code-direct-${idx}`,
-                    type: 'code',
-                    title: `Codebase: ${blob.file_path || blob.file_name || blob.path}`,
-                    content: blob.content || blob.summary || blob.snippet || '',
-                    score: 0.88 - (idx * 0.05),
-                    links: extractEntityLinks(blob.content || blob.summary || '')
-                }));
-                allCandidates.push(...codeItems);
-            }
-        } catch (_) {}
-    }
-
-    // 5. Multi-Hop Graph Traversal
-    let expandedGraphItems = await traverseGraphNeighbors(allCandidates, Math.min(graph_hops, 2));
-
-    // 6. Stage-Aware Post-Retrieval Pruning (Near-duplicate suppression)
-    expandedGraphItems = prunePostRetrieval(expandedGraphItems, { similarityThreshold: 0.88 });
-
-    // 7. Optional Rubric4Setwise Minimal Cover Reranking
-    if (setwise_rerank) {
-        expandedGraphItems = selectMinimalCoveringSet(expandedGraphItems, query, 10);
-    }
-
-    // 8. Optional Pre-compiled Project State Briefing
-    let stateBriefing = '';
-    if (include_state && resolvedProject) {
-        try {
-            const stateRes = await compileProjectState({ project: resolvedProject });
-            if (stateRes && stateRes.content && stateRes.content[0]?.text) {
-                stateBriefing = stateRes.content[0].text + '\n\n---\n\n';
-            }
-        } catch (err) {
-            console.warn(`[unifiedRetrieve] Failed to compile project state: ${err.message}`);
-        }
-    }
-
-    // 9. Server-Side Token Budget Accumulator (Pre-Synthesis Pruned)
-    const stateTokens = estimateTokens(stateBriefing);
-    const remainingBudget = Math.max(limit_tokens - stateTokens, 1000);
-    const { contextText, packedCount, totalTokens } = packTokenBudget(expandedGraphItems, remainingBudget);
-
-    const summaryHeader = `## 🧠 Unified Context Retrieval\n` +
-        `**Query**: "${query}" | **Project**: ${resolvedProject || 'Global'} | **Graph Hops**: ${graph_hops} | **State Included**: ${include_state} | **Setwise Rerank**: ${setwise_rerank} | **Packed**: ${packedCount} items (~${totalTokens + stateTokens} tokens / max ${limit_tokens})\n\n`;
+    const stateBadge = (mode === 'state' || include_state) ? ' (State Included)' : '';
+    const fullPayload = `${stateHeader}# 🔍 Unified Context Retrieval: "${query}"${stateBadge}\n` +
+        `**Tokens**: ~${packed.totalTokens + estimateTokens(stateHeader)} / Budget: ${limit_tokens} | ` +
+        `**Items Packed**: ${packed.packedCount} / ${items.length} candidates\n\n` +
+        packed.contextText;
 
     return {
-        content: [{
-            type: "text",
-            text: summaryHeader + stateBriefing + contextText
-        }]
+
+        content: [{ type: "text", text: fullPayload }],
+        citations: packed.citations
     };
 }

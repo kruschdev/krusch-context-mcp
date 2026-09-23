@@ -1,21 +1,22 @@
 {
   "name": "krusch-context-mcp",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "type": "module",
-  "description": "Sovereign 13-tool core MCP context engine (working memory, structural code retrieval, steering nuggets) with modular companion extensions.",
+  "description": "Universal Memory & Steering Engine for AI Agents (5-verb core, near-duplicate protection, SQLite-first default, durable fleet persistence).",
   "main": "src/index.js",
   "bin": {
-    "krusch-context-mcp": "src/index.js",
-    "krusch-semantic-router": "src/extensions/semantic-router/server.js"
+    "krusch-context-mcp": "bin/cli.js"
   },
   "publishConfig": {
     "access": "public"
   },
   "files": [
     "src",
+    "bin",
     "db",
     "templates",
     "scripts",
+    "docs",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
@@ -23,25 +24,14 @@
     "docker-compose.yml"
   ],
   "scripts": {
-    "start": "node src/index.js",
-    "start:cloud": "node src/extensions/polygres-cloud/server.js",
-    "start:router": "node src/extensions/semantic-router/server.js",
-    "start:law": "node src/extensions/law/server.js",
-    "start:nexus": "node src/extensions/nexus/server.js",
-    "start:biz": "node src/extensions/biz/server.js",
-    "start:sovereign": "KRUSCH_PROFILE=sovereign node src/index.js",
-    "start:triad": "KRUSCH_PROFILE=sovereign node src/index.js",
-    "start:ecosystem": "KRUSCH_PROFILE=ecosystem node src/index.js",
-    "test": "node --env-file=.env --test tests/*.test.js",
-    "test:smoke": "node --env-file=.env tests/test_client.js && node --env-file=.env tests/test_proactive.js",
-    "test:cloud": "node --env-file=.env tests/test_cloud_integration.js && node --env-file=.env tests/test_polygres_cloud.js",
+    "start": "node bin/cli.js",
+    "init": "node bin/cli.js init",
+    "health": "node bin/cli.js health",
+    "test": "node --test tests/*.test.js",
+    "docs:generate": "node scripts/generate_docs.js",
     "snapshot": "node scripts/snapshot.js",
     "sync-all": "node scripts/sync_all_projects.js",
-    "bench:memory": "node --env-file=.env scripts/benchmark_memory_eval.js",
-    "eval:accuracy": "node --env-file=.env scripts/eval_accuracy.js",
-    "eval:foreign": "node --env-file=.env scripts/eval_accuracy.js evals/fixtures/express_benchmark_10.json express",
-    "export:polygres": "node scripts/export_to_polygres.js",
-    "install-hook": "node scripts/install_git_hook.js"
+    "bench:memory": "node scripts/benchmark_memory_eval.js"
   },
   "keywords": [
     "mcp",

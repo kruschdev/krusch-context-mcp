@@ -1,10 +1,11 @@
-import fs from 'fs';
-import path from 'path';
-import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { pool } from '../db/pool.js';
 import { syncPgContextPoints } from './pgcontext-helper.js';
+import { detectCurrentProject } from './project-helper.js';
 
-import { fileURLToPath } from 'url';
+import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,27 +13,56 @@ const __dirname = path.dirname(__filename);
 const dbCache = new Map();
 
 /**
+ * Execute a transaction on DatabaseSync.
+ */
+export function withTransaction(db, fn) {
+    db.exec('BEGIN');
+    try {
+        const result = fn();
+        db.exec('COMMIT');
+        return result;
+    } catch (e) {
+        try { db.exec('ROLLBACK'); } catch {}
+        throw e;
+    }
+}
+
+/**
+ * Helper to compute cosine similarity between two numeric arrays.
+ */
+export function cosineSimilarity(vecA, vecB) {
+    if (!Array.isArray(vecA) || !Array.isArray(vecB) || vecA.length === 0 || vecB.length === 0) return 0;
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    const len = Math.min(vecA.length, vecB.length);
+    for (let i = 0; i < len; i++) {
+        dotProduct += vecA[i] * vecB[i];
+        normA += vecA[i] * vecA[i];
+        normB += vecB[i] * vecB[i];
+    }
+    if (normA === 0 || normB === 0) return 0;
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+/**
  * Get or initialize a per-project SQLite database connection.
- * Stores a Promise in dbCache to prevent the pull race condition — concurrent
- * callers block on the same initialization promise rather than getting a
- * half-populated DB.
- * Returns null if the project folder is not found.
+ * Stores a Promise in dbCache to prevent the pull race condition.
  */
 export async function getProjectDb(projectName) {
-    if (!projectName) return null;
+    if (!projectName) {
+        projectName = detectCurrentProject() || 'default';
+    }
     
     if (dbCache.has(projectName)) {
         return dbCache.get(projectName);
     }
     
-    // Store the initialization promise immediately to prevent concurrent callers
-    // from re-entering this block before pullProjectMemory completes.
     const initPromise = _initProjectDb(projectName);
     dbCache.set(projectName, initPromise);
     
     try {
         const db = await initPromise;
-        // Replace the promise with the resolved DB instance for future fast access
         if (db) {
             dbCache.set(projectName, db);
         } else {
@@ -46,31 +76,45 @@ export async function getProjectDb(projectName) {
 }
 
 /**
- * Internal: Creates, migrates, and seeds a project SQLite database.
- * Awaits pullProjectMemory so the DB is fully populated before returning.
- * @param {string} projectName
- * @returns {Promise<Database|null>}
+ * Resolves repository path for a project name.
  */
-async function _initProjectDb(projectName) {
-    // Homelab projects are in the sibling directories of this MCP server
-    const projectsRoot = path.resolve(__dirname, '../../');
-    const repoPath = path.join(projectsRoot, projectName);
-    
-    if (!fs.existsSync(repoPath)) {
-        console.warn(`[sqlite-engine] Project folder '${projectName}' not found at ${repoPath}`);
-        return null;
+function resolveProjectPath(projectName) {
+    // 1. Current workspace match
+    const detected = detectCurrentProject();
+    if (projectName === detected || projectName === 'default') {
+        return process.cwd();
     }
     
+    // 2. Sibling directory match (homelab structure)
+    const projectsRoot = path.resolve(__dirname, '../../');
+    const siblingPath = path.join(projectsRoot, projectName);
+    if (fs.existsSync(siblingPath)) {
+        return siblingPath;
+    }
+
+    // 3. Fallback to cwd/.agent
+    return process.cwd();
+}
+
+/**
+ * Internal: Creates, migrates, and seeds a project SQLite database.
+ */
+async function _initProjectDb(projectName) {
+    const repoPath = resolveProjectPath(projectName);
     const agentDir = path.join(repoPath, '.agent');
     
     if (!fs.existsSync(agentDir)) {
         fs.mkdirSync(agentDir, { recursive: true });
     }
     
-    const dbPath = path.join(agentDir, 'memory.db');
-    const db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
+    const dbPath = path.join(agentDir, 'context.db');
+    const db = new DatabaseSync(dbPath);
+    db.exec('PRAGMA journal_mode = WAL;');
+
     
+    // Polyfill db.transaction for better-sqlite3 compatibility
+    db.transaction = (fn) => (...args) => withTransaction(db, () => fn(...args));
+
     // Ensure schema
     db.exec(`
         CREATE TABLE IF NOT EXISTS ide_agent_memory (
@@ -79,15 +123,31 @@ async function _initProjectDb(projectName) {
             content TEXT NOT NULL,
             tags TEXT,
             embedding TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            status TEXT DEFAULT 'ACTIVE',
+            supersedes_id INTEGER,
+            superseded_by INTEGER,
+            invalidated_reason TEXT,
+            provenance TEXT,
+            valid_until DATETIME,
+            pg_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS ide_agent_nuggets (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
             kind TEXT NOT NULL,
             embedding TEXT,
+            pg_synced BOOLEAN DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS auditor_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rule_id TEXT NOT NULL,
+            feedback TEXT NOT NULL,
+            weight REAL DEFAULT 1.0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS agent_teacher_memories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,43 +164,33 @@ async function _initProjectDb(projectName) {
         );
     `);
     
-    // Schema Evolution (Lakebase Architecture)
-    try {
-        db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN pg_id INTEGER;`);
-    } catch (e) {
-        if (!e.message.includes('duplicate column name')) throw e;
-    }
-    try {
-        db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN status TEXT DEFAULT 'ACTIVE';`);
-    } catch (e) {
-        if (!e.message.includes('duplicate column name')) throw e;
-    }
-    try {
-        db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN supersedes_id INTEGER;`);
-    } catch (e) {
-        if (!e.message.includes('duplicate column name')) throw e;
-    }
-    try {
-        db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN superseded_by INTEGER;`);
-    } catch (e) {
-        if (!e.message.includes('duplicate column name')) throw e;
-    }
-    try {
-        db.exec(`ALTER TABLE ide_agent_memory ADD COLUMN valid_until DATETIME;`);
-    } catch (e) {
-        if (!e.message.includes('duplicate column name')) throw e;
-    }
-    try {
-        db.exec(`ALTER TABLE ide_agent_nuggets ADD COLUMN pg_synced BOOLEAN DEFAULT 0;`);
-    } catch (e) {
-        if (!e.message.includes('duplicate column name')) throw e;
+    // Schema Evolution
+    const columns = [
+        `ALTER TABLE ide_agent_memory ADD COLUMN pg_id INTEGER;`,
+        `ALTER TABLE ide_agent_memory ADD COLUMN status TEXT DEFAULT 'ACTIVE';`,
+        `ALTER TABLE ide_agent_memory ADD COLUMN supersedes_id INTEGER;`,
+        `ALTER TABLE ide_agent_memory ADD COLUMN superseded_by INTEGER;`,
+        `ALTER TABLE ide_agent_memory ADD COLUMN valid_until DATETIME;`,
+        `ALTER TABLE ide_agent_memory ADD COLUMN invalidated_reason TEXT;`,
+        `ALTER TABLE ide_agent_memory ADD COLUMN provenance TEXT;`,
+        `ALTER TABLE ide_agent_nuggets ADD COLUMN pg_synced BOOLEAN DEFAULT 0;`
+    ];
+
+    for (const colSql of columns) {
+        try {
+            db.exec(colSql);
+        } catch (e) {
+            if (!e.message.includes('duplicate column name')) {
+                // Ignore duplicate column errors
+            }
+        }
     }
     
-    // Synchronous read-ahead — await pull so callers get a fully populated DB
+    // Synchronous read-ahead: try pulling from Postgres if configured
     try {
         await pullProjectMemory(projectName, db);
-    } catch (e) {
-        console.error(`[sqlite-engine] Pull failed for ${projectName}:`, e);
+    } catch {
+        // Postgres pull is optional; ignore failure in SQLite standalone mode
     }
     
     return db;
@@ -148,28 +198,35 @@ async function _initProjectDb(projectName) {
 
 /**
  * PULL: Object Storage (Postgres) -> Compute Cache (SQLite)
- * Fetches all memories and nuggets for the project and populates the local cache.
  */
 export async function pullProjectMemory(projectName, db) {
-    const client = await pool.connect();
+    if (!process.env.DATABASE_URL && !process.env.DB_PASSWORD) {
+        return; // Skip if postgres not configured
+    }
+    let client;
+    try {
+        client = await pool.connect();
+    } catch {
+        return; // Postgres unavailable
+    }
+
     try {
         // 1. Pull Episodic Memories
         const memRes = await client.query(
-            `SELECT id, category, content, tags, embedding::text FROM ide_agent_memory WHERE project = $1`,
+            `SELECT id, category, content, tags, embedding::text, status, supersedes_id FROM ide_agent_memory WHERE project = $1`,
             [projectName]
         );
         
         const insertMem = db.prepare(`
-            INSERT INTO ide_agent_memory (pg_id, category, content, tags, embedding)
-            SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM ide_agent_memory WHERE pg_id = ?)
+            INSERT INTO ide_agent_memory (pg_id, category, content, tags, embedding, status, supersedes_id)
+            SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM ide_agent_memory WHERE pg_id = ?)
         `);
         
-        const memTx = db.transaction((rows) => {
-            for (const row of rows) {
-                insertMem.run(row.id, row.category, row.content, row.tags, row.embedding, row.id);
+        withTransaction(db, () => {
+            for (const row of memRes.rows) {
+                insertMem.run(row.id, row.category, row.content, row.tags, row.embedding, row.status || 'ACTIVE', row.supersedes_id || null, row.id);
             }
         });
-        memTx(memRes.rows);
 
         // 2. Pull Nuggets
         const nugRes = await client.query(
@@ -182,24 +239,31 @@ export async function pullProjectMemory(projectName, db) {
             VALUES (?, ?, ?, ?, 1)
         `);
         
-        const nugTx = db.transaction((rows) => {
-            for (const row of rows) {
+        withTransaction(db, () => {
+            for (const row of nugRes.rows) {
                 insertNug.run(row.key, row.value, row.kind, row.embedding);
             }
         });
-        nugTx(nugRes.rows);
         
     } finally {
-        client.release();
+        if (client) client.release();
     }
 }
 
 /**
  * PUSH: Compute Cache (SQLite) -> Object Storage (Postgres)
- * Asynchronous write-behind to persist local learnings to the durable fleet history.
  */
 export async function pushProjectMemory(projectName, db) {
-    const client = await pool.connect();
+    if (!process.env.DATABASE_URL && !process.env.DB_PASSWORD) {
+        return; // Skip if postgres not configured
+    }
+    let client;
+    try {
+        client = await pool.connect();
+    } catch {
+        return; // Postgres unavailable
+    }
+
     try {
         await client.query('BEGIN');
         
@@ -207,7 +271,6 @@ export async function pushProjectMemory(projectName, db) {
         const unsyncedMems = db.prepare(`SELECT id, category, content, tags, embedding, status, supersedes_id, superseded_by FROM ide_agent_memory WHERE pg_id IS NULL`).all();
         const pushedMemIds = [];
         for (const mem of unsyncedMems) {
-            // Reconstruct array string if necessary
             let embedStr = mem.embedding;
             if (embedStr && !embedStr.startsWith('[')) {
                  embedStr = `[${embedStr}]`;
@@ -256,27 +319,9 @@ export async function pushProjectMemory(projectName, db) {
             await syncPgContextPoints(pool, 'ide_agent_nuggets', pushedNugIds);
         }
     } catch (e) {
-        await client.query('ROLLBACK');
-        console.error(`[sqlite-engine] Async push failed for ${projectName}:`, e);
+        try { await client.query('ROLLBACK'); } catch {}
+        console.error(`[sqlite-engine] Push failed for ${projectName}:`, e.message);
     } finally {
-        client.release();
+        if (client) client.release();
     }
-}
-
-/**
- * Helper to compute cosine similarity between two numeric arrays.
- */
-export function cosineSimilarity(vecA, vecB) {
-    if (!Array.isArray(vecA) || !Array.isArray(vecB) || vecA.length === 0 || vecB.length === 0) return 0;
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-    const len = Math.min(vecA.length, vecB.length);
-    for (let i = 0; i < len; i++) {
-        dotProduct += vecA[i] * vecB[i];
-        normA += vecA[i] * vecA[i];
-        normB += vecB[i] * vecB[i];
-    }
-    if (normA === 0 || normB === 0) return 0;
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }

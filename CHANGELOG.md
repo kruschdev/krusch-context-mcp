@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-09-23
+
+### Added
+- **5-Verb Canonical Tool Surface**:
+  - Collapsed the MCP default tool menu to strictly 5 canonical verbs:
+    1. `retrieve` (`krusch_context_retrieve`): Hybrid context & state briefing retrieval with strict `limit_tokens` budget packing and structured citations.
+    2. `remember` (`krusch_context_remember`): Unified write API for episodic memory and steering nuggets with near-duplicate detection (`cosine >= 0.85`), closed taxonomy (`decision`, `bug`, `invariant`, `lesson`, `blocker`), and provenance tracking.
+    3. `revise` (`krusch_context_revise`): Temporal superseding (with lineage links) or explicit invalidations (with mandatory reason).
+    4. `nudge` (`krusch_context_nudge`): Lightweight invariant auditor (max 1–3 findings with code evidence) and feedback weight adjustment.
+    5. `health` (`krusch_context_health`): Operational health, storage mode, category counts, and 30-day TTL decay review.
+- **Zero-Docker On-Ramp (`npx krusch-context-mcp init`)**:
+  - Implemented `bin/cli.js` providing instant workspace setup using Node 22 built-in `node:sqlite` (`.agent/context.db`).
+  - Automatically writes `.env`, seeds starter context, verifies health, and outputs copy-paste MCP configs for Cursor, Claude Code, and Claude Desktop.
+- **Safe Memory Writes**:
+  - Enforced closed taxonomy (`decision`, `bug`, `invariant`, `lesson`, `blocker`).
+  - Implemented semantic near-duplicate detection (`cosine >= 0.85`) warning before twin insertion and proposing `revise(action: 'supersede')`.
+  - Enforced mandatory justification reason for invalidating rules.
+  - Added provenance tracking (`author`, `file`, `commit`, `pr`, `confidence`).
+  - Added 30-day TTL decay review.
+- **Automated Documentation Generator (`scripts/generate_docs.js`)**:
+  - Generates `docs/TOOL_REFERENCE.md` directly from tool code schemas (`npm run docs:generate`).
+- **2-Page Architecture Specification Note (`docs/ARCHITECTURE.md`)**:
+  - Covers SQLite/Postgres schemas, indexes, embedding dimension invariants, and failure modes.
+
+### Changed
+- **Excised Non-Memory Engines**:
+  - Quarantined companion extension bridges (`law`, `nexus`, `biz`, `polygres-cloud`, `semantic-router`) to their independent standalone repositories.
+  - Moved Codebase RAG and AST chunking (`ast-chunker.js`, `git-engine.js`) to dedicated `pg-git` repository.
+  - Purged dead re-exports (`v2-engine.js`, `think-engine.js`, `polygres-cloud.js`, `session-engine.js`, `skills-engine.js`).
+  - Rewrote `README.md` to be an honest, grounded 1-page guide without marketing buzzwords ("sovereign triad", "holographic", arXiv jargon).
+- **Storage Layer Evolution**:
+  - Migrated from `better-sqlite3` to Node 22 native `node:sqlite` (`DatabaseSync`), eliminating native C++ compilation dependencies.
+  - Added `src/storage-adapter.js` supporting dual-mode persistence (`node:sqlite` default, PostgreSQL fleet mode optional).
+
 ## [1.7.0] - 2026-09-23
 
 ### Added

@@ -1,118 +1,110 @@
 import test from 'node:test';
-import assert from 'node:assert';
-import { getRepoRootTree, getTreeEntries, getBlob } from '../src/git-engine.js';
-import { consolidateMemories } from '../src/memory-engine.js';
-import { writeState, resolveConflict } from '../src/v2-engine.js';
+import assert from 'node:assert/strict';
+import {
+  addMemory,
+  searchMemory,
+  supersedeMemory,
+  invalidateMemory,
+  compileProjectState,
+  getStaleMemories,
+  getHealthStats,
+  CLOSED_CATEGORIES
+} from '../src/memory-engine.js';
 import { pool } from '../db/pool.js';
 
-test('Integration Test Suite for krusch-context-mcp tools', async (t) => {
+test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async (t) => {
+  const testProject = 'krusch-context-mcp';
+  const uniqueTag = `run_${Date.now()}`;
+
+  await t.test('1. Rejects invalid category outside closed taxonomy', async () => {
+    await assert.rejects(
+      async () => {
+        await addMemory({
+          category: 'free_form_marketing_notes',
+          content: 'This should fail taxonomy validation',
+          project: testProject
+        });
+      },
+      (err) => {
+        assert.ok(err.message.includes('Permitted closed set'));
+        return true;
+      }
+    );
+  });
+
+  await t.test('2. Accepts all valid closed categories', async () => {
+    for (const cat of CLOSED_CATEGORIES) {
+      const res = await addMemory({
+        category: cat,
+        content: `Rule for category ${cat} (${uniqueTag})`,
+        project: testProject,
+        provenance: { author: 'agent', confidence: 0.95 },
+        force: true
+      });
+      assert.ok(res.content[0].text.includes('Successfully saved memory to SQLite project DB'));
+    }
+  });
+
+  await t.test('3. Detects near-duplicates and warns agent instead of inserting twin', async () => {
+    const content = `Near-duplicate detection rule: Keep database queries under 100ms (${uniqueTag})`;
     
-    // We assume the DB has at least one repository and some memories for integration testing
-    let testRepoId = null;
-    let rootTreeId = null;
+    // First insertion
+    const firstRes = await addMemory({
+      category: 'invariant',
+      content,
+      project: testProject,
+      force: true
+    });
+    assert.ok(firstRes.id, 'First insert must succeed');
 
-    await t.test('should retrieve repository root tree', async () => {
-        try {
-            const res = await pool.query('SELECT id FROM repositories LIMIT 1');
-            if (res.rows.length === 0) {
-                console.log('Skipping: No repositories found in db');
-                return;
-            }
-            testRepoId = res.rows[0].id;
-            rootTreeId = await getRepoRootTree(testRepoId);
-            assert.ok(rootTreeId, 'Root tree ID should not be null');
-            assert.strictEqual(typeof rootTreeId, 'string', 'Root tree ID should be a string');
-        } catch (err) {
-            if (err.code === '42P01') {
-                console.log('Skipping: repositories table does not exist in db');
-                return;
-            }
-            throw err;
-        }
+    // Second insertion with identical content without force
+    const dupRes = await addMemory({
+      category: 'invariant',
+      content,
+      project: testProject,
+      force: false
     });
 
-    await t.test('should list tree entries', async () => {
-        if (!rootTreeId) return;
-        const entries = await getTreeEntries(rootTreeId);
-        assert.ok(Array.isArray(entries), 'Tree entries should be an array');
-        if (entries.length > 0) {
-            assert.ok(entries[0].name, 'Entry should have a name');
-            assert.ok(entries[0].type, 'Entry should have a type');
-            assert.ok(entries[0].object_id, 'Entry should have an object_id');
-        }
-    });
+    assert.equal(dupRes.warning, 'near_duplicate');
+    assert.ok(dupRes.content[0].text.includes('Near-duplicate memory detected'));
+    assert.ok(dupRes.content[0].text.includes('supersede'));
+  });
 
-    await t.test('should fetch a blob content', async () => {
-        if (!rootTreeId) return;
-        const entries = await getTreeEntries(rootTreeId);
-        const blobEntry = entries.find(e => e.type === 'blob');
-        if (!blobEntry) return;
-
-        const blob = await getBlob(blobEntry.object_id);
-        assert.ok(blob, 'Blob should be retrieved');
-        if (blob.content !== null) {
-            const contentStr = blob.content.toString('utf-8');
-            assert.ok(contentStr.length >= 0, 'Content string should have length');
-        }
-    });
-
-    await t.test('should simulate consolidateMemories (dry run)', async () => {
-        const res = await consolidateMemories({
-            category: 'lessons',
-            threshold: 0.15,
-            dry_run: true
+  await t.test('4. Invalidation strictly requires a non-empty reason', async () => {
+    // Attempt invalidation without reason
+    await assert.rejects(
+      async () => {
+        await invalidateMemory({
+          id: 999999,
+          reason: '   ',
+          project: testProject
         });
-        assert.ok(res.content, 'Consolidate should return content');
-        const text = res.content[0].text;
-        assert.ok(text.includes('Consolidation Preview') || text.includes('No duplicate'), 'Should specify preview or no duplicates in output');
-    });
+      },
+      (err) => {
+        assert.ok(err.message.includes('requires a non-empty \'reason\''));
+        return true;
+      }
+    );
+  });
 
-    await t.test('should write state and resolve conflicts (v2 schema)', async () => {
-        // Write state A
-        const resA = await writeState({
-            content: "Testing state A for conflict resolution",
-            category: "activity",
-            author_id: "agent:test"
-        });
-        assert.ok(resA.content[0].text.includes('New ID:'), 'Should return New ID for state A');
-        const idA = resA.content[0].text.match(/New ID: ([0-9a-fA-F-]+)/)[1];
+  await t.test('5. compileProjectState compiles closed categories, nuggets, and decay review', async () => {
+    const res = await compileProjectState({ project: testProject });
+    const text = res.content[0].text;
+    assert.ok(text.includes('Compiled Project State: krusch-context-mcp'));
+    assert.ok(text.includes('Decisions & Priorities'));
+    assert.ok(text.includes('Project Invariants'));
+  });
 
-        // Write state B
-        const resB = await writeState({
-            content: "Testing state B for conflict resolution",
-            category: "activity",
-            author_id: "agent:test"
-        });
-        assert.ok(resB.content[0].text.includes('New ID:'), 'Should return New ID for state B');
-        const idB = resB.content[0].text.match(/New ID: ([0-9a-fA-F-]+)/)[1];
+  await t.test('6. getHealthStats reports accurate closed taxonomy breakdown', async () => {
+    const health = await getHealthStats({ project: testProject });
+    assert.ok(health.content[0].text.includes('Krusch Context Health Status'));
+    assert.ok(typeof health.stats.activeCount === 'number');
+    assert.ok(typeof health.stats.staleCount === 'number');
+  });
 
-        // Resolve conflicts
-        const resResolve = await resolveConflict({
-            conflict_ids: [idA, idB],
-            resolution_content: "Resolved state AB",
-            author_id: "agent:test"
-        });
-        assert.ok(resResolve.content[0].text.includes('Unified State ID:'), 'Should return Unified State ID');
-        const unifiedId = resResolve.content[0].text.match(/Unified State ID: ([0-9a-fA-F-]+)/)[1];
-        
-        // Verify old states are deprecated
-        const checkRes = await pool.query('SELECT id, status FROM interaction_memory WHERE id IN ($1, $2, $3)', [idA, idB, unifiedId]);
-        
-        const stateA = checkRes.rows.find(r => r.id === idA);
-        const stateB = checkRes.rows.find(r => r.id === idB);
-        const stateUnified = checkRes.rows.find(r => r.id === unifiedId);
-
-        assert.strictEqual(stateA.status, 'deprecated', 'State A should be deprecated');
-        assert.strictEqual(stateB.status, 'deprecated', 'State B should be deprecated');
-        assert.strictEqual(stateUnified.status, 'active', 'Unified state should be active');
-
-        // Cleanup
-        await pool.query('DELETE FROM memory_to_blob_edges WHERE memory_id IN ($1, $2, $3)', [idA, idB, unifiedId]);
-        await pool.query('DELETE FROM interaction_memory WHERE id IN ($1, $2, $3)', [idA, idB, unifiedId]);
-    });
-    
-    // Cleanup pool
-    t.after(async () => {
-        await pool.end();
-    });
+  t.after(async () => {
+    try {
+      await pool.end();
+    } catch {}
+  });
 });

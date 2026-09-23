@@ -4,9 +4,9 @@ import { searchMemory } from './memory-engine.js';
 import { nuggetNudges } from './nuggets-engine.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { writeState } from './v2-engine.js';
+import { getProjectDb } from './sqlite-engine.js';
 import { pool } from '../db/pool.js';
-
+import { detectCurrentProject } from './project-helper.js';
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,405 +14,169 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '..', '.env'), quiet: true });
 
-export const STATUTORY_PATTERN = /(?:§|Section|\bCal\.?\s*Civ\.?|\bOMC|\bLAMC|\bU\.?S\.?C\.?)\s*[\d\.]+/i;
-export const COMMERCIAL_PATTERN = /(?:MSA|SLA|NDA|Master Services Agreement|Service Level Agreement|Non-Disclosure|Limitation of Liability|Net \d+|Payment Terms|Indemnification)/i;
-export const CITATION_PATTERN = /(?:workspace\s+['"][^'"]+['"]|cite span|char_start|char_end|page \d+ of |scan(?:ned)? document|pdf exhibit)/i;
-
 /**
- * Proactively audits current agent trajectory against historical lessons, bugs, and rules.
- *
- * @param {object} args
- * @param {string|Array} args.history - Conversational history or last user input string
- * @param {string} [args.project] - Optional active project context
- * @returns {Promise<{content: Array}>} MCP tool response
+ * Record developer feedback on an auditor nudge.
+ * Feedback adjusts rule weights to prevent repeated false positives.
  */
-export async function handleProactiveNudge({ history, project }) {
-    if (!history) {
-        throw new McpError(ErrorCode.InvalidParams, "Missing required parameter 'history'");
+export async function recordNudgeFeedback({ rule_id, feedback, project }) {
+    if (!rule_id || !feedback) {
+        throw new McpError(ErrorCode.InvalidParams, "Missing rule_id or feedback");
+    }
+    const targetProject = project || detectCurrentProject();
+    let weightDelta = 0.0;
+    if (feedback === 'helpful') weightDelta = 0.2;
+    else if (feedback === 'unhelpful') weightDelta = -0.3;
+    else if (feedback === 'false_positive') weightDelta = -0.6;
+
+    // Record in SQLite
+    if (targetProject) {
+        try {
+            const db = await getProjectDb(targetProject);
+            if (db) {
+                const existing = db.prepare(`SELECT weight FROM auditor_feedback WHERE rule_id = ?`).get(String(rule_id));
+                const newWeight = existing ? Math.max(0.0, existing.weight + weightDelta) : Math.max(0.0, 1.0 + weightDelta);
+                db.prepare(`
+                    INSERT INTO auditor_feedback (project, rule_id, feedback, weight)
+                    VALUES (?, ?, ?, ?)
+                `).run(targetProject, String(rule_id), feedback, newWeight);
+            }
+        } catch (e) {
+            console.warn(`[proactive-engine] SQLite feedback warning: ${e.message}`);
+        }
     }
 
-    // 1. Parse history into a query query string
-    let queryText = "";
-    if (Array.isArray(history)) {
-        // Find last user message
-        const lastUser = history.slice().reverse().find(m => m.role === 'user');
-        if (lastUser) {
-            queryText = typeof lastUser.content === 'string' ? lastUser.content : JSON.stringify(lastUser.content);
-        } else {
-            // Fallback to concatenating the last few turns
-            queryText = history.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n');
+    return {
+        content: [{
+            type: "text",
+            text: `[krusch-context] ✅ Recorded '${feedback}' feedback for rule #${rule_id}. Weight updated.`
+        }]
+    };
+}
+
+/**
+ * Get active rule weights for a project.
+ */
+async function getRuleWeights(project) {
+    const weights = new Map();
+    if (!project) return weights;
+    try {
+        const db = await getProjectDb(project);
+        if (db) {
+            const rows = db.prepare(`SELECT rule_id, weight FROM auditor_feedback WHERE project = ? ORDER BY id DESC`).all(project);
+            for (const r of rows) {
+                if (!weights.has(r.rule_id)) {
+                    weights.set(r.rule_id, r.weight);
+                }
+            }
         }
-    } else if (typeof history === 'string') {
-        queryText = history;
-    } else {
-        throw new McpError(ErrorCode.InvalidParams, "Parameter 'history' must be a string or message array.");
+    } catch {}
+    return weights;
+}
+
+/**
+ * Lightweight, focused invariant auditor.
+ * Checks proposed diffs or actions against active project invariants and blockers.
+ * Capped to 1-3 findings with concrete evidence.
+ */
+export async function handleProactiveNudge({
+    action = 'audit',
+    history,
+    code,
+    file_path,
+    hook = 'manual',
+    rule_id,
+    feedback,
+    project
+}) {
+    const targetProject = project || detectCurrentProject();
+
+    // 1. If action is feedback, record and return
+    if (action === 'feedback' || (rule_id && feedback)) {
+        return await recordNudgeFeedback({ rule_id, feedback, project: targetProject });
+    }
+
+    // 2. Parse candidate text to audit
+    let queryText = code || "";
+    if (!queryText && history) {
+        if (Array.isArray(history)) {
+            const lastUser = history.slice().reverse().find(m => m.role === 'user');
+            queryText = lastUser ? (typeof lastUser.content === 'string' ? lastUser.content : JSON.stringify(lastUser.content)) : "";
+        } else if (typeof history === 'string') {
+            queryText = history;
+        }
     }
 
     if (!queryText.trim()) {
         return { content: [{ type: "text", text: "NO_NUDGES_REQUIRED" }] };
     }
 
-    console.error(`[krusch-context-mcp] Proactive audit triggered for query: "${queryText.substring(0, 80)}..."`);
+    // 3. Retrieve active project invariants & blockers
+    const ruleWeights = await getRuleWeights(targetProject);
+    const candidateRules = [];
 
-    // 2. Generate embedding for queryText
-    const vector = await getEmbedding(queryText);
-    if (!vector) {
-        throw new McpError(ErrorCode.InternalError, "Failed to generate query embedding");
-    }
-
-    // 3. Search Macro-scale (lessons, bugs, priorities, nuggets) and Meso-scale (activities)
-    const categories = ['lessons', 'bugs', 'priorities'];
-    const memoryPromises = categories.map(cat =>
-        searchMemory({ category: cat, query: queryText, limit: 3, active_project: project, _embedding: vector })
-            .catch(err => {
-                console.error(`[krusch-context-mcp] Memory search error for category '${cat}':`, err.message);
-                return { content: [{ type: "text", text: "" }] };
-            })
-    );
-
-    const nuggetsPromise = nuggetNudges({ query: queryText, active_project: project, _embedding: vector, limit: 3 })
-        .catch(err => {
-            console.error('[krusch-context-mcp] Nuggets search error:', err.message);
-            return { content: [{ type: "text", text: "" }] };
-        });
-
-    const mesoPromise = pool.query(`
-        SELECT content, created_at FROM interaction_memory
-        WHERE category = 'activity' AND (project = $1 OR project IS NULL)
-        ORDER BY created_at DESC LIMIT 3
-    `, [project || null]).catch(err => {
-        console.error('[krusch-context-mcp] Meso activities query failed:', err.message);
-        return { rows: [] };
-    });
-
-    const [nuggetsResult, mesoResult, ...memoryResults] = await Promise.all([nuggetsPromise, mesoPromise, ...memoryPromises]);
-
-    // 4. Compile multi-scale context block
-    let contextBlock = "";
-
-    // Micro-scale
-    contextBlock += `### 1. Micro-Scale Context (Current Task)\nQuery / Target: "${queryText}"\n\n`;
-
-    // Meso-scale
-    if (mesoResult && mesoResult.rows && mesoResult.rows.length > 0) {
-        contextBlock += `### 2. Meso-Scale Context (Recent Activities)\n`;
-        for (const row of mesoResult.rows) {
-            const dateStr = row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : 'unknown';
-            contextBlock += `- [${dateStr}] ${row.content}\n`;
-        }
-        contextBlock += `\n`;
-    }
-
-    // Macro-scale
-    let macroBlock = "";
-    for (let i = 0; i < categories.length; i++) {
-        const text = memoryResults[i].content[0].text;
-        if (text && !text.includes("No results found")) {
-            macroBlock += `#### Past ${categories[i].toUpperCase()}\n${text}\n\n`;
-        }
-    }
-
-    const nuggetText = nuggetsResult.content[0].text;
-    if (nuggetText && !nuggetText.includes("No relevant nudges found")) {
-        macroBlock += `#### Holographic Nuggets\n${nuggetText}\n\n`;
-    }
-
-    if (macroBlock.trim()) {
-        contextBlock += `### 3. Macro-Scale Context (Lessons, Bugs, & Rules)\n${macroBlock}`;
-    }
-
-    // 3b. Regulatory & Statutory Guardrail Check (KruschLaw Grounding)
-    const STATUTORY_PATTERN = /(?:§|Section|\bCal\.?\s*Civ\.?|\bOMC|\bLAMC|\bU\.?S\.?C\.?)\s*[\d\.]+/i;
-    let legalGroundingBlock = "";
-    if (STATUTORY_PATTERN.test(queryText)) {
-        const kruschlawUrl = process.env.KRUSCHLAW_API_URL || 'http://127.0.0.1:8085';
+    if (targetProject) {
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000);
-            const lawSearchRes = await fetch(`${kruschlawUrl}/api/laws/search?q=${encodeURIComponent(queryText)}&limit=3`, {
-                signal: controller.signal
-            }).then(r => r.ok ? r.json() : null).catch(() => null);
-            clearTimeout(timeoutId);
+            const db = await getProjectDb(targetProject);
+            if (db) {
+                const rows = db.prepare(`
+                    SELECT id, category, content
+                    FROM ide_agent_memory
+                    WHERE status = 'ACTIVE' AND category IN ('invariant', 'blocker', 'bug')
+                `).all();
 
-            if (lawSearchRes && lawSearchRes.results && lawSearchRes.results.length > 0) {
-                legalGroundingBlock += `#### Governing Statutory Authorities (KruschLaw)\n`;
-                for (const law of lawSearchRes.results) {
-                    legalGroundingBlock += `- [${law.section}] ${law.title} (${law.jurisdiction}) — Authority Weight: ${law.authority_weight || '1.0'}x${law.repealed ? ' [🛑 REPEALED]' : ''}\n`;
+                for (const r of rows) {
+                    const weight = ruleWeights.has(String(r.id)) ? ruleWeights.get(String(r.id)) : 1.0;
+                    if (weight > 0.2) {
+                        candidateRules.push({ id: r.id, category: r.category, content: r.content, weight });
+                    }
                 }
-                legalGroundingBlock += `\n`;
+
+                // Add active nuggets
+                const nugs = db.prepare(`SELECT key, value FROM ide_agent_nuggets`).all();
+                for (const n of nugs) {
+                    const weight = ruleWeights.has(n.key) ? ruleWeights.get(n.key) : 1.0;
+                    if (weight > 0.2) {
+                        candidateRules.push({ id: n.key, category: 'nugget', content: `${n.key}: ${n.value}`, weight });
+                    }
+                }
             }
-        } catch (_) {
-            // Non-blocking: continue if KruschLaw backend is offline
+        } catch (e) {
+            console.warn(`[proactive-engine] SQLite rules query error: ${e.message}`);
         }
     }
 
-    // 3c. Commercial & Contract Precedence Check (KruschBiz Grounding)
-    const COMMERCIAL_PATTERN = /(?:MSA|SLA|NDA|Master Services Agreement|Service Level Agreement|Non-Disclosure|Limitation of Liability|Net \d+|Payment Terms|Indemnification)/i;
-    let bizGroundingBlock = "";
-    if (COMMERCIAL_PATTERN.test(queryText)) {
-        const kruschbizUrl = process.env.KRUSCHBIZ_API_URL || process.env.KRUSCHBIZ_URL || 'http://127.0.0.1:8086';
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000);
-            const clausesRes = await fetch(`${kruschbizUrl}/api/clauses?q=${encodeURIComponent(queryText)}&limit=3`, {
-                signal: controller.signal,
-                headers: { 'X-Tenant-ID': 'org_default' }
-            }).then(r => r.ok ? r.json() : null).catch(() => null);
-            clearTimeout(timeoutId);
-
-            if (Array.isArray(clausesRes) && clausesRes.length > 0) {
-                bizGroundingBlock += `#### Governing Commercial Agreements (KruschBiz)\n`;
-                for (const c of clausesRes) {
-                    bizGroundingBlock += `- [${c.section || 'Clause'}] ${c.title || c.agreement_type} (${c.counterparty || c.organization}) — ${c.authority_class || 'governing_agreement'}${c.superseded ? ' [🛑 SUPERSEDED]' : ''}\n`;
-                }
-                bizGroundingBlock += `\n`;
-            }
-        } catch (_) {
-            // Non-blocking: continue if KruschBiz backend is offline
-        }
-    }
-
-    // 3d. Citation Spine & Workspace Check (KruschNexus Grounding)
-    const CITATION_PATTERN = /(?:workspace\s+['"][^'"]+['"]|cite span|char_start|char_end|page \d+ of |scan(?:ned)? document|pdf exhibit)/i;
-    let nexusGroundingBlock = "";
-    if (CITATION_PATTERN.test(queryText)) {
-        const nexusUrl = process.env.NEXUS_API_URL || process.env.NEXUS_URL || 'http://127.0.0.1:8000';
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000);
-            const wsRes = await fetch(`${nexusUrl}/v1/workspaces`, {
-                signal: controller.signal
-            }).then(r => r.ok ? r.json() : null).catch(() => null);
-            clearTimeout(timeoutId);
-
-            if (Array.isArray(wsRes) && wsRes.length > 0) {
-                nexusGroundingBlock += `#### Document Workspaces & Citation Anchors (KruschNexus)\n`;
-                for (const w of wsRes.slice(0, 3)) {
-                    nexusGroundingBlock += `- Workspace \`${w.name}\` (${w.doc_count || 0} docs, ${w.chunk_count || 0} chunks)\n`;
-                }
-                nexusGroundingBlock += `\n`;
-            }
-        } catch (_) {
-            // Non-blocking: continue if KruschNexus backend is offline
-        }
-    }
-
-    let sovereignBlock = legalGroundingBlock + bizGroundingBlock + nexusGroundingBlock;
-    if (sovereignBlock.trim()) {
-        contextBlock += `### 4. Sovereign Precedence & Grounding Guardrails\n${sovereignBlock}`;
-    }
-
-
-    // If no context exists to audit against, return NO_NUDGES_REQUIRED
-    if (!contextBlock.trim()) {
+    if (candidateRules.length === 0) {
         return { content: [{ type: "text", text: "NO_NUDGES_REQUIRED" }] };
     }
 
-    // 5. Setup prompt and local LLM
-    const systemPrompt = `You are the Proactive Context Auditor for the workspace.
-Your job is to examine the current user prompt / action trajectory and audit it against the retrieved facts, lessons, bugs, priorities, and nuggets.
-You must determine if there is any critical lesson, user preference, bug history, or project constraint that the user or agent might be ignoring or violating.
+    // 4. Quick keyword/heuristic check to filter down relevant rules
+    const activeViolations = [];
+    const lowerQuery = queryText.toLowerCase();
 
-Retrieved Context Block:
-${contextBlock}
-
-Rules for output:
-1. If you find a critical mismatch (e.g. they are trying to run a model with mismatched dimensions, using an invalid API key, deleting database files without confirmation, etc.), generate a concise Markdown alert starting with "### 🧠 Proactive Context Nudge" describing the warning/reminder and suggested action.
-2. If NO rules, constraints, or historical lessons are violated, or if the current action is completely aligned and safe, you MUST return exactly the string: "NO_NUDGES_REQUIRED" and nothing else.
-3. Keep it brief, constructive, and actionable. Do not add general greeting text or conversational filler.
-`;
-
-    const userMsg = `Current agent trajectory / user query:
-"${queryText}"`;
-
-    // Try local Ollama first, fallback to OpenRouter or other configuration
-    let llmConfig = {
-        provider: 'ollama',
-        model: process.env.COMPLETION_MODEL || process.env.PROACTIVE_MODEL || 'qwen2.5-coder:7b',
-        apiUrl: process.env.COMPLETION_URL
-            || (process.env.OLLAMA_URL 
-                ? `${process.env.OLLAMA_URL.replace(/\/$/, '')}/v1/chat/completions` 
-                : 'http://localhost:11434/v1/chat/completions'),
-        apiKey: process.env.COMPLETION_API_KEY || null,
-        maxTokens: 1000,
-        temperature: 0.1
-    };
-
-    // If OLLAMA_URL is not set but OPENROUTER_API_KEY is present, default to OpenRouter
-    if (process.env.OPENROUTER_API_KEY && !process.env.OLLAMA_URL && !process.env.COMPLETION_URL && !process.env.USE_LOCAL_OLLAMA_ONLY) {
-        llmConfig = {
-            provider: 'openai',
-            apiKey: process.env.OPENROUTER_API_KEY,
-            apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
-            model: process.env.COMPLETION_MODEL || process.env.PROACTIVE_MODEL || 'google/gemini-2.5-flash',
-            maxTokens: 1000,
-            temperature: 0.1
-        };
+    for (const rule of candidateRules) {
+        // Extract key terms (words > 4 chars) from rule content
+        const words = rule.content.toLowerCase().split(/\W+/).filter(w => w.length > 4 && !['should', 'always', 'never', 'before', 'after'].includes(w));
+        const matchedWord = words.find(w => lowerQuery.includes(w));
+        if (matchedWord) {
+            activeViolations.push(rule);
+        }
+        if (activeViolations.length >= 3) break;
     }
 
-    try {
-        console.error(`[krusch-context-mcp] Querying proactive auditor (model: ${llmConfig.model})...`);
-        const responseText = await chat(systemPrompt, userMsg, llmConfig);
-        return { content: [{ type: "text", text: responseText.trim() }] };
-    } catch (err) {
-        console.error("[krusch-context-mcp] Proactive audit LLM call failed:", err.message);
-        // Fail-safe: if the LLM call fails, return NO_NUDGES_REQUIRED so execution is not blocked
+    if (activeViolations.length === 0) {
         return { content: [{ type: "text", text: "NO_NUDGES_REQUIRED" }] };
     }
-}
 
-/**
- * Logs developer/agent feedback for proactive nudges to capture alignment signals.
- * Writes a state of category 'alignment_signal' containing the audited query as content,
- * and the nudge feedback metadata inside action_trace.
- *
- * @param {object} args
- * @param {string} args.query_text - The audited query
- * @param {string} args.nudge_text - The warning nudge text
- * @param {boolean} args.user_approved - Whether the nudge was approved/helpful
- * @param {boolean} args.agent_corrected - Whether the agent corrected its trajectory
- * @param {string} [args.correction_diff] - Optional diff showing correction
- * @param {string} [args.project] - Optional project association
- */
-export async function handleNudgeFeedback({ query_text, nudge_text, user_approved, agent_corrected, correction_diff, project }) {
-    if (!query_text || !nudge_text) {
-        throw new McpError(ErrorCode.InvalidParams, "Missing required parameters 'query_text' and 'nudge_text'");
+    // 5. Format concise Markdown findings (capped to 1-3)
+    let output = `### 🛡️ Invariant Check (${file_path || hook})\n\n`;
+    output += `Found ${activeViolations.length} relevant active invariant(s) for this action:\n\n`;
+
+    for (const v of activeViolations) {
+        output += `* **Rule #${v.id}** [${v.category}]: ${v.content}\n`;
     }
+    output += `\n*If this nudge is unhelpful or a false positive, call 'nudge' with action: 'feedback', rule_id: '<id>', feedback: 'false_positive'.*`;
 
-    const action_trace = {
-        nudge_text,
-        user_approved: !!user_approved,
-        agent_corrected: !!agent_corrected,
-        correction_diff: correction_diff || null,
-        timestamp: new Date().toISOString()
+    return {
+        content: [{ type: "text", text: output }]
     };
-
-    // Use writeState from v2-engine to persist the alignment signal
-    return await writeState({
-        content: query_text,
-        category: 'alignment_signal',
-        author_id: 'proactive-auditor',
-        action_trace,
-        project: project || null
-    });
 }
-
-/**
- * Analyzes the execution trajectory of a memory state using STRACE principles.
- * Identifies root cause steps where errors first occurred or where confidence dropped.
- *
- * @param {object} args
- * @param {string} args.memory_id - The UUID of the leaf/head memory to analyze.
- * @returns {Promise<{content: Array}>} MCP tool response
- */
-export async function handleAnalyzeTrajectory({ memory_id }) {
-    if (!memory_id) {
-        throw new McpError(ErrorCode.InvalidParams, "Missing required parameter 'memory_id'");
-    }
-
-    const client = await pool.connect();
-    try {
-        // Query the parent-child chain (provenance) of the memory, including action_trace
-        const queryStr = `
-            WITH RECURSIVE provenance_tree AS (
-                SELECT id, parent_id, version_id, author_id, source_ref, created_at, content, status, action_trace
-                FROM interaction_memory
-                WHERE id = $1
-                UNION ALL
-                SELECT m.id, m.parent_id, m.version_id, m.author_id, m.source_ref, m.created_at, m.content, m.status, m.action_trace
-                FROM interaction_memory m
-                INNER JOIN provenance_tree pt ON pt.parent_id = m.id
-            )
-            SELECT * FROM provenance_tree ORDER BY version_id ASC;
-        `;
-        const res = await client.query(queryStr, [memory_id]);
-        if (res.rows.length === 0) {
-            return { content: [{ type: "text", text: `Error: Memory ID '${memory_id}' not found.` }], isError: true };
-        }
-
-        let report = `### 📊 Structural Trajectory Analysis (STRACE) for Memory ${memory_id.substring(0, 8)}\n\n`;
-        report += `Total versions traced: **${res.rows.length}**\n\n`;
-
-        const faults = [];
-        let totalSteps = 0;
-
-        for (const row of res.rows) {
-            report += `#### Version ${row.version_id} (Author: ${row.author_id}, Status: ${row.status})\n`;
-            report += `- **Created At:** ${row.created_at.toISOString()}\n`;
-            if (row.source_ref) {
-                report += `- **Source Ref:** \`${row.source_ref}\`\n`;
-            }
-
-            let trace = [];
-            if (row.action_trace) {
-                try {
-                    trace = typeof row.action_trace === 'string' ? JSON.parse(row.action_trace) : row.action_trace;
-                } catch(e) {
-                    report += `  - ⚠️ Failed to parse action trace JSON.\n`;
-                }
-            }
-
-            if (!Array.isArray(trace)) {
-                trace = trace ? [trace] : [];
-            }
-
-            if (trace.length === 0) {
-                report += `  - *No action trace logged for this version.*\n`;
-                continue;
-            }
-
-            report += `- **Action Trace Steps:**\n`;
-            for (const step of trace) {
-                totalSteps++;
-                const stepIdx = step.step_index || step.step || totalSteps;
-                const actionName = step.action || step.tool || 'unknown_action';
-                const status = step.status || (step.success === false ? 'failed' : 'success');
-                const resultText = step.result || step.output || step.error || '';
-                const confidence = step.confidence !== undefined ? step.confidence : 1.0;
-
-                const statusEmoji = status === 'failed' || resultText.toLowerCase().includes('error') || resultText.toLowerCase().includes('failed') ? '❌' : '✅';
-                
-                report += `  ${statusEmoji} **Step ${stepIdx}:** \`${actionName}\` (Confidence: ${confidence.toFixed(2)})\n`;
-                if (step.args) {
-                    report += `    - **Arguments:** \`${JSON.stringify(step.args)}\`\n`;
-                }
-
-                // If step failed or output contains error, log as potential causal fault node
-                const isError = status === 'failed' || resultText.toLowerCase().includes('error') || resultText.toLowerCase().includes('failed') || resultText.toLowerCase().includes('exception');
-                if (isError) {
-                    faults.push({
-                        version: row.version_id,
-                        step: stepIdx,
-                        action: actionName,
-                        confidence,
-                        snippet: resultText.substring(0, 200)
-                    });
-                }
-            }
-            report += `\n`;
-        }
-
-        // Causal Localization & Fault Isolation
-        report += `### 🔍 Causal Fault Isolation\n\n`;
-        if (faults.length === 0) {
-            report += `✅ **No step-level failures or anomalies detected in the trajectory.**\n`;
-        } else {
-            report += `⚠️ Found **${faults.length}** anomaly/failure steps in the execution graph:\n\n`;
-            for (const fault of faults) {
-                report += `- **[Version ${fault.version}, Step ${fault.step}]** \`${fault.action}\` (Confidence: ${fault.confidence.toFixed(2)}):\n`;
-                report += `  > *Error Snip:* \`${fault.snippet.replace(/\n/g, ' ')}\`\n`;
-            }
-            
-            // Highlight the root cause (earliest version, earliest step)
-            const root = faults[0];
-            report += `\n🎯 **STRACE Root Cause Suggestion:** The trajectory drift likely originated at **Version ${root.version}, Step ${root.step}** during the execution of \`${root.action}\`.\n`;
-        }
-
-        return { content: [{ type: "text", text: report }] };
-    } catch (err) {
-        throw new McpError(ErrorCode.InternalError, `Trajectory analysis database error: ${err.message}`);
-    } finally {
-        client.release();
-    }
-}
-

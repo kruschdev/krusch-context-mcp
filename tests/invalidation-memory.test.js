@@ -24,9 +24,11 @@ test('MobileMem Memory Invalidation & Superseding Engine', async (t) => {
             content: `Initial Rate Rule (${keywordMarker}): Hourly rate for ad-hoc maintenance is $45/hour.`,
             project: testProject,
             tags: ['billing', 'rates', 'v1'],
-            _embedding: mockEmbedding
+            _embedding: mockEmbedding,
+            force: true
         });
         assert.ok(res.content[0].text.includes('Successfully saved memory to SQLite'));
+
 
         const db = await getProjectDb(testProject);
         const row = db.prepare(`SELECT id FROM ide_agent_memory WHERE content LIKE ? ORDER BY id DESC LIMIT 1`).get(`%${keywordMarker}%`);
