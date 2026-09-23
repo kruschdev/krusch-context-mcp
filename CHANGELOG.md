@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-09-23
+
+### Added
+- **Sovereign Triad Companion Suite**:
+  - Integrated `krusch-nexus` (Universal Document Ingestion & Citation Spine, 6 tools).
+  - Integrated `krusch-law` (Legal Intelligence & Statute-to-Code Traceability, 8 tools).
+  - Integrated `krusch-biz` (Corporate Intelligence, Controlling Clause Precedence & Diffing, 7 tools).
+  - Integrated L2 Neural Semantic Router (`krusch_context_semantic_route`, 3 tools) with calibrated centroids for code, deep reasoning, high-risk, and sovereign domains.
+  - Added proactive trajectory auditor guardrails in `krusch_context_proactive_nudge` for ungrounded citations, contract drafting, and statutes.
+  - Added Sovereign Triad presets (`sovereign`, `triad`, `ecosystem`) mounting Core + Law + Nexus + Biz + Semantic Router (37 tools total).
+
+### Changed
+- **Architectural Separation of Research Machinery**:
+  - Extracted 15 experimental research engines (AgentDebugX, DataFlow, Setwise, AREX, ACM, Teacher Distillation, Multi-Agent Resilience Gate) to the dedicated standalone companion package [`krusch-research-mcp`](file:///home/krusch/homelab/projects/krusch-research-mcp).
+  - Folded in-memory token deduplication (`selectMinimalCoveringSet`) directly into `src/prune-helper.js` for server-side token budget packing in `unifiedRetrieve`.
+  - Moved `src/extensions/company-brain/v2-engine.js` to internal `src/v2-engine.js` for interaction memory writes, eliminating exposed extension overhead.
+  - Pruned stale companion servers (`skills-docs`, `session-bridge`, `company-brain`).
+  - Streamlined `krusch-context-mcp` product surface to strictly 13 core daily driver tools (~900 tokens) and companion sovereign domain extensions.
+  - Updated tool contract tests (`tests/tool-contract.test.js`) to enforce 0 research tools, 0 collisions, and audited documentation against stale full-suite claims.
+
 ## [1.6.3] - 2026-09-18
 
 ### Added

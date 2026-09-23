@@ -12,7 +12,7 @@ import { extension } from "./index.js";
 
 async function main() {
   const server = new Server(
-    { name: "krusch-polygres-cloud-mcp", version: "1.6.3" },
+    { name: "krusch-polygres-cloud-mcp", version: "1.7.0" },
     { capabilities: { tools: {} } }
   );
 
