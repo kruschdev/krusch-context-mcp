@@ -12,7 +12,7 @@ import { extension } from "./index.js";
 
 async function main() {
   const server = new Server(
-    { name: "krusch-nexus-companion-mcp", version: "1.0.0" },
+    { name: "krusch-nexus-companion-mcp", version: "0.2.3" },
     { capabilities: { tools: {} } }
   );
 

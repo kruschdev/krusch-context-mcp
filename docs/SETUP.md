@@ -16,7 +16,7 @@ cp .env.example .env
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `KRUSCH_PROFILE` | Tool exposure profile (`core`, `extended`, `full`) | `core` |
+| `KRUSCH_PROFILE` | Tool exposure profile (`core`, `extended`, `sovereign`) | `core` |
 | `POLYGRES_PROJECT_ID` | Polygres Cloud project identifier (auto-configures runtime & usage tools) | *(none)* |
 | `POLYGRES_RUNTIME_URL` | Polygres Cloud Runtime REST API endpoint (`https://<id>.api.db.polygres.com/v1`) | *(none)* |
 | `POLYGRES_API_KEY` | Polygres Cloud authentication API key | *(none)* |
@@ -99,7 +99,7 @@ Krusch Context MCP natively bundles the complete PG-Git engine, eliminating the 
 Because Krusch Context MCP and standalone [PG-Git](https://github.com/kruschdev/pg-git) (`pg-git-mcp@1.1.0`) share the exact same PostgreSQL schema (`repositories`, `blobs`, `code_symbols`, `code_symbol_edges`, `trees`, `commits`, `branches`), you can:
 - Ingest repositories using `npm run snapshot` in `krusch-context-mcp`.
 - Query those same repositories using standalone `pg-git` tools (`pg_git_search_code`, `pg_git_search_symbols`, `pg_git_dependency_graph`) in single-purpose IDE setups.
-- Use Krusch Context MCP for comprehensive, unified context orchestration (episodic memory + codebase search + AST symbols + holographic steering + AI Watch research engines) in full pair-programming agents.
+- Use Krusch Context MCP for comprehensive, unified context orchestration (episodic memory + codebase search + AST symbols + holographic steering + proactive trajectory auditing) in daily pair-programming sessions.
 
 While Ollama is the default choice to minimize setup friction (it manages model caching, GPU VRAM offloading, and on-demand model concurrency/swapping), you can route requests to any OpenAI-compatible API or local server (like `llama.cpp`'s `llama-server`, LM Studio, or vLLM).
 

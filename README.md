@@ -225,8 +225,8 @@ Add the server to your IDE's MCP configuration.
 
 > [!NOTE]
 > **Enabling Companion Extensions**:
-> - **In-process**: Pass `--extensions=polygres-cloud,research` in `args` or set `KRUSCH_EXTENSIONS=...`.
-> - **Dedicated Companion MCP Servers (Recommended)**: Add separate server entries pointing to `src/extensions/<name>/server.js` (e.g. `npm run start:research`, `npm run start:cloud`).
+> - **In-process**: Pass `--extensions=nexus,law,biz,polygres-cloud` in `args` or set `KRUSCH_EXTENSIONS=...`.
+> - **Dedicated Companion MCP Servers (Recommended)**: Add separate server entries pointing to `src/extensions/<name>/server.js` (e.g. `npm run start:nexus`, `npm run start:law`, `npm run start:biz`, `npm run start:cloud`, `npm run start:router`).
 
 Restart your IDE — your agent now has immediate access to the **13 core context tools** with zero prompt bloat (~900 tokens).
 
@@ -396,8 +396,8 @@ For complete parameter types, input schemas, and JSON examples, see **[TOOL_REFE
 | :--- | :--- | :---: | :--- |
 | **`nexus`** | `npm run start:nexus` | **6** | KruschNexus sovereign citation spine: universal document ingestion (`ingest_file`), workspace isolation (`list_workspaces`), page and character span verification (`verify_span`), and OCR layout inspection (`get_ingest_report`, `search_corpus`). |
 | **`biz`** | `npm run start:biz` | **7** | KruschBiz sovereign corporate intelligence: contract search (`search_contracts`), controlling clause resolution (`resolve_controlling_clause`), clause conflict detection (`detect_conflicts`), side-by-side diffing (`diff_instruments`), and deal briefs (`draft_deal_brief`, `list_deals`). |
-| **`law`** | `npm run start:law` | **8** | KruschLaw sovereign legal intelligence: statutory graph exploration (`get_statute_graph`), deterministic jurisdiction machine (`evaluate_jurisdiction`), claim verification (`verify_claim`), code traceability (`get_traceability`), citations (`search_citations`, `extract_citations`), and risk analysis (`analyze_risk`). |
-| **`semantic-router`** | `npm run start:router` | **3** | L2 Neural Semantic Router: low-overhead domain intent classification (`semantic_route`), dynamic archetype centroid registration (`register_centroid`), and router inspection (`list_centroids`). |
+| **`law`** | `npm run start:law` | **8** | KruschLaw sovereign legal intelligence: municipal codes (`search_ordinances`), section text (`get_section`), grounded briefs (`draft_grounded_brief`), assertion audits (`verify_assertion_grounding`), memory freshness (`flag_stale_memories`, `review_stale_queue`, `resolve_stale_memory`), and code traceability (`get_code_traceability`). |
+| **`semantic-router`** | `npm run start:router` | **3** | L2 Neural Semantic Router: pgvector cosine prompt classification (`semantic_route`), dynamic archetype centroid registration (`register_semantic_centroid`), and centroid inspection (`list_semantic_centroids`). |
 | **`polygres-cloud`** | `npm run start:cloud` | **5** | Live microcredit quota tracking (`usage`), in-engine semantic search (`search`), in-database model catalog (`models`), HNSW capabilities, and watched table embedding configs. |
 
 > [!NOTE]
@@ -408,7 +408,7 @@ For complete parameter types, input schemas, and JSON examples, see **[TOOL_REFE
 ## 🧪 Testing & Verification
 
 ```bash
-# Automated unit & integration tests (42 passing tests)
+# Automated unit & integration tests (76 passing tests)
 npm test
 
 # Full JSON-RPC stdio smoke test across all tools
@@ -452,18 +452,16 @@ For detailed per-query execution logs, published misses, and benchmark methodolo
 
 ---
 
-## 🔬 Research Inspirations & Theoretical Background
+## 🔬 Architectural Principles & Theoretical Background
 
-Krusch Context MCP is an engineering testbed that implements pragmatic software adaptations inspired by modern agentic systems and retrieval research:
+Krusch Context MCP implements pragmatic software adaptations inspired by modern agentic systems and retrieval research:
 
-* **Determinantal Point Processes for Diversity (DSR)**: Orthogonal skill selection balancing relevance and non-redundancy (inspired by DPP skill routing concepts).
-* **Temporal Memory & Knowledge Lineage (MobileMem)**: Fact superseding and active lineage filtering for long-running agents.
-* **Agentic Context Management (ACM)**: Lifecycle staging, compaction, and context-window token budget auditing.
-* **Failure Observability & Patch Catalogs (AgentDebugX)**: Structured error attribution and recovery pattern distribution.
-* **Direct Alignment Distillation (Direct-OPD)**: Closed-loop developer feedback updating proactive trajectory rules.
-* **Company Brain Substrates**: Multi-tier organizational memory inspired by the [Sentra Company Brain Series](https://sentra.app).
-
-> *Note: These modules represent functional homelab and product engineering adaptations designed to solve developer workflow friction, rather than formal academic benchmark reproductions.*
+* **Temporal Memory & Knowledge Lineage (MobileMem, arXiv: 2608.13606)**: Fact superseding, lineage tracking, and active invalidation filtering for long-running agents.
+* **Hybrid Reciprocal Rank Fusion (RRF)**: Merges dense vector semantic embeddings with sparse BM25 lexical tokens for robust code identifier retrieval.
+* **Structural AST Symbol Graphs**: Zero-dependency structural symbol extraction across multiple programming languages and bidirectional dependency graph walks.
+* **Minimal Covering Set Compaction**: Greedy token budget packing and context deduplication in `prune-helper.js`.
+* **Closed-Loop Proactive Auditing**: In-flight trajectory monitoring with developer feedback refinement.
+* **Sovereign Triad Cross-Domain Grounding**: Multi-domain grounding bridging documents (KruschNexus), legal statutes (KruschLaw), and corporate agreements (KruschBiz).
 
 ---
 
