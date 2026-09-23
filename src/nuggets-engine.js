@@ -181,10 +181,10 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project, pr
     combinedResults = combinedResults.slice(0, limit);
 
     if (combinedResults.length === 0) {
-        return { content: [{ type: "text", text: `=== 💎 Holographic Nudges ===\n\nNo relevant nudges found.` }] };
+        return { content: [{ type: "text", text: `=== 💎 Steering Nuggets ===\n\nNo relevant nudges found.` }] };
     }
 
-    let output = `=== 💎 Holographic Nudges ===\n`;
+    let output = `=== 💎 Steering Nuggets ===\n`;
     for (const r of combinedResults) {
         output += `\n[${r.kind}] ${r.key}:\n${r.value}\n`;
     }
