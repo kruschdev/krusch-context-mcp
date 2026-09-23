@@ -9,7 +9,10 @@ import {
   searchOrdinances,
   getSection,
   draftGroundedBrief,
-  verifyAssertionGrounding
+  verifyAssertionGrounding,
+  flagStaleMemories,
+  reviewStaleQueue,
+  resolveStaleMemory
 } from './law-engine.js';
 
 export const tools = [
@@ -107,6 +110,80 @@ export const tools = [
       },
       required: ["draft_text"]
     }
+  },
+  {
+    name: "krusch_law_flag_stale_memories",
+    description: "Flag all stored agent conclusions and working memories citing an amended statute as STALE_PENDING_REVIEW without silent deletion or automatic overwrite.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        section: { 
+          type: "string", 
+          description: "Amended statutory section (e.g. 'Section 1950.5(b)', 'OMC 8.22.360')" 
+        },
+        amendment_diff: { 
+          type: "string", 
+          description: "Optional text diff showing previous vs amended statutory terms" 
+        },
+        chaptered_bill_ref: { 
+          type: "string", 
+          description: "Legislative act or chaptered bill citation (e.g. 'Stats. 2023, ch. 290 (AB 12)')" 
+        },
+        project: { 
+          type: "string", 
+          description: "Project identifier (default: 'krusch-law')",
+          default: "krusch-law" 
+        }
+      },
+      required: ["section"]
+    }
+  },
+  {
+    name: "krusch_law_review_stale_queue",
+    description: "Inspect the queue of stored agent conclusions and working memories flagged as STALE_PENDING_REVIEW due to statutory amendments.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: { 
+          type: "string", 
+          description: "Project identifier (default: 'krusch-law')",
+          default: "krusch-law" 
+        },
+        limit: { 
+          type: "integer", 
+          description: "Maximum queue entries to inspect (default: 10)",
+          default: 10 
+        }
+      }
+    }
+  },
+  {
+    name: "krusch_law_resolve_stale_memory",
+    description: "Resolve a memory in STALE_PENDING_REVIEW status: reaffirm (restore to ACTIVE), supersede (replace with updated statutory conclusions), or invalidate.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        memory_id: { 
+          type: "integer", 
+          description: "ID of the memory record to resolve" 
+        },
+        resolution: { 
+          type: "string", 
+          enum: ["reaffirm", "supersede", "invalidate"],
+          description: "Resolution action: 'reaffirm' (still valid), 'supersede' (replace with new_content), 'invalidate' (dead rule)" 
+        },
+        new_content: { 
+          type: "string", 
+          description: "Updated memory content (required if resolution is 'supersede')" 
+        },
+        project: { 
+          type: "string", 
+          description: "Project identifier (default: 'krusch-law')",
+          default: "krusch-law" 
+        }
+      },
+      required: ["memory_id", "resolution"]
+    }
   }
 ];
 
@@ -114,7 +191,10 @@ export const handlers = new Map([
   ['krusch_law_search_ordinances', (args) => searchOrdinances(args)],
   ['krusch_law_get_section', (args) => getSection(args)],
   ['krusch_law_draft_brief', (args) => draftGroundedBrief(args)],
-  ['krusch_law_verify_grounding', (args) => verifyAssertionGrounding(args)]
+  ['krusch_law_verify_grounding', (args) => verifyAssertionGrounding(args)],
+  ['krusch_law_flag_stale_memories', (args) => flagStaleMemories(args)],
+  ['krusch_law_review_stale_queue', (args) => reviewStaleQueue(args)],
+  ['krusch_law_resolve_stale_memory', (args) => resolveStaleMemory(args)]
 ]);
 
 export const extension = {

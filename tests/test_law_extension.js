@@ -11,7 +11,10 @@ import {
   searchOrdinances,
   getSection,
   draftGroundedBrief,
-  verifyAssertionGrounding
+  verifyAssertionGrounding,
+  flagStaleMemories,
+  reviewStaleQueue,
+  resolveStaleMemory
 } from '../src/extensions/law/law-engine.js';
 
 async function runTests() {
@@ -34,13 +37,16 @@ async function runTests() {
 
   // 2. Tool structure and schemas
   console.log('  2. Validating tool definitions...');
-  assert.strictEqual(tools.length, 4, 'Should expose exactly 4 legal tools');
+  assert.strictEqual(tools.length, 7, 'Should expose exactly 7 legal tools');
   
   const toolNames = tools.map(t => t.name);
   assert.ok(toolNames.includes('krusch_law_search_ordinances'));
   assert.ok(toolNames.includes('krusch_law_get_section'));
   assert.ok(toolNames.includes('krusch_law_draft_brief'));
   assert.ok(toolNames.includes('krusch_law_verify_grounding'));
+  assert.ok(toolNames.includes('krusch_law_flag_stale_memories'));
+  assert.ok(toolNames.includes('krusch_law_review_stale_queue'));
+  assert.ok(toolNames.includes('krusch_law_resolve_stale_memory'));
 
   for (const tool of tools) {
     assert.ok(tool.name, 'Tool must have name');
@@ -69,6 +75,12 @@ async function runTests() {
 
   const emptyVerifyRes = await verifyAssertionGrounding({});
   assert.ok(emptyVerifyRes.isError, 'Missing draft_text should return isError: true');
+
+  const emptyFlagRes = await flagStaleMemories({ section: '' });
+  assert.ok(emptyFlagRes.isError, 'Missing section should return isError: true');
+
+  const emptyResolveRes = await resolveStaleMemory({});
+  assert.ok(emptyResolveRes.isError, 'Missing memory_id should return isError: true');
 
   // 5. Graceful offline degradation
   console.log('  5. Testing graceful offline handling...');

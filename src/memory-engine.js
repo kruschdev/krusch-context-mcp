@@ -28,7 +28,7 @@ export function filterActiveMemories(memories = [], options = {}) {
     }
 
     return memories.filter(mem => {
-        if (mem.status === 'INVALIDATED' || mem.status === 'SUPERSEDED') return false;
+        if (mem.status === 'INVALIDATED' || mem.status === 'SUPERSEDED' || mem.status === 'STALE_PENDING_REVIEW') return false;
         if (strictLineage && supersededIds.has(mem.id)) return false;
         if (invalidatedIds.has(mem.id)) return false;
         return true;

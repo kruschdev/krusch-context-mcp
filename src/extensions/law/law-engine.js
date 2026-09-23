@@ -5,6 +5,8 @@
  * and resilient offline error handling.
  */
 
+import { getProjectDb } from '../../sqlite-engine.js';
+
 const KRUSCHLAW_HOST = process.env.KRUSCHLAW_API_URL || 'http://127.0.0.1:8085';
 const KRUSCHLAW_KEY = process.env.KRUSCHLAW_API_KEY || '';
 
@@ -223,6 +225,207 @@ export async function verifyAssertionGrounding({ draft_text }) {
     return {
       isError: true,
       content: [{ type: "text", text: `Grounding verification unavailable: ${err.message}` }]
+    };
+  }
+}
+
+/**
+ * Flags memories citing an amended statute as STALE_PENDING_REVIEW instead of silently superseding them.
+ * Surfaces a human/agent review queue.
+ * @param {Object} args
+ * @param {string} args.section - Amended section (e.g. 'Section 1950.5(b)')
+ * @param {string} [args.amendment_diff] - Text diff of statutory amendment
+ * @param {string} [args.chaptered_bill_ref] - Legislative enactment reference
+ * @param {string} [args.project='krusch-law'] - Target project repository
+ * @returns {Promise<{content: Array<{type: string, text: string}>, isError?: boolean}>}
+ */
+export async function flagStaleMemories({ section, amendment_diff, chaptered_bill_ref, project = 'krusch-law' }) {
+  if (!section || !section.trim()) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: "Missing required section identifier." }]
+    };
+  }
+
+  const cleanSec = section.trim().replace(/^Section\s+/i, '');
+  const searchPatterns = [`%${cleanSec}%`, `%${section.trim()}%`];
+
+  let flaggedCount = 0;
+  const affectedMemories = [];
+
+  try {
+    const db = await getProjectDb(project);
+    if (db) {
+      const rows = db.prepare(`
+        SELECT id, category, content, tags, status
+        FROM ide_agent_memory
+        WHERE status = 'ACTIVE'
+          AND (content LIKE ? OR content LIKE ? OR tags LIKE ? OR tags LIKE ?)
+      `).all(searchPatterns[0], searchPatterns[1], searchPatterns[0], searchPatterns[1]);
+
+      for (const row of rows) {
+        db.prepare(`
+          UPDATE ide_agent_memory
+          SET status = 'STALE_PENDING_REVIEW'
+          WHERE id = ?
+        `).run(row.id);
+
+        flaggedCount++;
+        affectedMemories.push({
+          id: row.id,
+          category: row.category,
+          snippet: row.content.slice(0, 140) + '...'
+        });
+      }
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: `### ⚠️ KruschLaw Stale Memory Review Queue\n\n` +
+              `**Amended Section**: ${section}\n` +
+              (chaptered_bill_ref ? `**Authority Reference**: ${chaptered_bill_ref}\n` : '') +
+              `**Flagged Conclusions**: ${flaggedCount} memories set to \`STALE_PENDING_REVIEW\`\n\n` +
+              (affectedMemories.length > 0
+                ? affectedMemories.map(m => `- [Memory #${m.id}] (${m.category}): ${m.snippet}`).join('\n') + '\n\n'
+                : 'No existing active memories currently cite this provision.\n\n') +
+              (amendment_diff ? `#### Amendment Diff:\n\`\`\`diff\n${amendment_diff}\n\`\`\`\n` : '')
+      }]
+    };
+  } catch (err) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error flagging stale memories: ${err.message}` }]
+    };
+  }
+}
+
+/**
+ * Reviews the queue of memories flagged as STALE_PENDING_REVIEW due to statutory changes.
+ * @param {Object} args
+ * @param {string} [args.project='krusch-law'] - Project name
+ * @param {number} [args.limit=10] - Maximum queue items to return
+ * @returns {Promise<{content: Array<{type: string, text: string}>, isError?: boolean}>}
+ */
+export async function reviewStaleQueue({ project = 'krusch-law', limit = 10 } = {}) {
+  try {
+    const db = await getProjectDb(project);
+    if (!db) {
+      return {
+        content: [{ type: "text", text: `Project database for '${project}' not initialized.` }]
+      };
+    }
+
+    const rows = db.prepare(`
+      SELECT id, category, content, tags, updated_at
+      FROM ide_agent_memory
+      WHERE status = 'STALE_PENDING_REVIEW'
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(limit);
+
+    if (rows.length === 0) {
+      return {
+        content: [{ type: "text", text: `✅ Stale Legal Memory Queue is clean (0 conclusions pending review).` }]
+      };
+    }
+
+    const items = rows.map((r, i) => (
+      `**[${i + 1}] Memory ID #${r.id}** (${r.category})\n` +
+      `> ${r.content}\n` +
+      `*Action Required*: Use \`krusch_law_resolve_stale_memory\` with 'reaffirm', 'supersede', or 'invalidate'.`
+    )).join('\n\n---\n\n');
+
+    return {
+      content: [{
+        type: "text",
+        text: `## ⚠️ Stale Legal Memory Queue (${rows.length} pending review)\n\n` +
+              `The following stored conclusions cite amended or repealed statutes. They are paused from automated drafting until reviewed:\n\n` +
+              `${items}`
+      }]
+    };
+  } catch (err) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error reviewing stale queue: ${err.message}` }]
+    };
+  }
+}
+
+/**
+ * Resolves a memory in STALE_PENDING_REVIEW status.
+ * @param {Object} args
+ * @param {number} args.memory_id - Memory row ID to resolve
+ * @param {'reaffirm'|'supersede'|'invalidate'} args.resolution - Action to take
+ * @param {string} [args.new_content] - Required if resolution is 'supersede'
+ * @param {string} [args.project='krusch-law'] - Target project repository
+ * @returns {Promise<{content: Array<{type: string, text: string}>, isError?: boolean}>}
+ */
+export async function resolveStaleMemory({ memory_id, resolution, new_content, project = 'krusch-law' }) {
+  if (!memory_id || !resolution) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: "Both 'memory_id' and 'resolution' ('reaffirm', 'supersede', 'invalidate') are required." }]
+    };
+  }
+
+  try {
+    const db = await getProjectDb(project);
+    if (!db) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Project database for '${project}' not found.` }]
+      };
+    }
+
+    const existing = db.prepare(`SELECT * FROM ide_agent_memory WHERE id = ?`).get(memory_id);
+    if (!existing) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Memory #${memory_id} not found.` }]
+      };
+    }
+
+    if (resolution === 'reaffirm') {
+      db.prepare(`UPDATE ide_agent_memory SET status = 'ACTIVE' WHERE id = ?`).run(memory_id);
+      return {
+        content: [{ type: "text", text: `✅ Memory #${memory_id} reaffirmed and restored to ACTIVE status.` }]
+      };
+    } else if (resolution === 'invalidate') {
+      db.prepare(`UPDATE ide_agent_memory SET status = 'INVALIDATED' WHERE id = ?`).run(memory_id);
+      return {
+        content: [{ type: "text", text: `🛑 Memory #${memory_id} marked as INVALIDATED due to statutory change.` }]
+      };
+    } else if (resolution === 'supersede') {
+      if (!new_content || !new_content.trim()) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "'new_content' is required when resolution is 'supersede'." }]
+        };
+      }
+      const info = db.prepare(`
+        INSERT INTO ide_agent_memory (category, content, tags, status, supersedes_id)
+        VALUES (?, ?, ?, 'ACTIVE', ?)
+      `).run(existing.category, new_content.trim(), existing.tags, memory_id);
+
+      db.prepare(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = ? WHERE id = ?`).run(info.lastInsertRowid, memory_id);
+
+      return {
+        content: [{
+          type: "text",
+          text: `✅ Memory #${memory_id} superseded by new Memory #${info.lastInsertRowid} with updated statutory terms.`
+        }]
+      };
+    } else {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Invalid resolution '${resolution}'. Must be 'reaffirm', 'supersede', or 'invalidate'.` }]
+      };
+    }
+  } catch (err) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error resolving stale memory: ${err.message}` }]
     };
   }
 }
