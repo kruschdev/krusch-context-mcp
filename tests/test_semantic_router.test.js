@@ -94,6 +94,17 @@ test('L2 Neural Semantic Router Extension Tests', async (t) => {
     assert.ok(parsed.confidence !== undefined, 'Parsed output should contain confidence');
   });
 
+  // 7. Test Sovereign Triad Archetype Seeding
+  await t.test('seeds Sovereign Triad archetypes for Law, Nexus, and Biz', async () => {
+    const centroids = await listSemanticCentroids({ dbPool: pool });
+    const archetypes = centroids.map(c => c.archetype);
+
+    assert.ok(archetypes.includes('legal_statutory_research'), 'Should include legal_statutory_research');
+    assert.ok(archetypes.includes('nexus_document_ingestion'), 'Should include nexus_document_ingestion');
+    assert.ok(archetypes.includes('biz_contract_analysis'), 'Should include biz_contract_analysis');
+  });
+
+
   t.after(async () => {
     // Cleanup temporary unit test centroid
     await pool.query("DELETE FROM semantic_route_centroids WHERE archetype = 'unit_test_custom_devops'");

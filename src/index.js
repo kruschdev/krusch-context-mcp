@@ -187,6 +187,7 @@ export function getActiveProfile() {
   const normalized = rawProfile.toLowerCase().trim();
   if (normalized === 'full' || normalized === 'all') return 'full';
   if (normalized === 'extended' || normalized === 'standard') return 'extended';
+  if (normalized === 'sovereign' || normalized === 'triad' || normalized === 'quartet') return 'sovereign';
   if (normalized === 'ecosystem' || normalized === 'cascade') return 'ecosystem';
   if (normalized === 'router') return 'router';
   return 'core';
@@ -202,15 +203,19 @@ export function getRequestedExtensions() {
   if (profile === 'full' || rawList.includes('all')) {
     return ['all'];
   }
-  if (profile === 'ecosystem' || profile === 'router') {
-    // Curated small bundle: loads semantic-router with core tools (16 tools total) or standalone (router)
-    const exts = new Set(['semantic-router', ...rawList.filter(e => e !== 'none' && e !== 'no-polygres')]);
+  if (profile === 'router') {
+    return ['semantic-router'];
+  }
+  if (profile === 'sovereign' || profile === 'ecosystem') {
+    // Sovereign Quartet bundle: loads semantic-router, law, nexus, and biz
+    const exts = new Set(['semantic-router', 'law', 'nexus', 'biz', ...rawList.filter(e => e !== 'none' && e !== 'no-polygres')]);
     return Array.from(exts);
   }
 
   const exts = new Set(rawList.filter(e => e !== 'none' && e !== 'no-polygres'));
   return Array.from(exts);
 }
+
 
 // Core Tool Schemas
 export const CORE_TOOL_DEFINITIONS = [

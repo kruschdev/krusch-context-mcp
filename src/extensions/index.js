@@ -10,6 +10,8 @@ import skillsDocs from './skills-docs/index.js';
 import research from './research/index.js';
 import semanticRouter from './semantic-router/index.js';
 import law from './law/index.js';
+import nexus from './nexus/index.js';
+import biz from './biz/index.js';
 
 const EXTENSIONS_REGISTRY = new Map([
   ['company-brain', companyBrain],
@@ -20,6 +22,10 @@ const EXTENSIONS_REGISTRY = new Map([
   ['semantic-router', semanticRouter],
   ['law', law],
   ['krusch-law', law],
+  ['nexus', nexus],
+  ['krusch-nexus', nexus],
+  ['biz', biz],
+  ['krusch-biz', biz],
   // Friendly aliases
   ['ai-watch', research],
   ['v2', companyBrain],
@@ -28,12 +34,16 @@ const EXTENSIONS_REGISTRY = new Map([
   ['session', sessionBridge],
   ['router', semanticRouter],
   ['neural-router', semanticRouter],
-  ['legal', law]
+  ['legal', law],
+  ['citation', nexus],
+  ['corporate', biz],
+  ['commercial', biz]
 ]);
 
 export function getAvailableExtensionNames() {
-  return ['research', 'company-brain', 'polygres-cloud', 'session-bridge', 'skills-docs', 'semantic-router', 'law'];
+  return ['research', 'company-brain', 'polygres-cloud', 'session-bridge', 'skills-docs', 'semantic-router', 'law', 'nexus', 'biz'];
 }
+
 
 export function resolveExtension(name) {
   const normalized = name.toLowerCase().trim();

@@ -429,3 +429,49 @@ export async function resolveStaleMemory({ memory_id, resolution, new_content, p
     };
   }
 }
+
+/**
+ * Retrieves curated statute-to-code traceability links binding codebase symbols to governing statutes.
+ * @param {Object} args
+ * @param {string} [args.doctrine] - Doctrine filter (e.g. 'Security Deposits', 'Just Cause')
+ * @param {string} [args.status] - Status filter (e.g. 'manually_verified')
+ * @returns {Promise<{content: Array<{type: string, text: string}>, isError?: boolean}>}
+ */
+export async function getCodeTraceability({ doctrine, status } = {}) {
+  const params = new URLSearchParams();
+  if (doctrine) params.set('doctrine', doctrine.trim());
+  if (status) params.set('status', status.trim());
+
+  try {
+    const data = await fetchKruschLaw(`/api/compliance/traceability?${params.toString()}`);
+
+    if (!Array.isArray(data) || data.length === 0) {
+      return {
+        content: [{ type: "text", text: "No statute-to-code traceability bindings found matching criteria." }]
+      };
+    }
+
+    const items = data.map((t, i) => (
+      `**[${i + 1}] Binding #${t.id} — Doctrine: \`${t.doctrine}\`**\n` +
+      `- **Statute ID**: ${t.statute_id || 'N/A'}\n` +
+      `- **Code Symbol**: \`${t.symbol_id || 'N/A'}\`\n` +
+      `- **Repository / File**: \`${t.repository}\` → \`${t.file_path}\`\n` +
+      `- **Status**: \`${t.status}\` | **Reviewed By**: ${t.reviewed_by || 'Unreviewed'} (${t.reviewed_at ? new Date(t.reviewed_at).toLocaleDateString() : 'N/A'})\n` +
+      `- **Statutory Digest**: ${t.statutory_digest || 'N/A'}\n` +
+      `- **Attestation Notes**: ${t.notes || 'None'}`
+    )).join('\n\n---\n\n');
+
+    return {
+      content: [{
+        type: "text",
+        text: `### 📜 Statute-to-Code Traceability Table (${data.length} bindings)\n\n${items}`
+      }]
+    };
+  } catch (err) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error retrieving code traceability: ${err.message}` }]
+    };
+  }
+}
+

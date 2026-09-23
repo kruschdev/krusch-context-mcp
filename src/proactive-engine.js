@@ -262,9 +262,62 @@ export async function handleProactiveNudge({ history, project }) {
         }
     }
 
-    if (legalGroundingBlock.trim()) {
-        contextBlock += `### 4. Regulatory & Statutory Guardrails\n${legalGroundingBlock}`;
+    // 3c. Commercial & Contract Precedence Check (KruschBiz Grounding)
+    const COMMERCIAL_PATTERN = /(?:MSA|SLA|NDA|Master Services Agreement|Service Level Agreement|Non-Disclosure|Limitation of Liability|Net \d+|Payment Terms|Indemnification)/i;
+    let bizGroundingBlock = "";
+    if (COMMERCIAL_PATTERN.test(queryText)) {
+        const kruschbizUrl = process.env.KRUSCHBIZ_API_URL || process.env.KRUSCHBIZ_URL || 'http://127.0.0.1:8086';
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            const clausesRes = await fetch(`${kruschbizUrl}/api/clauses?q=${encodeURIComponent(queryText)}&limit=3`, {
+                signal: controller.signal,
+                headers: { 'X-Tenant-ID': 'org_default' }
+            }).then(r => r.ok ? r.json() : null).catch(() => null);
+            clearTimeout(timeoutId);
+
+            if (Array.isArray(clausesRes) && clausesRes.length > 0) {
+                bizGroundingBlock += `#### Governing Commercial Agreements (KruschBiz)\n`;
+                for (const c of clausesRes) {
+                    bizGroundingBlock += `- [${c.section || 'Clause'}] ${c.title || c.agreement_type} (${c.counterparty || c.organization}) — ${c.authority_class || 'governing_agreement'}${c.superseded ? ' [🛑 SUPERSEDED]' : ''}\n`;
+                }
+                bizGroundingBlock += `\n`;
+            }
+        } catch (_) {
+            // Non-blocking: continue if KruschBiz backend is offline
+        }
     }
+
+    // 3d. Citation Spine & Workspace Check (KruschNexus Grounding)
+    const CITATION_PATTERN = /(?:workspace\s+['"][^'"]+['"]|cite span|char_start|char_end|page \d+ of |scan(?:ned)? document|pdf exhibit)/i;
+    let nexusGroundingBlock = "";
+    if (CITATION_PATTERN.test(queryText)) {
+        const nexusUrl = process.env.NEXUS_API_URL || process.env.NEXUS_URL || 'http://127.0.0.1:8000';
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            const wsRes = await fetch(`${nexusUrl}/v1/workspaces`, {
+                signal: controller.signal
+            }).then(r => r.ok ? r.json() : null).catch(() => null);
+            clearTimeout(timeoutId);
+
+            if (Array.isArray(wsRes) && wsRes.length > 0) {
+                nexusGroundingBlock += `#### Document Workspaces & Citation Anchors (KruschNexus)\n`;
+                for (const w of wsRes.slice(0, 3)) {
+                    nexusGroundingBlock += `- Workspace \`${w.name}\` (${w.doc_count || 0} docs, ${w.chunk_count || 0} chunks)\n`;
+                }
+                nexusGroundingBlock += `\n`;
+            }
+        } catch (_) {
+            // Non-blocking: continue if KruschNexus backend is offline
+        }
+    }
+
+    let sovereignBlock = legalGroundingBlock + bizGroundingBlock + nexusGroundingBlock;
+    if (sovereignBlock.trim()) {
+        contextBlock += `### 4. Sovereign Precedence & Grounding Guardrails\n${sovereignBlock}`;
+    }
+
 
     // If no context exists to audit against, return NO_NUDGES_REQUIRED
     if (!contextBlock.trim()) {

@@ -128,6 +128,42 @@ export const DEFAULT_ARCHETYPES = [
     exemplar: 'Draft a citation-grounded 4-part legal brief analyzing tenant habitability claims under California Civil Code 1941.1.',
     confidenceThreshold: 0.68,
     metadata: { domain: 'law', server: 'krusch-law', extension: 'law', tools: ['krusch_law_draft_brief', 'krusch_law_verify_grounding'] }
+  },
+  {
+    archetype: 'nexus_document_ingestion',
+    tier: 'specialist',
+    role: 'citation_spine',
+    label: 'Document Ingestion & Workspace Parsing',
+    exemplar: 'Ingest a multi-page PDF document into the workspace, extract text layouts with OCR, and compute character span offsets.',
+    confidenceThreshold: 0.65,
+    metadata: { domain: 'ingestion', server: 'krusch-nexus', extension: 'nexus', tools: ['krusch_nexus_ingest_file', 'krusch_nexus_list_workspaces'] }
+  },
+  {
+    archetype: 'nexus_citation_verification',
+    tier: 'heavy',
+    role: 'citation_spine',
+    label: 'Citation Span & Bounding Box Verification',
+    exemplar: 'Verify whether this quoted clause matches the exact physical page and character span coordinates in the ingested contract PDF.',
+    confidenceThreshold: 0.66,
+    metadata: { domain: 'citations', server: 'krusch-nexus', extension: 'nexus', tools: ['krusch_nexus_verify_span', 'krusch_nexus_search_corpus'] }
+  },
+  {
+    archetype: 'biz_contract_analysis',
+    tier: 'specialist',
+    role: 'commercial_counsel',
+    label: 'Commercial Contract & Clause Analysis',
+    exemplar: 'Search our vendor MSAs and SLAs for limitation of liability caps, Net 30 payment terms, and indemnification exclusions.',
+    confidenceThreshold: 0.65,
+    metadata: { domain: 'commercial', server: 'krusch-biz', extension: 'biz', tools: ['krusch_biz_search_contracts', 'krusch_biz_get_clause'] }
+  },
+  {
+    archetype: 'biz_controlling_resolution',
+    tier: 'heavy',
+    role: 'commercial_counsel',
+    label: 'Controlling Agreement & Precedence Resolution',
+    exemplar: 'Resolve which contract amendment controls our hosting agreement payment terms and detect conflicting clauses across active instruments.',
+    confidenceThreshold: 0.68,
+    metadata: { domain: 'commercial', server: 'krusch-biz', extension: 'biz', tools: ['krusch_biz_resolve_controlling_clause', 'krusch_biz_detect_conflicts', 'krusch_biz_diff_instruments'] }
   }
 ];
 
@@ -157,12 +193,11 @@ export async function initSemanticRouterTable(dbPool = pool) {
     ON semantic_route_centroids USING hnsw (embedding vector_cosine_ops);
   `);
 
-  // Auto-seed default archetypes if table is empty
-  const countRes = await dbPool.query('SELECT COUNT(*) FROM semantic_route_centroids');
-  if (parseInt(countRes.rows[0].count, 10) === 0) {
-    console.error('[krusch-semantic-router] Seeding default routing centroids...');
-    for (const item of DEFAULT_ARCHETYPES) {
-      try {
+  // Seed any missing default archetypes
+  for (const item of DEFAULT_ARCHETYPES) {
+    try {
+      const existsRes = await dbPool.query('SELECT 1 FROM semantic_route_centroids WHERE archetype = $1', [item.archetype]);
+      if (existsRes.rowCount === 0) {
         const vec = await getEmbedding(item.exemplar);
         if (vec && vec.length === dim) {
           await dbPool.query(`
@@ -181,12 +216,13 @@ export async function initSemanticRouterTable(dbPool = pool) {
             JSON.stringify(item.metadata || {})
           ]);
         }
-      } catch (err) {
-        console.error(`[krusch-semantic-router] Failed seeding centroid '${item.archetype}':`, err.message);
       }
+    } catch (err) {
+      console.error(`[krusch-semantic-router] Failed seeding centroid '${item.archetype}':`, err.message);
     }
   }
 }
+
 
 /**
  * Classify an unstructured prompt into an L2 routing recommendation.

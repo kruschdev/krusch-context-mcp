@@ -37,7 +37,7 @@ async function runTests() {
 
   // 2. Tool structure and schemas
   console.log('  2. Validating tool definitions...');
-  assert.strictEqual(tools.length, 7, 'Should expose exactly 7 legal tools');
+  assert.strictEqual(tools.length, 8, 'Should expose exactly 8 legal tools');
   
   const toolNames = tools.map(t => t.name);
   assert.ok(toolNames.includes('krusch_law_search_ordinances'));
@@ -47,6 +47,8 @@ async function runTests() {
   assert.ok(toolNames.includes('krusch_law_flag_stale_memories'));
   assert.ok(toolNames.includes('krusch_law_review_stale_queue'));
   assert.ok(toolNames.includes('krusch_law_resolve_stale_memory'));
+  assert.ok(toolNames.includes('krusch_law_get_traceability'));
+
 
   for (const tool of tools) {
     assert.ok(tool.name, 'Tool must have name');

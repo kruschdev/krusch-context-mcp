@@ -12,8 +12,10 @@ import {
   verifyAssertionGrounding,
   flagStaleMemories,
   reviewStaleQueue,
-  resolveStaleMemory
+  resolveStaleMemory,
+  getCodeTraceability
 } from './law-engine.js';
+
 
 export const tools = [
   {
@@ -184,6 +186,23 @@ export const tools = [
       },
       required: ["memory_id", "resolution"]
     }
+  },
+  {
+    name: "krusch_law_get_traceability",
+    description: "Query curated statute-to-code traceability links, binding California housing statutes directly to codebase symbols and files with attorney review attestations.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        doctrine: {
+          type: "string",
+          description: "Optional doctrine filter (e.g. 'Security Deposits', 'Just Cause')"
+        },
+        status: {
+          type: "string",
+          description: "Optional verification status filter (e.g. 'manually_verified', 'pending_review')"
+        }
+      }
+    }
   }
 ];
 
@@ -194,8 +213,10 @@ export const handlers = new Map([
   ['krusch_law_verify_grounding', (args) => verifyAssertionGrounding(args)],
   ['krusch_law_flag_stale_memories', (args) => flagStaleMemories(args)],
   ['krusch_law_review_stale_queue', (args) => reviewStaleQueue(args)],
-  ['krusch_law_resolve_stale_memory', (args) => resolveStaleMemory(args)]
+  ['krusch_law_resolve_stale_memory', (args) => resolveStaleMemory(args)],
+  ['krusch_law_get_traceability', (args) => getCodeTraceability(args)]
 ]);
+
 
 export const extension = {
   name: "law",

@@ -13,7 +13,7 @@
 
 **The 13-tool Sovereign Context Engine for Coding Agents** (~900 prompt tokens): hybrid codebase retrieval, persistent episodic memory with self-healing superseding/invalidation, persistent steering nuggets, and proactive trajectory auditing. 100% local-first on PostgreSQL + Ollama, with optional cloud runtimes.
 
-Architecture: **Sovereign Core (13 tools, default)** → **Extended Core (26 tools)** → **Modular Companion Extensions** (`law`, `research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`, `semantic-router`).
+Architecture: **Sovereign Core (13 tools, default)** → **Extended Core (26 tools)** → **Modular Companion Extensions** (`law`, `nexus`, `biz`, `research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`, `semantic-router`).
 
 ---
 
@@ -34,10 +34,10 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 | Profile / Mode | Tools Exposed | Default | System Prompt Cost | Intended Use |
 | :--- | :---: | :---: | :---: | :--- |
 | **`core`** *(Sovereign Default)* | **13 tools** | ✅ **Yes** | **~900 tokens** | High-signal daily drivers using local PostgreSQL + local Ollama: hybrid retrieval, episodic memory, active superseding & invalidation, state compilation, steering nuggets, structural symbol search, dependency graph, health, and proactive guardrails. |
-| **`ecosystem`** *(Cascade / Router)* | **16 tools** | ❌ No | **~1,150 tokens** | Curated daily drivers + L2 Neural Semantic Router (`krusch_context_semantic_route`, centroid registration). Bridges cascade routing with zero full-suite bloat. |
+| **`sovereign`** / **`triad`** / **`ecosystem`** | **37 tools** | ❌ No | **~2,500 tokens** | Sovereign Quartet substrate: Curated 13 daily drivers + Neural Semantic Router (3) + KruschLaw (8) + KruschNexus (6) + KruschBiz (7) loaded in-process. |
 | **`extended`** | **26 tools** | ❌ No | ~1,800 tokens | Adds full administrative memory inspection (`list`, `delete`, `update`, `consolidate`), Git tree/blob inspection, cited thinking, and alignment feedback. |
-| **`extensions`** | **Companion MCPs** | ❌ No | On-demand | Specialized domains running as independent companion servers or loaded dynamically via `--extensions=...` (`law`, `research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`, `semantic-router`). |
-| **`full`** | **68 tools** | ❌ No | ~4,500 tokens | Complete monolithic development suite with all companion extensions loaded in-process. |
+| **`extensions`** | **Companion MCPs** | ❌ No | On-demand | Specialized domains running as independent companion servers or loaded dynamically via `--extensions=...` (`law`, `nexus`, `biz`, `semantic-router`, `research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`). |
+| **`full`** | **61 tools** | ❌ No | ~4,200 tokens | Complete monolithic development suite with all 5 standard companion extensions loaded in-process. |
 
 > [!TIP]
 > **Modular Companion Pattern (Recommended)**: Run `krusch-context` for the core 13-tool daily memory loop, and launch companion servers (`npm run start:law`, `npm run start:research`, `npm run start:router`, `npm run start:cloud`, etc.) only for sessions that need specialized tools.
@@ -103,6 +103,9 @@ graph TD;
     end
 
     subgraph "Modular Companion Extensions"
+        MCP -. "companion / flag" .-> ExtNexus["📄 KruschNexus (6 tools)<br/>Ingest & citation spine"];
+        MCP -. "companion / flag" .-> ExtBiz["💼 KruschBiz (7 tools)<br/>Contracts & conflict resolver"];
+        MCP -. "companion / flag" .-> ExtLaw["⚖️ KruschLaw (8 tools)<br/>Statutory & traceability"];
         MCP -. "companion / flag" .-> ExtCloud["⚡ Polygres Cloud (5 tools)<br/>Quota & in-engine search"];
         MCP -. "companion / flag" .-> ExtBrain["🧠 Company Brain (8 tools)<br/>Multi-tenant v2 graph"];
         MCP -. "companion / flag" .-> ExtResearch["🔬 Research Suite (15 tools)<br/>AgentDebugX, AREX, ACM"];
@@ -395,6 +398,10 @@ For complete parameter types, input schemas, and JSON examples, see **[TOOL_REFE
 
 | Extension | Standalone Launcher | Tools | Key Capabilities |
 | :--- | :--- | :---: | :--- |
+| **`nexus`** | `npm run start:nexus` | **6** | KruschNexus sovereign citation spine: universal document ingestion (`ingest_file`), workspace isolation (`list_workspaces`), page and character span verification (`verify_span`), and OCR layout inspection (`get_ingest_report`, `search_corpus`). |
+| **`biz`** | `npm run start:biz` | **7** | KruschBiz sovereign corporate intelligence: contract search (`search_contracts`), controlling clause resolution (`resolve_controlling_clause`), clause conflict detection (`detect_conflicts`), side-by-side diffing (`diff_instruments`), and deal briefs (`draft_deal_brief`, `list_deals`). |
+| **`law`** | `npm run start:law` | **8** | KruschLaw sovereign legal intelligence: statutory graph exploration (`get_statute_graph`), deterministic jurisdiction machine (`evaluate_jurisdiction`), claim verification (`verify_claim`), code traceability (`get_traceability`), citations (`search_citations`, `extract_citations`), and risk analysis (`analyze_risk`). |
+| **`semantic-router`** | `npm run start:router` | **3** | L2 Neural Semantic Router: low-overhead domain intent classification (`semantic_route`), dynamic archetype centroid registration (`register_centroid`), and router inspection (`list_centroids`). |
 | **`polygres-cloud`** | `npm run start:cloud` | **5** | Live microcredit quota tracking (`usage`), in-engine semantic search (`search`), in-database model catalog (`models`), HNSW capabilities, and watched table embedding configs. |
 | **`company-brain`** | `npm run start:company-brain` | **8** | Company Brain v2 Substrate: optimistic concurrency memory (`write_state`), branching conflict resolution (`resolve_conflict`), version provenance (`get_provenance`), ontology management (`update_ontology`), role lenses (`search_lens`), and graph walks (`traverse_graph`). |
 | **`research`** | `npm run start:research` | **15** | AI Watch research suite: failure observability (`AgentDebugX`), DAG mutations (`DataFlow`), minimal cover reranking (`Setwise`), deep research state (`AREX`), context lifecycle (`ACM`), teacher distillation, and resilience gating. |
