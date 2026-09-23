@@ -10,7 +10,7 @@
 > *🚀 Shifted my AI agent working memory 100% to the cloud! Powered by @Evokoa Polygres.com (Postgres + pgGraph + HNSW) & @OpenRouterAI (bge-large @ 1024-dim), krusch-context-mcp delivers infinite context to Cursor & Claude Code with zero local VRAM load! 🐘⚡*
 
 > [!NOTE]
-> **Architecture Update (v1.6.1)**: As of v1.6.1, `krusch-context-mcp` defaults to a lean **13-tool Sovereign Core** (~900 tokens). The Polygres Cloud tools are encapsulated in a standalone companion server (`npm run start:cloud`) or loaded dynamically via `--extensions=polygres-cloud`. The monolithic full suite comprises 61 tools.
+> **Architecture Update**: `krusch-context-mcp` defaults to a lean **13-tool Sovereign Core** (~900 tokens). Modular companion extensions provide domain-specific capability for Law, Nexus, Biz, Routing, and Polygres Cloud.
 
 ---
 
@@ -41,8 +41,8 @@ By pairing **[Polygres.com](https://polygres.com)** (Evokoa's AI-native PostgreS
 * **Cost Efficiency**: Priced at ~$0.01 per 1 million tokens (~1 to 2 cents per month of heavy active development).
 * **Benefit**: Zero local Ollama process overhead, zero VRAM allocation on the laptop, sub-100ms vector generation, and 100% uptime while traveling.
 
-### 3. Unified Agent Surface: `krusch-context-mcp` (61 MCP Tools Full Suite / 13 Core Default)
-* **Unified Tooling**: Exposes 61 Model Context Protocol (MCP) tools across Core (13), Extended (13), and 5 Companion Extensions: Polygres Cloud Runtime (v0.5.0), Episodic Memory (v1), Company Brain v2 Substrate, Holographic Nuggets, Native PG-Git Codebase & Structural Symbol Search, and AI Watch Research Engines (AgentDebugX, DataFlow-Harness, Rubric4Setwise, AREX, Teacher Distillation, DSR, Resilience Gate).
+### 3. Unified Agent Surface: `krusch-context-mcp` (13 Core Default + Modular Companions)
+* **Unified Tooling**: Exposes a lean 13-tool daily driver core with modular companion extensions (Polygres Cloud Runtime, Sovereign Triad for Law, Nexus, and Biz, and L2 Semantic Router).
 * **Local Compute Cache + Cloud Sync**: Per-project SQLite caches (`.agent/memory.db`) provide instant local reads, while write-behind sync automatically pushes updates to Polygres.com.
 
 ---
@@ -124,15 +124,15 @@ The 100% Cloud Stack Architecture
 
 • Benefit: Zero local Ollama process overhead, zero VRAM allocation on the laptop, sub-100ms vector generation, and 100% uptime while traveling.
 
-3. Unified Agent Surface: krusch-context-mcp (61 MCP Tools Full Suite / 13 Core Default)
+3. Unified Agent Surface: krusch-context-mcp (13 Core Default + Modular Companions)
 
-Exposes 61 Model Context Protocol (MCP) tools across Core, Extended, and 5 Companion Extensions: Polygres Cloud Runtime (v0.5.0), Episodic Memory, Company Brain v2 Substrate, Holographic Nuggets, Native PG-Git Codebase & Structural Symbol Search, and AI Watch Research Engines.
+Exposes a lean 13-tool daily driver core with modular companion extensions (Polygres Cloud Runtime, Sovereign Triad for Law, Nexus, and Biz, and L2 Semantic Router).
 
 Migration & Live Verification Results
 
-• Data Migration: Successfully exported and migrated 12,398 episodic memories, 149 holographic steering nuggets, 756 interaction memory states, and AI Watch failure bundles.
+• Data Migration: Successfully exported and migrated 12,398 episodic memories, 149 holographic steering nuggets, 756 interaction memory states, and vector embeddings.
 
-• Test Suite Verification: 40/40 unit tests passed and 7/7 cloud integration tests passed verifying live vector generation, Polygres 0.5.0 Runtime API readiness, live 500M microcredit quota inspection, and pgContext capabilities.
+• Test Suite Verification: All core, companion, and cloud integration tests passed verifying live vector generation, Polygres 0.5.0 Runtime API readiness, live 500M microcredit quota inspection, and pgContext capabilities.
 
 Links & Resources
 

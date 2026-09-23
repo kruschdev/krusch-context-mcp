@@ -13,7 +13,7 @@
 
 **The 13-tool Sovereign Context Engine for Coding Agents** (~900 prompt tokens): hybrid codebase retrieval, persistent episodic memory with self-healing superseding/invalidation, persistent steering nuggets, and proactive trajectory auditing. 100% local-first on PostgreSQL + Ollama, with optional cloud runtimes.
 
-Architecture: **Sovereign Core (13 tools, default)** → **Extended Core (26 tools)** → **Modular Companion Extensions** (`law`, `nexus`, `biz`, `research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`, `semantic-router`).
+Architecture: **Sovereign Core (13 tools, default)** → **Extended Core (26 tools)** → **Production Companion Extensions** (`nexus`, `law`, `biz`, `polygres-cloud`, `semantic-router`).
 
 ---
 
@@ -29,18 +29,17 @@ Operating as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 
 
 ## 🎯 Curated Tool Profiles: No Tool Overload
 
-Exposing dozens of overlapping tools hurts LLM performance: it consumes thousands of prompt tokens per turn and causes tool-selection errors. Krusch Context MCP solves this with **Tool Profiles** (`KRUSCH_PROFILE`) and **Modular Companion Extensions**:
+Exposing dozens of overlapping tools hurts LLM performance: it consumes thousands of prompt tokens per turn and causes tool-selection errors. Krusch Context MCP solves this with **Tool Profiles** (`KRUSCH_PROFILE`) and **Production Companion Extensions**:
 
 | Profile / Mode | Tools Exposed | Default | System Prompt Cost | Intended Use |
 | :--- | :---: | :---: | :---: | :--- |
 | **`core`** *(Sovereign Default)* | **13 tools** | ✅ **Yes** | **~900 tokens** | High-signal daily drivers using local PostgreSQL + local Ollama: hybrid retrieval, episodic memory, active superseding & invalidation, state compilation, steering nuggets, structural symbol search, dependency graph, health, and proactive guardrails. |
 | **`sovereign`** / **`triad`** / **`ecosystem`** | **37 tools** | ❌ No | **~2,500 tokens** | Sovereign Quartet substrate: Curated 13 daily drivers + Neural Semantic Router (3) + KruschLaw (8) + KruschNexus (6) + KruschBiz (7) loaded in-process. |
 | **`extended`** | **26 tools** | ❌ No | ~1,800 tokens | Adds full administrative memory inspection (`list`, `delete`, `update`, `consolidate`), Git tree/blob inspection, cited thinking, and alignment feedback. |
-| **`extensions`** | **Companion MCPs** | ❌ No | On-demand | Specialized domains running as independent companion servers or loaded dynamically via `--extensions=...` (`law`, `nexus`, `biz`, `semantic-router`, `research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`). |
-| **`full`** | **61 tools** | ❌ No | ~4,200 tokens | Complete monolithic development suite with all 5 standard companion extensions loaded in-process. |
+| **`extensions`** | **Companion MCPs** | ❌ No | On-demand | Production domains running as independent companion servers or loaded dynamically via `--extensions=...` (`nexus`, `law`, `biz`, `polygres-cloud`, `semantic-router`). |
 
 > [!TIP]
-> **Modular Companion Pattern (Recommended)**: Run `krusch-context` for the core 13-tool daily memory loop, and launch companion servers (`npm run start:law`, `npm run start:research`, `npm run start:router`, `npm run start:cloud`, etc.) only for sessions that need specialized tools.
+> **Modular Companion Pattern (Recommended)**: Run `krusch-context` for the core 13-tool daily memory loop, and launch companion servers (`npm run start:nexus`, `npm run start:biz`, `npm run start:law`, `npm run start:cloud`, etc.) only for sessions that need specialized tools.
 > Direct tool calls to registered handlers always succeed even if omitted from `tools/list`, ensuring complete script and CI compatibility.
 
 ---
@@ -71,10 +70,10 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 * **Proactive Auditor (`proactive_nudge`)**: Background threat-auditor that flags rule violations, architectural drift, or known regressions before edits execute.
 * **Closed-Loop Alignment (`nudge_feedback`)**: Automatically captures developer approvals and corrections to refine future proactive guidance.
 
-### 5. ⚡ Modular Companion Extensions & AI Watch Research Lab
-* **Modular Companion MCPs**: Run specialized domains as independent companion servers (`npm run start:research`, `npm run start:company-brain`, `npm run start:cloud`, `npm run start:skills`, `npm run start:session`, `npm run start:router`) or load dynamically via `--extensions=...`.
+### 5. ⚡ Modular Companion Extensions
+* **Modular Companion MCPs**: Run specialized domains as independent companion servers (`npm run start:nexus`, `npm run start:biz`, `npm run start:law`, `npm run start:cloud`, `npm run start:router`) or load dynamically via `--extensions=...`.
 * **L2 Neural Semantic Router (`npm run start:router`)**: 3 tools (`krusch_context_semantic_route`, `krusch_context_register_semantic_centroid`, `krusch_context_list_semantic_centroids`) providing pgvector HNSW cosine-distance routing for unstructured natural language prompts, bridging Stage-0 pre-router gate misses to domain specialists.
-* **AI Watch Research Lab (Opt-In Companion)**: ArXiv-grounded experimental modules (AgentDebugX failure observability, DataFlow DAG mutations, Setwise minimal covers, AREX recursive research, Teacher Memory Distillation, Resilience Gate) kept cleanly decoupled from the 13-tool daily driver loop.
+* **Sovereign Triad**: Dedicated engines for KruschNexus (citation spine & ingestion), KruschLaw (ordinances & compliance traceability), and KruschBiz (contract graph & conflict resolution).
 * **Turnkey Cloud Option**: Optional support for Polygres Cloud (`polygres_cloud_*`, 5 tools) providing zero-GPU in-engine embeddings, vector search, model catalog, and live microcredit tracking.
 
 ---
@@ -83,7 +82,7 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 
 ```mermaid
 graph TD;
-    Agent["IDE Agent: Cursor / Claude Code / Windsurf"] --> MCP{"Krusch Context MCP<br/><b>Core: 13 Tools (Default)</b><br/>+ Modular Extensions"};
+    Agent["IDE Agent: Cursor / Claude Code / Windsurf"] --> MCP{"Krusch Context MCP<br/><b>Core: 13 Tools (Default)</b><br/>+ Production Companions"};
 
     subgraph "Storage & Backend Layer"
         MCP -- "Self-Hosted / Fleet" --> PG[("🐘 PostgreSQL + pgvector / pgContext<br/>• Code Blobs, Trees, Commits<br/>• Structural Symbols & Graph Edges<br/>• Episodic Memory & Nuggets")];
@@ -102,15 +101,12 @@ graph TD;
         MCP --> Auditor["🛡️ Proactive Auditor<br/>Trajectory Guardrails"];
     end
 
-    subgraph "Modular Companion Extensions"
+    subgraph "Production Companion Extensions"
         MCP -. "companion / flag" .-> ExtNexus["📄 KruschNexus (6 tools)<br/>Ingest & citation spine"];
         MCP -. "companion / flag" .-> ExtBiz["💼 KruschBiz (7 tools)<br/>Contracts & conflict resolver"];
         MCP -. "companion / flag" .-> ExtLaw["⚖️ KruschLaw (8 tools)<br/>Statutory & traceability"];
+        MCP -. "companion / flag" .-> ExtRouter["🧭 Semantic Router (3 tools)<br/>L2 centroid classification"];
         MCP -. "companion / flag" .-> ExtCloud["⚡ Polygres Cloud (5 tools)<br/>Quota & in-engine search"];
-        MCP -. "companion / flag" .-> ExtBrain["🧠 Company Brain (8 tools)<br/>Multi-tenant v2 graph"];
-        MCP -. "companion / flag" .-> ExtResearch["🔬 Research Suite (15 tools)<br/>AgentDebugX, AREX, ACM"];
-        MCP -. "companion / flag" .-> ExtSession["🌉 Session Bridge (2 tools)<br/>Jean SRE handoffs"];
-        MCP -. "companion / flag" .-> ExtSkills["🛠️ Skills & Docs (5 tools)<br/>DSR routing & manuals"];
     end
 
     Auditor -. "Warning Nudge" .-> Agent;
@@ -403,10 +399,9 @@ For complete parameter types, input schemas, and JSON examples, see **[TOOL_REFE
 | **`law`** | `npm run start:law` | **8** | KruschLaw sovereign legal intelligence: statutory graph exploration (`get_statute_graph`), deterministic jurisdiction machine (`evaluate_jurisdiction`), claim verification (`verify_claim`), code traceability (`get_traceability`), citations (`search_citations`, `extract_citations`), and risk analysis (`analyze_risk`). |
 | **`semantic-router`** | `npm run start:router` | **3** | L2 Neural Semantic Router: low-overhead domain intent classification (`semantic_route`), dynamic archetype centroid registration (`register_centroid`), and router inspection (`list_centroids`). |
 | **`polygres-cloud`** | `npm run start:cloud` | **5** | Live microcredit quota tracking (`usage`), in-engine semantic search (`search`), in-database model catalog (`models`), HNSW capabilities, and watched table embedding configs. |
-| **`company-brain`** | `npm run start:company-brain` | **8** | Company Brain v2 Substrate: optimistic concurrency memory (`write_state`), branching conflict resolution (`resolve_conflict`), version provenance (`get_provenance`), ontology management (`update_ontology`), role lenses (`search_lens`), and graph walks (`traverse_graph`). |
-| **`research`** | `npm run start:research` | **15** | AI Watch research suite: failure observability (`AgentDebugX`), DAG mutations (`DataFlow`), minimal cover reranking (`Setwise`), deep research state (`AREX`), context lifecycle (`ACM`), teacher distillation, and resilience gating. |
-| **`session-bridge`** | `npm run start:session` | **2** | Jean SRE companion bridge: autonomous session handoff recording (`write_session_handoff`) and idempotent review consumption (`read_session_review`). |
-| **`skills-docs`** | `npm run start:skills` | **5** | Agent skills registry (`list_skills`, `get_skill`), Diverse Skill Routing via DPP (`route_skills`), and ingested external documentation manuals (`docs_list`, `docs_search`). |
+
+> [!NOTE]
+> **Experimental ArXiv Research Modules**: The AI Watch research pack (AgentDebugX, DataFlow, Setwise, AREX, ACM, Teacher Distillation, Resilience Gate) has been separated into its own dedicated companion repository: [`krusch-research-mcp`](https://github.com/kruschdev/krusch-research-mcp).
 
 ---
 

@@ -79,7 +79,7 @@ To prevent semantic cross-contamination (e.g., a bug memory polluting a list of 
 |---|---|---|
 | 📌 **`priorities`** | Active goals, roadmap, task state, and milestones. | `Implement SQLite pull/push sync engine for Krusch Context.` |
 | 🐛 **`bugs`** | Identified issues, root causes, symptoms, and fixes. | `Port 5441 conflicts with PostgreSQL. Switched container to 5442.` |
-| 🎯 **`outcomes`** | Results of completed sessions, deployments, or tests. | `Verified all 61 tools pass smoke tests on production host.` |
+| 🎯 **`outcomes`** | Results of completed sessions, deployments, or tests. | `Verified all core and companion test suites pass on production host.` |
 | 🎓 **`lessons`** | Pattern discoveries, architectural decisions, and conventions. | `Avoid circular imports in index.js by exporting DB pools from pool.js.` |
 | 🕒 **`activity`** | Chronological log of steps taken during the session. | `Created test suite, migrated schema, verified connections.` |
 

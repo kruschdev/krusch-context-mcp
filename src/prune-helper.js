@@ -85,3 +85,41 @@ export function prunePreSynthesis(text = '') {
     }
     return cleaned;
 }
+
+/**
+ * Minimal non-redundant set cover selection for context packing.
+ * @param {Array<{id: string, title?: string, content: string, score: number}>} candidates 
+ * @param {string} query 
+ * @param {number} [targetCount=5] 
+ * @param {number} [redundancyThreshold=0.6] 
+ * @returns {Array} Minimal covering set of candidates
+ */
+export function selectMinimalCoveringSet(candidates, query, targetCount = 5, redundancyThreshold = 0.6) {
+    if (!candidates || candidates.length === 0) return [];
+    const sorted = [...candidates].sort((a, b) => (b.score || 0) - (a.score || 0));
+    const selected = [];
+
+    for (const item of sorted) {
+        if (selected.length >= targetCount) break;
+        let isRedundant = false;
+        for (const sel of selected) {
+            if (computeSimilarity(item.content, sel.content) >= redundancyThreshold) {
+                isRedundant = true;
+                break;
+            }
+        }
+        if (!isRedundant) {
+            selected.push(item);
+        }
+    }
+
+    if (selected.length < targetCount && sorted.length > selected.length) {
+        for (const item of sorted) {
+            if (!selected.includes(item)) {
+                selected.push(item);
+                if (selected.length >= targetCount) break;
+            }
+        }
+    }
+    return selected;
+}

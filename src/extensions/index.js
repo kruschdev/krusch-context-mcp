@@ -1,24 +1,17 @@
 /**
  * @module extensions
  * Central extension registry and dynamic loader for krusch-context-mcp.
+ * Houses companion extensions for Polygres Cloud and the Sovereign Triad (Nexus, Law, Biz).
  */
 
-import companyBrain from './company-brain/index.js';
 import polygresCloud from './polygres-cloud/index.js';
-import sessionBridge from './session-bridge/index.js';
-import skillsDocs from './skills-docs/index.js';
-import research from './research/index.js';
 import semanticRouter from './semantic-router/index.js';
 import law from './law/index.js';
 import nexus from './nexus/index.js';
 import biz from './biz/index.js';
 
 const EXTENSIONS_REGISTRY = new Map([
-  ['company-brain', companyBrain],
   ['polygres-cloud', polygresCloud],
-  ['session-bridge', sessionBridge],
-  ['skills-docs', skillsDocs],
-  ['research', research],
   ['semantic-router', semanticRouter],
   ['law', law],
   ['krusch-law', law],
@@ -27,11 +20,7 @@ const EXTENSIONS_REGISTRY = new Map([
   ['biz', biz],
   ['krusch-biz', biz],
   // Friendly aliases
-  ['ai-watch', research],
-  ['v2', companyBrain],
-  ['skills', skillsDocs],
   ['cloud', polygresCloud],
-  ['session', sessionBridge],
   ['router', semanticRouter],
   ['neural-router', semanticRouter],
   ['legal', law],
@@ -41,9 +30,8 @@ const EXTENSIONS_REGISTRY = new Map([
 ]);
 
 export function getAvailableExtensionNames() {
-  return ['research', 'company-brain', 'polygres-cloud', 'session-bridge', 'skills-docs', 'semantic-router', 'law', 'nexus', 'biz'];
+  return ['polygres-cloud', 'nexus', 'law', 'biz', 'semantic-router'];
 }
-
 
 export function resolveExtension(name) {
   const normalized = name.toLowerCase().trim();
@@ -76,3 +64,10 @@ export async function loadExtensions(names = [], pool = null) {
 
   return loaded;
 }
+
+export default {
+  registry: EXTENSIONS_REGISTRY,
+  getAvailableExtensionNames,
+  resolveExtension,
+  loadExtensions
+};

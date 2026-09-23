@@ -7,8 +7,7 @@ import { pool } from '../db/pool.js';
 import { getEmbedding } from '../src/embedding-helper.js';
 import { searchMemory, addMemory } from '../src/memory-engine.js';
 import { unifiedRetrieve } from '../src/unified-retrieval.js';
-import { setwiseRerank, selectMinimalCoveringSet } from '../src/setwise-engine.js';
-import { logAgentFailure, searchFailures, getRecoveryPattern } from '../src/agentdebugx-engine.js';
+import { selectMinimalCoveringSet } from '../src/prune-helper.js';
 
 // Needle-in-a-haystack test dataset
 const NEEDLE_DATASET = [

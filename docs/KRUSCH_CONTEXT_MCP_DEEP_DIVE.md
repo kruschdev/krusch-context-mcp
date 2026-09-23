@@ -29,7 +29,7 @@ Traditional RAG tools (Pinecone, Qdrant, naive vector search) failed to solve th
 
 ## 🏗️ 2. How Local & Remote Agents Use the MCP Server
 
-`krusch-context-mcp` organizes its functionality into a **lean 13-tool Sovereign Core** with companion extensions (totaling **61 standardized Model Context Protocol tools** across the full suite) over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
+`krusch-context-mcp` organizes its functionality into a **lean 13-tool Sovereign Core** with modular companion extensions (Law, Nexus, Biz, Router, Polygres Cloud) over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
 
 ![5 Unified Memory Subsystems Architecture](assets/krusch_context_mcp_5_subsystems_diagram.png)
 
@@ -85,14 +85,14 @@ Integrates cutting-edge AI research subsystems:
 
 | Feature | Generic Vector DBs | Naive MCP Memory | `krusch-context-mcp` |
 | :--- | :---: | :---: | :---: |
-| **Protocol Support** | Proprietary REST | MCP | **13 Core (Default) · 61 Full Suite** |
+| **Protocol Support** | Proprietary REST | MCP | **13 Core (Default) · Sovereign Companions** |
 | **Code RAG & Structural Indexing** | ❌ No | ❌ No | **✅ Native Git DAG + Structural Symbols + Hybrid RRF** |
 | **Temporal Recency Decay** | ❌ No | ❌ No | **✅ Exponential Decay ($e^{-0.01t}$)** |
 | **Micro-Steering (Nuggets)** | ❌ No | ❌ No | **✅ Persistent Steering Facts** |
-| **Multi-Agent Consensus** | ❌ No | ❌ No | **✅ Company Brain v2 Substrate** |
+| **Multi-Agent Consensus** | ❌ No | ❌ No | **✅ State Graph & Concurrency Substrate** |
 | **Graph-Vector Fusion** | Separate DB | ❌ No | **✅ Native `pgGraph` & Symbol Dependency Walks** |
 | **Offline Cache + Cloud Sync** | ❌ No | Local Only | **✅ SQLite Cache + Polygres.com Sync** |
-| **Failure Pattern Matching** | ❌ No | ❌ No | **✅ Native AgentDebugX Integration** |
+| **Failure Pattern Matching** | ❌ No | ❌ No | **✅ Proactive Trajectory Auditor** |
 
 ---
 
@@ -135,7 +135,7 @@ How Local & Remote Agents Use the MCP Server
 
 [INSERT IMAGE: docs/assets/krusch_context_mcp_5_subsystems_diagram.png]
 
-krusch-context-mcp organizes into a lean 13-tool Sovereign Core (expanding to 61 tools in full multi-server mode) over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
+krusch-context-mcp organizes into a lean 13-tool Sovereign Core (expanding to modular companion extensions for sovereign domains) over stdio JSON-RPC transport. Any client — whether a cloud-hosted IDE like Cursor, a CLI agent like Claude Code, or a 100% offline local agent running via Ollama — connects seamlessly to the exact same memory server.
 
 • Local Agent Support: Local agents get instant sub-5ms zero-latency reads from the project-scoped SQLite cache. No internet connection required.
 

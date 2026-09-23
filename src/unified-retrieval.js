@@ -12,8 +12,7 @@ import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { isPgContextEnabled } from './pgcontext-helper.js';
 import { searchBlobs } from './git-engine.js';
-import { selectMinimalCoveringSet } from './setwise-engine.js';
-import { prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from './prune-helper.js';
+import { selectMinimalCoveringSet, prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from './prune-helper.js';
 import { detectCurrentProject } from './project-helper.js';
 import { compileProjectState } from './memory-engine.js';
 
