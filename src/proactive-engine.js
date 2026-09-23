@@ -237,6 +237,35 @@ export async function handleProactiveNudge({ history, project }) {
         contextBlock += `### 3. Macro-Scale Context (Lessons, Bugs, & Rules)\n${macroBlock}`;
     }
 
+    // 3b. Regulatory & Statutory Guardrail Check (KruschLaw Grounding)
+    const STATUTORY_PATTERN = /(?:§|Section|\bCal\.?\s*Civ\.?|\bOMC|\bLAMC|\bU\.?S\.?C\.?)\s*[\d\.]+/i;
+    let legalGroundingBlock = "";
+    if (STATUTORY_PATTERN.test(queryText)) {
+        const kruschlawUrl = process.env.KRUSCHLAW_API_URL || 'http://127.0.0.1:8085';
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            const lawSearchRes = await fetch(`${kruschlawUrl}/api/laws/search?q=${encodeURIComponent(queryText)}&limit=3`, {
+                signal: controller.signal
+            }).then(r => r.ok ? r.json() : null).catch(() => null);
+            clearTimeout(timeoutId);
+
+            if (lawSearchRes && lawSearchRes.results && lawSearchRes.results.length > 0) {
+                legalGroundingBlock += `#### Governing Statutory Authorities (KruschLaw)\n`;
+                for (const law of lawSearchRes.results) {
+                    legalGroundingBlock += `- [${law.section}] ${law.title} (${law.jurisdiction}) — Authority Weight: ${law.authority_weight || '1.0'}x${law.repealed ? ' [🛑 REPEALED]' : ''}\n`;
+                }
+                legalGroundingBlock += `\n`;
+            }
+        } catch (_) {
+            // Non-blocking: continue if KruschLaw backend is offline
+        }
+    }
+
+    if (legalGroundingBlock.trim()) {
+        contextBlock += `### 4. Regulatory & Statutory Guardrails\n${legalGroundingBlock}`;
+    }
+
     // If no context exists to audit against, return NO_NUDGES_REQUIRED
     if (!contextBlock.trim()) {
         return { content: [{ type: "text", text: "NO_NUDGES_REQUIRED" }] };

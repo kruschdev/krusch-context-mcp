@@ -13,7 +13,7 @@
 
 **The 13-tool Sovereign Context Engine for Coding Agents** (~900 prompt tokens): hybrid codebase retrieval, persistent episodic memory with self-healing superseding/invalidation, persistent steering nuggets, and proactive trajectory auditing. 100% local-first on PostgreSQL + Ollama, with optional cloud runtimes.
 
-Architecture: **Sovereign Core (13 tools, default)** → **Extended Core (26 tools)** → **Modular Companion Extensions** (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`).
+Architecture: **Sovereign Core (13 tools, default)** → **Extended Core (26 tools)** → **Modular Companion Extensions** (`law`, `research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`, `semantic-router`).
 
 ---
 
@@ -36,11 +36,11 @@ Exposing dozens of overlapping tools hurts LLM performance: it consumes thousand
 | **`core`** *(Sovereign Default)* | **13 tools** | ✅ **Yes** | **~900 tokens** | High-signal daily drivers using local PostgreSQL + local Ollama: hybrid retrieval, episodic memory, active superseding & invalidation, state compilation, steering nuggets, structural symbol search, dependency graph, health, and proactive guardrails. |
 | **`ecosystem`** *(Cascade / Router)* | **16 tools** | ❌ No | **~1,150 tokens** | Curated daily drivers + L2 Neural Semantic Router (`krusch_context_semantic_route`, centroid registration). Bridges cascade routing with zero full-suite bloat. |
 | **`extended`** | **26 tools** | ❌ No | ~1,800 tokens | Adds full administrative memory inspection (`list`, `delete`, `update`, `consolidate`), Git tree/blob inspection, cited thinking, and alignment feedback. |
-| **`extensions`** | **Companion MCPs** | ❌ No | On-demand | Specialized domains running as independent companion servers or loaded dynamically via `--extensions=...` (`research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`, `semantic-router`). |
-| **`full`** | **61 tools** | ❌ No | ~4,200 tokens | Complete monolithic development suite with all 5 companion extensions loaded in-process. |
+| **`extensions`** | **Companion MCPs** | ❌ No | On-demand | Specialized domains running as independent companion servers or loaded dynamically via `--extensions=...` (`law`, `research`, `company-brain`, `polygres-cloud`, `session-bridge`, `skills-docs`, `semantic-router`). |
+| **`full`** | **68 tools** | ❌ No | ~4,500 tokens | Complete monolithic development suite with all companion extensions loaded in-process. |
 
 > [!TIP]
-> **Modular Companion Pattern (Recommended)**: Run `krusch-context` for the core 13-tool daily memory loop, and launch companion servers (`npm run start:research`, `npm run start:router`, `npm run start:cloud`, etc.) only for sessions that need specialized tools.
+> **Modular Companion Pattern (Recommended)**: Run `krusch-context` for the core 13-tool daily memory loop, and launch companion servers (`npm run start:law`, `npm run start:research`, `npm run start:router`, `npm run start:cloud`, etc.) only for sessions that need specialized tools.
 > Direct tool calls to registered handlers always succeed even if omitted from `tools/list`, ensuring complete script and CI compatibility.
 
 ---

@@ -9,6 +9,7 @@ import sessionBridge from './session-bridge/index.js';
 import skillsDocs from './skills-docs/index.js';
 import research from './research/index.js';
 import semanticRouter from './semantic-router/index.js';
+import law from './law/index.js';
 
 const EXTENSIONS_REGISTRY = new Map([
   ['company-brain', companyBrain],
@@ -17,6 +18,8 @@ const EXTENSIONS_REGISTRY = new Map([
   ['skills-docs', skillsDocs],
   ['research', research],
   ['semantic-router', semanticRouter],
+  ['law', law],
+  ['krusch-law', law],
   // Friendly aliases
   ['ai-watch', research],
   ['v2', companyBrain],
@@ -24,11 +27,12 @@ const EXTENSIONS_REGISTRY = new Map([
   ['cloud', polygresCloud],
   ['session', sessionBridge],
   ['router', semanticRouter],
-  ['neural-router', semanticRouter]
+  ['neural-router', semanticRouter],
+  ['legal', law]
 ]);
 
 export function getAvailableExtensionNames() {
-  return ['research', 'company-brain', 'polygres-cloud', 'session-bridge', 'skills-docs', 'semantic-router'];
+  return ['research', 'company-brain', 'polygres-cloud', 'session-bridge', 'skills-docs', 'semantic-router', 'law'];
 }
 
 export function resolveExtension(name) {

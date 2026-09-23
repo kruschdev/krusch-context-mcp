@@ -110,6 +110,24 @@ export const DEFAULT_ARCHETYPES = [
     exemplar: 'Patient presenting with acute chest pain, diaphoresis, and left arm numbness; provide emergency clinical triage protocols.',
     confidenceThreshold: 0.65,
     metadata: { domain: 'safety_exclusion', preferredModel: 'claude-3-5-sonnet' }
+  },
+  {
+    archetype: 'legal_statutory_research',
+    tier: 'specialist',
+    role: 'legal_counsel',
+    label: 'Statutory Research & Municipal Ordinances',
+    exemplar: 'Does the Oakland Rent Adjustment Program allow an owner move-in eviction if the landlord owns multiple properties under OMC 8.22.360?',
+    confidenceThreshold: 0.65,
+    metadata: { domain: 'law', server: 'krusch-law', extension: 'law', tools: ['krusch_law_search_ordinances', 'krusch_law_get_section'] }
+  },
+  {
+    archetype: 'legal_matter_briefing',
+    tier: 'heavy',
+    role: 'legal_counsel',
+    label: 'Legal Matter Briefing & Grounded Analysis',
+    exemplar: 'Draft a citation-grounded 4-part legal brief analyzing tenant habitability claims under California Civil Code 1941.1.',
+    confidenceThreshold: 0.68,
+    metadata: { domain: 'law', server: 'krusch-law', extension: 'law', tools: ['krusch_law_draft_brief', 'krusch_law_verify_grounding'] }
   }
 ];
 

@@ -30,6 +30,7 @@
     "start:session": "node src/extensions/session-bridge/server.js",
     "start:skills": "node src/extensions/skills-docs/server.js",
     "start:router": "node src/extensions/semantic-router/server.js",
+    "start:law": "node src/extensions/law/server.js",
     "start:ecosystem": "KRUSCH_PROFILE=ecosystem node src/index.js",
     "start:full": "KRUSCH_PROFILE=full node src/index.js",
     "test": "node --env-file=.env --test tests/*.test.js",
