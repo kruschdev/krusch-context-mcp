@@ -138,17 +138,52 @@ In one turn at session start, the agent is fully grounded in the project's livin
 
 Earlier versions of `krusch-context-mcp` attempted to bundle everything into a single package: AST code parsing, Git commit DAG traversal, symbol call graphs, external documentation, and decision memory.
 
-In v1.8.0, **Codebase RAG was decoupled into [krusch-git](https://github.com/kruschdev/krusch-git)** (`krusch-git@1.2.0`).
+In v1.8.0, **Codebase RAG was decoupled into [krusch-git](https://github.com/kruschdev/krusch-git)** (`krusch-git@1.2.1`).
 
 ### The Architectural Rationale:
 1. **Divergent Lifecycles**:
-   - **Code Structure (`krusch-git`)** changes with every git commit, branch checkout, or file edit. It requires AST tree-sitter parsers, commit graph walkers, and symbol edge extractors.
+   - **Code Structure (`krusch-git`)** changes with every git commit, branch checkout, or file edit. It requires AST parsers, commit graph walkers, and symbol edge extractors.
    - **Decision Memory (`krusch-context-mcp`)** changes with human/agent architectural commitments, debugging discoveries, and policy shifts.
 2. **Preventing Agent Confusion**:
    Combining code search (`search_code`, `search_symbols`, `symbol_graph`) with memory verbs in the same MCP tool table led agents to call code search when they needed memory, or vice versa.
 3. **The Sibling Synergy**:
-   - Use **`krusch-context-mcp`** for **Agent Steering & Episodic Memory** (why code was written).
-   - Use **`krusch-git`** for **Git DAG & Symbol Traversal** (how code is structured).
+   - Use **`krusch-context-mcp`** (Tier 1) for **Agent Steering & Episodic Memory** (why code was written).
+   - Use **`krusch-git`** (Tier 2) for **Git DAG & Symbol Traversal** (how code is structured).
+   - Use **`krusch-harness`** (Tier 3) for **Staged Execution & Verification** (how code is safely committed).
+
+### The 7 Canonical Tools of `krusch-git`:
+| Tool | Purpose |
+|---|---|
+| `krusch_git_list_repos` | List all indexed repositories & branch metadata |
+| `krusch_git_read_tree` | Inspect Git DAG tree hierarchy at commit/branch |
+| `krusch_git_read_blob` | Fetch content-addressed file blob or pointer file |
+| `krusch_git_semantic_search` | Hybrid cosine + BM25 + temporal recency decay ($e^{-0.01t}$) |
+| `krusch_git_search_symbols` | AST lookup for functions, classes, and interfaces |
+| `krusch_git_file_symbols` | Line-range symbol map for a specific file |
+| `krusch_git_dependency_graph` | Multi-hop caller/callee traversal around target symbol |
+
+---
+
+### The 3-Tier Coding Agent MCP Ecosystem
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. SESSION START & INVARIANTS                               │
+│    krusch-context-mcp: retrieve, remember, revise, nudge     │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 2. CODE EXPLORATION & ARCHITECTURE                          │
+│    krusch-git: search_symbols, dependency_graph, read_blob   │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 3. STAGED EXECUTION & VERIFICATION                          │
+│    krusch-harness: run, task_status, diff, apply_diff        │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
