@@ -334,8 +334,10 @@ export async function compileProjectState({ project, active_project } = {}) {
             else lessons.push(r);
         }
 
-        const nugRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets`).all();
-        nuggets.push(...nugRows);
+        const nugRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets ORDER BY updated_at ASC`).all();
+        const nugMap = new Map();
+        for (const n of nugRows) nugMap.set(n.key, n);
+        nuggets.push(...nugMap.values());
     }
 
     const stale = await getStaleMemories({ project: targetProject, days: 30 });

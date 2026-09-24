@@ -163,9 +163,11 @@ export async function unifiedRetrieve({
                     }
                 }
 
-                // Search steering nuggets
-                const nugRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets`).all();
-                for (const n of nugRows) {
+                // Search steering nuggets (deduplicated by key)
+                const nugRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets ORDER BY updated_at ASC`).all();
+                const nugMap = new Map();
+                for (const n of nugRows) nugMap.set(n.key, n);
+                for (const n of nugMap.values()) {
                     let score = 0.4;
                     if (n.key.toLowerCase().includes(query.toLowerCase()) || n.value.toLowerCase().includes(query.toLowerCase())) {
                         score = 0.8;

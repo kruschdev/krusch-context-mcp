@@ -100,6 +100,8 @@ export function getSqliteDb(workspaceDir = process.cwd()) {
             PRIMARY KEY (key, project)
         );
 
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_nuggets_key ON ide_agent_nuggets(key);
+
         CREATE TABLE IF NOT EXISTS code_chunks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project TEXT,
