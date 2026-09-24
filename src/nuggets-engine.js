@@ -2,7 +2,6 @@ import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
-import { isPgContextEnabled, syncPgContextPoints } from './pgcontext-helper.js';
 
 const VALID_KINDS = new Set(['project', 'user', 'agent']);
 
@@ -52,9 +51,6 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
             SET value = EXCLUDED.value, kind = EXCLUDED.kind, embedding = EXCLUDED.embedding, updated_at = CURRENT_TIMESTAMP
             RETURNING id
         `, [key, value, kind, embeddingStr]);
-        if (res.rows.length > 0) {
-            await syncPgContextPoints(pool, 'ide_agent_nuggets', [res.rows[0].id]);
-        }
     } finally {
         client.release();
     }
@@ -87,58 +83,24 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project, pr
     try {
         const embeddingStr = `[${embeddingArray.join(',')}]`;
         const fetchLimit = limit * 2;
-        let pgContextHandled = false;
 
-        if (isPgContextEnabled()) {
-            try {
-                const filterConditions = [];
-                if (kinds && kinds.length === 1) {
-                    filterConditions.push({ key: "kind", match: kinds[0] });
-                }
-                const filterJson = filterConditions.length > 0 ? JSON.stringify({ must: filterConditions }) : '{}';
-
-                const res = await client.query(`
-                    WITH pgctx_matches AS (
-                        SELECT source_key::int as id, score as distance
-                        FROM pgcontext.search(
-                            'ide_agent_nuggets',
-                            $1::vector,
-                            $2,
-                            $3
-                        )
-                    )
-                    SELECT n.key, n.value, n.kind, n.created_at, p.distance, 'global' as source
-                    FROM pgctx_matches p
-                    JOIN ide_agent_nuggets n ON n.id = p.id
-                    ORDER BY p.distance ASC
-                    LIMIT $3
-                `, [embeddingStr, filterJson, fetchLimit]);
-                combinedResults.push(...res.rows);
-                pgContextHandled = true;
-            } catch (pgctxErr) {
-                console.error('[nuggets-engine] pgContext search fallback to standard vector search:', pgctxErr.message);
-            }
+        let sql = `
+            SELECT key, value, kind, created_at, (embedding <=> $1::vector) as distance, 'global' as source
+            FROM ide_agent_nuggets
+            WHERE embedding IS NOT NULL
+        `;
+        let params = [embeddingStr];
+        
+        if (kinds && kinds.length > 0) {
+            sql += ` AND kind = ANY($2)`;
+            params.push(kinds);
         }
+        
+        sql += ` ORDER BY embedding <=> $1::vector LIMIT $${params.length + 1}`;
+        params.push(fetchLimit);
 
-        if (!pgContextHandled) {
-            let sql = `
-                SELECT key, value, kind, created_at, (embedding <=> $1::vector) as distance, 'global' as source
-                FROM ide_agent_nuggets
-                WHERE embedding IS NOT NULL
-            `;
-            let params = [embeddingStr];
-            
-            if (kinds && kinds.length > 0) {
-                sql += ` AND kind = ANY($2)`;
-                params.push(kinds);
-            }
-            
-            sql += ` ORDER BY embedding <=> $1::vector LIMIT $${params.length + 1}`;
-            params.push(fetchLimit);
-
-            const res = await client.query(sql, params);
-            combinedResults.push(...res.rows);
-        }
+        const res = await client.query(sql, params);
+        combinedResults.push(...res.rows);
     } finally {
         client.release();
     }

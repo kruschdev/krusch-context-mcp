@@ -10,7 +10,6 @@
 
 import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
-import { isPgContextEnabled } from './pgcontext-helper.js';
 import { prunePreSynthesis } from './prune-helper.js';
 import { detectCurrentProject } from './project-helper.js';
 import { compileProjectState, searchMemory } from './memory-engine.js';

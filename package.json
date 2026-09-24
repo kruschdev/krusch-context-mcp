@@ -16,11 +16,15 @@
   "files": [
     "src",
     "bin",
-    "db",
     "templates",
-    "scripts",
-    "docs",
+    "db/schema.sql",
+    "docs/TOOL_REFERENCE.md",
+    "docs/ARCHITECTURE.md",
+    "docs/SETUP.md",
+    "docs/MIGRATION.md",
+    "docs/WHAT_MAKES_IT_SPECIAL.md",
     "README.md",
+    "CONTRIBUTING.md",
     "LICENSE",
     "CHANGELOG.md",
     ".env.example"
@@ -50,7 +54,9 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "dotenv": "^16.4.7",
+    "dotenv": "^16.4.7"
+  },
+  "optionalDependencies": {
     "pg": "^8.20.0"
   },
   "overrides": {

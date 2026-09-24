@@ -102,43 +102,6 @@ export function getSqliteDb(workspaceDir = process.cwd()) {
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_nuggets_key ON ide_agent_nuggets(key);
 
-        CREATE TABLE IF NOT EXISTS code_chunks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project TEXT,
-            path TEXT NOT NULL,
-            content TEXT NOT NULL,
-            embedding TEXT,
-            symbol TEXT,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS code_chunks_fts USING fts5(
-            path,
-            content,
-            symbol,
-            tokenize='porter unicode61'
-        );
-
-        CREATE TABLE IF NOT EXISTS code_symbols (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project TEXT,
-            name TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            path TEXT NOT NULL,
-            line_start INTEGER NOT NULL,
-            line_end INTEGER NOT NULL,
-            signature TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS symbol_edges (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project TEXT,
-            source_symbol TEXT NOT NULL,
-            target_symbol TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            confidence TEXT DEFAULT 'heuristic_regex'
-        );
-
         CREATE TABLE IF NOT EXISTS auditor_feedback (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project TEXT,

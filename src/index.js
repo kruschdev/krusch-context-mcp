@@ -79,25 +79,6 @@ export const CORE_TOOLS = new Set([
   "krusch_context_health"
 ]);
 
-// Extended Admin Tools (only active in --profile=extended)
-export const EXTENDED_CORE_TOOLS = new Set([
-  "krusch_context_list_memories",
-  "krusch_context_delete_memory",
-  "krusch_context_consolidate",
-  "krusch_context_nugget_list"
-]);
-
-export function getActiveProfile() {
-  const profileArg = process.argv.find(a => a.startsWith('--profile='));
-  const rawProfile = profileArg 
-    ? profileArg.split('=')[1] 
-    : (process.env.KRUSCH_PROFILE || 'core');
-  
-  const normalized = rawProfile.toLowerCase().trim();
-  if (normalized === 'extended' || normalized === 'admin') return 'extended';
-  return 'core';
-}
-
 // 5 Core Tool Definitions
 export const CORE_TOOL_DEFINITIONS = [
   {
@@ -190,58 +171,6 @@ export const CORE_TOOL_DEFINITIONS = [
   }
 ];
 
-export const EXTENDED_CORE_DEFINITIONS = [
-  {
-    name: "krusch_context_list_memories",
-    description: "List memories chronologically for inspection.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        category: { type: "string", enum: ['decision', 'bug', 'invariant', 'lesson', 'blocker'] },
-        limit: { type: "number", default: 10 },
-        project: { type: "string" }
-      },
-      required: ["category"]
-    }
-  },
-  {
-    name: "krusch_context_delete_memory",
-    description: "Hard-delete a memory record (admin cleanup).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        id: { type: "number" },
-        project: { type: "string" }
-      },
-      required: ["id"]
-    }
-  },
-  {
-    name: "krusch_context_consolidate",
-    description: "Consolidate duplicate memories within a category.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        category: { type: "string", enum: ['decision', 'bug', 'invariant', 'lesson', 'blocker'] },
-        threshold: { type: "number", default: 0.15 },
-        dry_run: { type: "boolean", default: false },
-        project: { type: "string" }
-      },
-      required: ["category"]
-    }
-  },
-  {
-    name: "krusch_context_nugget_list",
-    description: "List all persistent steering nuggets.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        project: { type: "string" }
-      }
-    }
-  }
-];
-
 // MCP Prompts
 export const CORE_PROMPTS = [
   {
@@ -278,17 +207,9 @@ export const CORE_PROMPTS = [
   }
 ];
 
-
-// MCP Tool Listing Handler
+// MCP Tool Listing Handler - Strictly the 5 canonical verbs
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const profile = getActiveProfile();
-  const tools = [...CORE_TOOL_DEFINITIONS];
-
-  if (profile === 'extended') {
-    tools.push(...EXTENDED_CORE_DEFINITIONS);
-  }
-
-  return { tools };
+  return { tools: CORE_TOOL_DEFINITIONS };
 });
 
 // MCP Prompt Listing Handlers

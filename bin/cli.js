@@ -30,24 +30,32 @@ if (majorVersion < 22) {
     process.exit(1);
 }
 
-const cmd = process.argv[2];
+const scriptName = process.argv[1] ? path.basename(process.argv[1]) : '';
+const isDirectRun = process.argv[1] && (
+    process.argv[1] === __filename || 
+    scriptName === 'cli.js' || 
+    scriptName === 'krusch-context-mcp'
+);
 
-if (cmd === 'init') {
-    runInit().catch(err => {
-        console.error('❌ Init error:', err.message);
-        process.exit(1);
-    });
-} else if (cmd === 'health' || cmd === '--health') {
-    runCliHealth().catch(err => {
-        console.error('❌ Health check error:', err.message);
-        process.exit(1);
-    });
-} else {
-    // Default: run MCP server
-    runServer().catch(err => {
-        console.error('❌ Server startup error:', err.message);
-        process.exit(1);
-    });
+if (isDirectRun) {
+    const cmd = process.argv[2];
+    if (cmd === 'init') {
+        runInit().catch(err => {
+            console.error('❌ Init error:', err.message);
+            process.exit(1);
+        });
+    } else if (cmd === 'health' || cmd === '--health') {
+        runCliHealth().catch(err => {
+            console.error('❌ Health check error:', err.message);
+            process.exit(1);
+        });
+    } else {
+        // Default: run MCP server
+        runServer().catch(err => {
+            console.error('❌ Server startup error:', err.message);
+            process.exit(1);
+        });
+    }
 }
 
 function cleanStaleMcpSchemas() {
@@ -85,6 +93,17 @@ function cleanStaleMcpSchemas() {
     }
 }
 
+export function migrateLegacyDatabase(targetDir) {
+    const agentDir = path.join(targetDir, '.agent');
+    const legacyDb = path.join(agentDir, 'memory.db');
+    const contextDb = path.join(agentDir, 'context.db');
+    if (fs.existsSync(legacyDb) && !fs.existsSync(contextDb)) {
+        fs.copyFileSync(legacyDb, contextDb);
+        return true;
+    }
+    return false;
+}
+
 async function runInit() {
     console.log(`\n🚀 Initializing Krusch Context MCP v${VERSION}...\n`);
     cleanStaleMcpSchemas();
@@ -106,8 +125,21 @@ async function runInit() {
     if (!fs.existsSync(agentDir)) {
         fs.mkdirSync(agentDir, { recursive: true });
     }
+    if (migrateLegacyDatabase(gitRoot)) {
+        console.log(`📦 Migrated legacy database \x1b[33m.agent/memory.db\x1b[0m -> \x1b[32m.agent/context.db\x1b[0m`);
+    }
     const db = getSqliteDb(gitRoot);
     console.log(`💾 Local SQLite database initialized at \x1b[32m.agent/context.db\x1b[0m (zero-Docker default)`);
+
+    // Ensure .agent/ is ignored in git
+    const gitignorePath = path.join(gitRoot, '.gitignore');
+    if (fs.existsSync(gitignorePath)) {
+        const gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8');
+        if (!gitignoreContent.includes('.agent')) {
+            fs.appendFileSync(gitignorePath, '\n# Local Agent State Database\n.agent/\n');
+            console.log(`🔒 Added \x1b[32m.agent/\x1b[0m to .gitignore`);
+        }
+    }
 
     // 2. Write or update .env
     const envPath = path.join(gitRoot, '.env');

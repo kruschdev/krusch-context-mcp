@@ -6,22 +6,18 @@ import { fileURLToPath } from 'node:url';
 
 import {
   CORE_TOOLS,
-  EXTENDED_CORE_TOOLS,
   CORE_TOOL_DEFINITIONS,
-  EXTENDED_CORE_DEFINITIONS,
   VERSION
 } from '../src/index.js';
-
-import { getAvailableExtensionNames } from '../src/extensions/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 
-describe('Tool Contract & Profile Invariant Suite', () => {
-  it('Core Profile must contain exactly 5 canonical verbs', () => {
-    assert.equal(CORE_TOOLS.size, 5, `Expected 5 core tools in Set, got ${CORE_TOOLS.size}`);
-    assert.equal(CORE_TOOL_DEFINITIONS.length, 5, `Expected 5 core tool schemas, got ${CORE_TOOL_DEFINITIONS.length}`);
+describe('Tool Contract & Invariant Suite', () => {
+  it('Public tool surface must contain strictly the 5 canonical verbs', () => {
+    assert.equal(CORE_TOOLS.size, 5, `Expected exactly 5 tools in Set, got ${CORE_TOOLS.size}`);
+    assert.equal(CORE_TOOL_DEFINITIONS.length, 5, `Expected exactly 5 tool schemas, got ${CORE_TOOL_DEFINITIONS.length}`);
 
     const expectedVerbs = new Set([
       'krusch_context_retrieve',
@@ -40,31 +36,22 @@ describe('Tool Contract & Profile Invariant Suite', () => {
     }
   });
 
-  it('Extended Profile must contain exactly 4 admin inspection tools', () => {
-    assert.equal(EXTENDED_CORE_TOOLS.size, 4, `Expected 4 extended tools in Set, got ${EXTENDED_CORE_TOOLS.size}`);
-    assert.equal(EXTENDED_CORE_DEFINITIONS.length, 4, `Expected 4 extended schemas, got ${EXTENDED_CORE_DEFINITIONS.length}`);
+  it('Zero companion extensions or legacy engine modules are embedded', () => {
+    const forbiddenSrcFiles = [
+      'extensions',
+      'git-engine.js',
+      'ast-chunker.js',
+      'skills-engine.js',
+      'session-engine.js',
+      'think-engine.js',
+      'polygres-cloud.js',
+      'v2-engine.js'
+    ];
 
-    const defNames = new Set(EXTENDED_CORE_DEFINITIONS.map(d => d.name));
-    for (const tool of EXTENDED_CORE_TOOLS) {
-      assert.ok(defNames.has(tool), `Extended tool '${tool}' is missing a schema definition`);
+    for (const f of forbiddenSrcFiles) {
+      const p = path.join(ROOT_DIR, 'src', f);
+      assert.ok(!fs.existsSync(p), `Forbidden legacy module/directory '${f}' must not exist in src/`);
     }
-  });
-
-  it('Core and Extended tool sets must have zero overlap', () => {
-    const intersection = [...CORE_TOOLS].filter(t => EXTENDED_CORE_TOOLS.has(t));
-    assert.deepEqual(intersection, [], `Collision detected between Core and Extended tools: ${intersection.join(', ')}`);
-  });
-
-  it('Zero companion extensions are embedded (companions live in separate repos)', () => {
-    const available = getAvailableExtensionNames();
-    assert.deepEqual(available, [], `Expected 0 companion extensions in core repo, found: ${available.join(', ')}`);
-  });
-
-  it('All tools across Core and Extended must have globally unique names', () => {
-    const allNames = [...CORE_TOOLS, ...EXTENDED_CORE_TOOLS];
-    assert.equal(allNames.length, 9, `Expected 9 total tool names, got ${allNames.length}`);
-    const nameSet = new Set(allNames);
-    assert.equal(nameSet.size, 9, `Duplicate tool names found! Unique count: ${nameSet.size}`);
   });
 
   it('Version consistency across package.json, code, and changelog', () => {
@@ -103,7 +90,7 @@ describe('Tool Contract & Profile Invariant Suite', () => {
       { pattern: /26\s+tools/i, label: 'stale 26 tools claim' },
       { pattern: /13\s+core\s+tools/i, label: 'stale 13 core tools claim' },
       { pattern: /13\s+tools/i, label: 'stale 13 tools claim' },
-      { pattern: /sovereign\s+triad/i, label: 'stale sovereign triad claim' },
+      { pattern: /--profile=/i, label: 'profile flag claim' },
       { pattern: /file:\/\/\/home\/krusch/i, label: 'leaked homelab file:/// link' }
     ];
 

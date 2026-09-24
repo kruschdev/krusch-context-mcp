@@ -7,8 +7,12 @@
 
 import test from 'node:test';
 import assert from 'node:assert';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { addMemory, searchMemory } from '../src/memory-engine.js';
 import { nuggetRemember, nuggetNudges, nuggetForget } from '../src/nuggets-engine.js';
+import { migrateLegacyDatabase } from '../bin/cli.js';
 import { pool } from '../db/pool.js';
 
 test('SQLite project-scoped memory isolation', async (t) => {
@@ -78,6 +82,28 @@ test('SQLite project-scoped memory isolation', async (t) => {
         });
         const text = res.content[0].text;
         assert.ok(text.includes('Memory Retrieval'), 'Should return retrieval header');
+    });
+
+    await t.test('migrateLegacyDatabase safely copies memory.db to context.db', () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'krusch-test-migration-'));
+        const agentDir = path.join(tmpDir, '.agent');
+        fs.mkdirSync(agentDir, { recursive: true });
+        
+        const legacyDb = path.join(agentDir, 'memory.db');
+        fs.writeFileSync(legacyDb, 'dummy sqlite content');
+
+        const migrated = migrateLegacyDatabase(tmpDir);
+        assert.strictEqual(migrated, true);
+        
+        const contextDb = path.join(agentDir, 'context.db');
+        assert.ok(fs.existsSync(contextDb), 'context.db should exist after migration');
+        assert.strictEqual(fs.readFileSync(contextDb, 'utf-8'), 'dummy sqlite content');
+
+        // Second call should return false (already migrated)
+        assert.strictEqual(migrateLegacyDatabase(tmpDir), false);
+
+        // Cleanup
+        fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
     t.after(async () => {

@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pool } from '../db/pool.js';
-import { syncPgContextPoints } from './pgcontext-helper.js';
 import { detectCurrentProject } from './project-helper.js';
 
 import { fileURLToPath } from 'node:url';
@@ -312,13 +311,6 @@ export async function pushProjectMemory(projectName, db) {
         }
         
         await client.query('COMMIT');
-
-        if (pushedMemIds.length > 0) {
-            await syncPgContextPoints(pool, 'ide_agent_memory', pushedMemIds);
-        }
-        if (pushedNugIds.length > 0) {
-            await syncPgContextPoints(pool, 'ide_agent_nuggets', pushedNugIds);
-        }
     } catch (e) {
         try { await client.query('ROLLBACK'); } catch {}
         console.error(`[sqlite-engine] Push failed for ${projectName}:`, e.message);

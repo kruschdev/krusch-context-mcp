@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CORE_TOOL_DEFINITIONS, EXTENDED_CORE_DEFINITIONS, VERSION } from '../src/index.js';
+import { CORE_TOOL_DEFINITIONS, VERSION } from '../src/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,7 +58,7 @@ Decision to standardize on 5 canonical verbs.
   "candidate": {
     "id": 12,
     "similarity": 0.88,
-    "suggestion": "Call revise with action: 'supersede' to replace #12"
+    "action": "Consider revise(action='supersede', target_id=12)"
   }
 }
 \`\`\``,
@@ -66,64 +66,57 @@ Decision to standardize on 5 canonical verbs.
 {
   "ok": true,
   "action": "supersede",
-  "superseded_id": 12,
+  "target_id": 12,
   "new_id": 43,
-  "message": "Memory #12 marked as SUPERSEDED by #43. Lineage preserved."
+  "lineage": {
+    "supersedes_id": 12,
+    "status": "SUPERSEDED"
+  }
 }
 \`\`\``,
-    krusch_context_nudge: `\`\`\`json
-{
-  "ok": true,
-  "trigger": "pre_commit",
-  "findings_count": 1,
-  "findings": [
-    {
-      "rule_id": "invariant-2",
-      "category": "invariant",
-      "severity": "warn",
-      "evidence": "Found better-sqlite3 in package.json",
-      "suggestion": "Standardize on node:sqlite built-in."
-    }
-  ]
-}
+    krusch_context_nudge: `\`\`\`markdown
+🛡️ Pre-Commit Invariant Findings (2 active constraints checked):
+1. [VIOLATION] invariant:db_query_parameterization
+   Line 42 of src/db.js contains raw string template in query.
+   Recommendation: Use parameterized $1 bindings.
 \`\`\``,
-    krusch_context_health: `\`\`\`json
-{
-  "status": "healthy",
-  "version": "1.8.0",
-  "storage": "sqlite",
-  "database_path": "/workspace/.agent/context.db",
-  "counts": {
-    "total": 18,
-    "decision": 7,
-    "invariant": 4,
-    "bug": 3,
-    "lesson": 3,
-    "blocker": 1
-  },
-  "decay_review": []
-}
+    krusch_context_health: `\`\`\`markdown
+=== 🏥 Krusch Context MCP Health Report ===
+* Store Mode: SQLite (.agent/context.db)
+* Total Active Memories: 142
+  - Decisions: 38
+  - Invariants: 44
+  - Bugs: 22
+  - Lessons: 31
+  - Blockers: 7
+* Memories > 30 Days Old: 14 (candidates for review or invalidation)
+* Status: HEALTHY (Operational)
 \`\`\``
 };
 
 function generateMarkdown() {
-    let md = `# Canonical Tool Reference (v${VERSION})\n\n`;
-    md += `*This document is automatically generated from \`src/index.js\` via \`npm run docs:generate\`. Do not edit manually.*\n\n`;
+    let md = `# 📖 Krusch Context MCP Tool Reference (v${VERSION})\n\n`;
+    md += `> Auto-generated from source definitions in \`src/index.js\`. Run \`npm run docs:generate\` to synchronize.\n\n`;
+    md += `Krusch Context MCP enforces a strict **5-verb public contract** (~350 prompt tokens) to maximize host agent accuracy and eliminate tool hallucination.\n\n`;
 
-    md += `## ⚡ Core 5 Verbs (\`core\` profile, default)\n\n`;
-    md += `The default profile exposes strictly **5 canonical verbs** (~350 prompt tokens) for maximum reliability and zero tool soup:\n\n`;
-    md += `| Tool Name | Short Alias | Primary Function |\n`;
+    md += `## ⚡ The 5 Canonical Verbs\n\n`;
+    md += `| Verb | Short Alias | Purpose |\n`;
     md += `| :--- | :--- | :--- |\n`;
-    md += `| \`krusch_context_retrieve\` | \`retrieve\` | Hybrid context & state retrieval with strict token budget packing. |\n`;
-    md += `| \`krusch_context_remember\` | \`remember\` | Unified write API for memories & steering nuggets with near-duplicate warning. |\n`;
-    md += `| \`krusch_context_revise\` | \`revise\` | Temporal superseding and explicit invalidation with mandatory reason. |\n`;
+    md += `| \`krusch_context_retrieve\` | \`retrieve\` | Hydrate project decisions, invariants, and state briefings within a strict token budget. |\n`;
+    md += `| \`krusch_context_remember\` | \`remember\` | Persist lasting facts with closed categories (\`decision\`, \`bug\`, \`invariant\`, \`lesson\`, \`blocker\`) and duplicate warning. |\n`;
+    md += `| \`krusch_context_revise\` | \`revise\` | Update facts via temporal superseding (\`supersede\`) or retire rules with mandatory justification (\`invalidate\`). |\n`;
     md += `| \`krusch_context_nudge\` | \`nudge\` | Pre-edit / pre-commit invariant auditor and alignment feedback weighting. |\n`;
     md += `| \`krusch_context_health\` | \`health\` | Operational diagnostics, closed-category counts, and 30-day TTL decay review. |\n\n`;
 
-    md += `---\n\n## 🔄 Legacy Alias → New Verb Mapping\n\n`;
-    md += `For backward compatibility, legacy tool invocations are automatically intercepted and routed to the corresponding verb:\n\n`;
-    md += `| Legacy Tool (v1.6 / v1.7) | Canonical Replacement (v1.8.0) | Notes |\n`;
+    md += `---\n\n## 🔄 Internal Alias Mapping\n\n`;
+    md += `For backward compatibility, host agent aliases and legacy invocations are automatically intercepted and routed to the corresponding verb:\n\n`;
+    md += `| Invocation / Alias | Canonical Replacement | Notes |\n`;
     md += `| :--- | :--- | :--- |\n`;
+    md += `| \`retrieve\` | \`krusch_context_retrieve\` | Direct shorthand |\n`;
+    md += `| \`remember\` | \`krusch_context_remember\` | Direct shorthand |\n`;
+    md += `| \`revise\` | \`krusch_context_revise\` | Direct shorthand |\n`;
+    md += `| \`nudge\` | \`krusch_context_nudge\` | Direct shorthand |\n`;
+    md += `| \`health\` | \`krusch_context_health\` | Direct shorthand |\n`;
     md += `| \`krusch_context_add_memory\` | \`krusch_context_remember({ content, category })\` | Enforces closed taxonomy |\n`;
     md += `| \`krusch_context_nugget_remember\` | \`krusch_context_remember({ key, content })\` | Sets persistent steering nugget |\n`;
     md += `| \`krusch_context_search_memory\` | \`krusch_context_retrieve({ query, mode: 'memory' })\` | Token budget packed |\n`;
@@ -151,20 +144,9 @@ function generateMarkdown() {
         md += `---\n\n`;
     }
 
-    md += `## 📋 Extended Admin Tools (\`--profile=extended\`)\n\n`;
-    md += `Tools available only when launched with \`--profile=extended\` for manual maintenance:\n\n`;
-
-    for (const tool of EXTENDED_CORE_DEFINITIONS) {
-        md += `### \`${tool.name}\`\n\n`;
-        md += `**Description**: ${tool.description}\n\n`;
-        md += `#### Parameters\n\n`;
-        md += formatSchemaProperties(tool.inputSchema);
-        md += `\n\n`;
-    }
-
     return md;
 }
 
 const content = generateMarkdown();
 fs.writeFileSync(OUTPUT_PATH, content, 'utf-8');
-console.log(`✅ Generated canonical tool reference at ${OUTPUT_PATH} (${CORE_TOOL_DEFINITIONS.length} core, ${EXTENDED_CORE_DEFINITIONS.length} extended)`);
+console.log(`✅ Generated canonical tool reference at ${OUTPUT_PATH} (${CORE_TOOL_DEFINITIONS.length} canonical verbs)`);

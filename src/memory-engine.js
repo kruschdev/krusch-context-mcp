@@ -16,7 +16,6 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
 import { checkNearDuplicateMemory, getStorageMode } from './storage-adapter.js';
 import { generateTagsFromLLM } from './llm-tags.js';
-import { isPgContextEnabled, syncPgContextPoints } from './pgcontext-helper.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
 
 export const CLOSED_CATEGORIES = new Set(['decision', 'bug', 'invariant', 'lesson', 'blocker']);

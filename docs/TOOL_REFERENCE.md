@@ -1,27 +1,32 @@
-# Canonical Tool Reference (v1.8.0)
+# 📖 Krusch Context MCP Tool Reference (v1.8.0)
 
-*This document is automatically generated from `src/index.js` via `npm run docs:generate`. Do not edit manually.*
+> Auto-generated from source definitions in `src/index.js`. Run `npm run docs:generate` to synchronize.
 
-## ⚡ Core 5 Verbs (`core` profile, default)
+Krusch Context MCP enforces a strict **5-verb public contract** (~350 prompt tokens) to maximize host agent accuracy and eliminate tool hallucination.
 
-The default profile exposes strictly **5 canonical verbs** (~350 prompt tokens) for maximum reliability and zero tool soup:
+## ⚡ The 5 Canonical Verbs
 
-| Tool Name | Short Alias | Primary Function |
+| Verb | Short Alias | Purpose |
 | :--- | :--- | :--- |
-| `krusch_context_retrieve` | `retrieve` | Hybrid context & state retrieval with strict token budget packing. |
-| `krusch_context_remember` | `remember` | Unified write API for memories & steering nuggets with near-duplicate warning. |
-| `krusch_context_revise` | `revise` | Temporal superseding and explicit invalidation with mandatory reason. |
+| `krusch_context_retrieve` | `retrieve` | Hydrate project decisions, invariants, and state briefings within a strict token budget. |
+| `krusch_context_remember` | `remember` | Persist lasting facts with closed categories (`decision`, `bug`, `invariant`, `lesson`, `blocker`) and duplicate warning. |
+| `krusch_context_revise` | `revise` | Update facts via temporal superseding (`supersede`) or retire rules with mandatory justification (`invalidate`). |
 | `krusch_context_nudge` | `nudge` | Pre-edit / pre-commit invariant auditor and alignment feedback weighting. |
 | `krusch_context_health` | `health` | Operational diagnostics, closed-category counts, and 30-day TTL decay review. |
 
 ---
 
-## 🔄 Legacy Alias → New Verb Mapping
+## 🔄 Internal Alias Mapping
 
-For backward compatibility, legacy tool invocations are automatically intercepted and routed to the corresponding verb:
+For backward compatibility, host agent aliases and legacy invocations are automatically intercepted and routed to the corresponding verb:
 
-| Legacy Tool (v1.6 / v1.7) | Canonical Replacement (v1.8.0) | Notes |
+| Invocation / Alias | Canonical Replacement | Notes |
 | :--- | :--- | :--- |
+| `retrieve` | `krusch_context_retrieve` | Direct shorthand |
+| `remember` | `krusch_context_remember` | Direct shorthand |
+| `revise` | `krusch_context_revise` | Direct shorthand |
+| `nudge` | `krusch_context_nudge` | Direct shorthand |
+| `health` | `krusch_context_health` | Direct shorthand |
 | `krusch_context_add_memory` | `krusch_context_remember({ content, category })` | Enforces closed taxonomy |
 | `krusch_context_nugget_remember` | `krusch_context_remember({ key, content })` | Sets persistent steering nugget |
 | `krusch_context_search_memory` | `krusch_context_retrieve({ query, mode: 'memory' })` | Token budget packed |
@@ -96,7 +101,7 @@ Decision to standardize on 5 canonical verbs.
   "candidate": {
     "id": 12,
     "similarity": 0.88,
-    "suggestion": "Call revise with action: 'supersede' to replace #12"
+    "action": "Consider revise(action='supersede', target_id=12)"
   }
 }
 ```
@@ -126,9 +131,12 @@ Decision to standardize on 5 canonical verbs.
 {
   "ok": true,
   "action": "supersede",
-  "superseded_id": 12,
+  "target_id": 12,
   "new_id": 43,
-  "message": "Memory #12 marked as SUPERSEDED by #43. Lineage preserved."
+  "lineage": {
+    "supersedes_id": 12,
+    "status": "SUPERSEDED"
+  }
 }
 ```
 
@@ -153,21 +161,11 @@ Decision to standardize on 5 canonical verbs.
 
 #### Example Return Shape
 
-```json
-{
-  "ok": true,
-  "trigger": "pre_commit",
-  "findings_count": 1,
-  "findings": [
-    {
-      "rule_id": "invariant-2",
-      "category": "invariant",
-      "severity": "warn",
-      "evidence": "Found better-sqlite3 in package.json",
-      "suggestion": "Standardize on node:sqlite built-in."
-    }
-  ]
-}
+```markdown
+🛡️ Pre-Commit Invariant Findings (2 active constraints checked):
+1. [VIOLATION] invariant:db_query_parameterization
+   Line 42 of src/db.js contains raw string template in query.
+   Recommendation: Use parameterized $1 bindings.
 ```
 
 ---
@@ -184,73 +182,18 @@ Decision to standardize on 5 canonical verbs.
 
 #### Example Return Shape
 
-```json
-{
-  "status": "healthy",
-  "version": "1.8.0",
-  "storage": "sqlite",
-  "database_path": "/workspace/.agent/context.db",
-  "counts": {
-    "total": 18,
-    "decision": 7,
-    "invariant": 4,
-    "bug": 3,
-    "lesson": 3,
-    "blocker": 1
-  },
-  "decay_review": []
-}
+```markdown
+=== 🏥 Krusch Context MCP Health Report ===
+* Store Mode: SQLite (.agent/context.db)
+* Total Active Memories: 142
+  - Decisions: 38
+  - Invariants: 44
+  - Bugs: 22
+  - Lessons: 31
+  - Blockers: 7
+* Memories > 30 Days Old: 14 (candidates for review or invalidation)
+* Status: HEALTHY (Operational)
 ```
 
 ---
-
-## 📋 Extended Admin Tools (`--profile=extended`)
-
-Tools available only when launched with `--profile=extended` for manual maintenance:
-
-### `krusch_context_list_memories`
-
-**Description**: List memories chronologically for inspection.
-
-#### Parameters
-
-| Parameter | Type | Required | Description |
-| :--- | :--- | :---: | :--- |
-| `category` | `string` | **Yes** |  [decision, bug, invariant, lesson, blocker] |
-| `limit` | `number` | No |  (default: `10`) |
-| `project` | `string` | No |  |
-
-### `krusch_context_delete_memory`
-
-**Description**: Hard-delete a memory record (admin cleanup).
-
-#### Parameters
-
-| Parameter | Type | Required | Description |
-| :--- | :--- | :---: | :--- |
-| `id` | `number` | **Yes** |  |
-| `project` | `string` | No |  |
-
-### `krusch_context_consolidate`
-
-**Description**: Consolidate duplicate memories within a category.
-
-#### Parameters
-
-| Parameter | Type | Required | Description |
-| :--- | :--- | :---: | :--- |
-| `category` | `string` | **Yes** |  [decision, bug, invariant, lesson, blocker] |
-| `threshold` | `number` | No |  (default: `0.15`) |
-| `dry_run` | `boolean` | No |  (default: `false`) |
-| `project` | `string` | No |  |
-
-### `krusch_context_nugget_list`
-
-**Description**: List all persistent steering nuggets.
-
-#### Parameters
-
-| Parameter | Type | Required | Description |
-| :--- | :--- | :---: | :--- |
-| `project` | `string` | No |  |
 
