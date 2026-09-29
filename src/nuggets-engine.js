@@ -14,12 +14,12 @@ const VALID_KINDS = new Set(['project', 'user', 'agent']);
  * @param {string} [params.active_project] - Project context for SQLite isolation
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function nuggetRemember({ key, value, kind = 'project', active_project, project }) {
+export async function nuggetRemember({ key, value, kind = 'project', active_project, project, _embedding }) {
     if (!key || !value) throw new McpError(ErrorCode.InvalidParams, "Missing key or value");
     if (!VALID_KINDS.has(kind)) throw new McpError(ErrorCode.InvalidParams, `Invalid kind: ${kind}. Must be one of: ${[...VALID_KINDS].join(', ')}`);
 
     const targetProject = active_project || project || null;
-    const embeddingArray = await getEmbedding(value);
+    const embeddingArray = _embedding || await getEmbedding(value);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 

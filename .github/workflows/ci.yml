@@ -25,6 +25,8 @@ jobs:
         run: npm ci
 
       - name: Run Test Suite
+        env:
+          MOCK_EMBEDDINGS: "1"
         run: npm test
 
       - name: Instant Failure Push Notification

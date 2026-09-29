@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import dotenv from 'dotenv';
 import { PRIORITY, ollamaQueue } from './llm-queue.js';
 
@@ -187,7 +188,40 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
     }
 
     // Fallback to local Ollama getEmbedding
-    return getOllamaEmbedding(text, priority);
+    const vec = await getOllamaEmbedding(text, priority);
+    if (vec) return vec;
+
+    // Headless / CI fallback: If Ollama and cloud embeddings are unavailable in automated test environments
+    if (process.env.MOCK_EMBEDDINGS === '1' || process.env.CI || process.env.NODE_ENV === 'test') {
+        return generateDeterministicVector(text, getConfiguredEmbeddingDim());
+    }
+
+    return null;
+}
+
+/**
+ * Generate a deterministic unit vector from text hash for offline/CI evaluation
+ * @param {string} text 
+ * @param {number} dim 
+ * @returns {number[]}
+ */
+export function generateDeterministicVector(text, dim = 1024) {
+    if (!text || typeof text !== 'string') return new Array(dim).fill(0);
+    const hash = crypto.createHash('sha256').update(text).digest();
+    const vec = new Array(dim);
+    let norm = 0;
+    for (let i = 0; i < dim; i++) {
+        const b1 = hash[(i * 2) % hash.length];
+        const b2 = hash[(i * 2 + 1) % hash.length];
+        const val = (((b1 << 8) | b2) / 65535) * 2 - 1;
+        vec[i] = val;
+        norm += val * val;
+    }
+    const magnitude = Math.sqrt(norm) || 1;
+    for (let i = 0; i < dim; i++) {
+        vec[i] = Number((vec[i] / magnitude).toFixed(6));
+    }
+    return vec;
 }
 
 const TEXT_EXTENSIONS = new Set([
