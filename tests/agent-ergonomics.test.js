@@ -45,6 +45,25 @@ describe('Agent Ergonomics & Streamlining Suite', () => {
     assert.ok(text.includes('Compiled Project State: krusch-context-mcp'), 'Should prepend compiled project state');
   });
 
+  it('unifiedRetrieve with query="*" should handle universal wildcard safely', async () => {
+    const res = await unifiedRetrieve({
+      query: '*',
+      include_state: false,
+      limit_tokens: 2000
+    });
+    assert.ok(res && res.content && res.content[0]?.text);
+    assert.ok(res.content[0].text.includes('Unified Context Retrieval: "*"'));
+  });
+
+  it('unifiedRetrieve with missing query should default safely without throwing', async () => {
+    const res = await unifiedRetrieve({
+      include_state: false,
+      limit_tokens: 2000
+    });
+    assert.ok(res && res.content && res.content[0]?.text);
+    assert.ok(res.content[0].text.includes('Unified Context Retrieval: "*"'));
+  });
+
   it('CORE_PROMPTS should provide session_start and pre_commit prompts', () => {
     assert.equal(CORE_PROMPTS.length, 2, 'Should define 2 core MCP prompts');
     const promptNames = CORE_PROMPTS.map(p => p.name);

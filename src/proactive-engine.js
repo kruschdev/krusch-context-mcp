@@ -122,6 +122,11 @@ export async function handleProactiveNudge({
         return { content: [{ type: "text", text: "NO_NUDGES_REQUIRED" }] };
     }
 
+    // Bound maximum text to prevent regex DoS on massive diff dumps
+    if (queryText.length > 50000) {
+        queryText = queryText.slice(0, 50000);
+    }
+
     // 3. Retrieve active project invariants & blockers
     const ruleWeights = await getRuleWeights(targetProject);
     const candidateRules = [];
@@ -180,7 +185,8 @@ export async function handleProactiveNudge({
     }
 
     // 5. Format concise Markdown findings (capped to 1-3)
-    let output = `### 🛡️ Invariant Check (${file_path || hook})\n\n`;
+    const triggerLabel = file_path || hook || trigger || 'manual';
+    let output = `### 🛡️ Invariant Check (${triggerLabel})\n\n`;
     output += `Found ${activeViolations.length} relevant active invariant(s) for this action:\n\n`;
 
     for (const v of activeViolations) {

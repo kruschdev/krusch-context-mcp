@@ -49,7 +49,8 @@ import { getEmbedding, getEmbeddingProvider, getConfiguredEmbeddingDim } from '.
 import { pool } from '../db/pool.js';
 import { unifiedRetrieve } from './unified-retrieval.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
-import { getStorageMode, setStorageMode, getSqliteDb } from './storage-adapter.js';
+import { getStorageMode, setStorageMode, getSqliteDb, closeSqliteDb } from './storage-adapter.js';
+import { closeAllDatabases } from './sqlite-engine.js';
 
 // Verify storage initialization (SQLite default, Postgres fallback)
 async function verifyDatabase() {
@@ -364,6 +365,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 });
+
+export async function shutdown() {
+  console.error('[krusch-context-mcp] Shutting down cleanly...');
+  try { closeAllDatabases(); } catch (_) {}
+  try { closeSqliteDb(); } catch (_) {}
+  try { await pool.end(); } catch (_) {}
+  process.exit(0);
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 export async function runServer() {
   await verifyDatabase();

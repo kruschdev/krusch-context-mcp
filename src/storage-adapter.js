@@ -69,6 +69,9 @@ export function getSqliteDb(workspaceDir = process.cwd()) {
     const dbPath = path.join(targetAgentDir, 'context.db');
     const db = new DatabaseSync(dbPath);
     db.exec('PRAGMA journal_mode = WAL;');
+    db.exec('PRAGMA busy_timeout = 5000;');
+    db.exec('PRAGMA synchronous = NORMAL;');
+    db.exec('PRAGMA foreign_keys = ON;');
 
     // Initialize Schema
     db.exec(`
@@ -197,4 +200,14 @@ export async function checkNearDuplicateMemory({ project, category, embedding, t
         return bestMatch;
     }
     return null;
+}
+
+/**
+ * Safely closes active SQLite singleton database if open.
+ */
+export function closeSqliteDb() {
+    if (sqliteInstance) {
+        try { sqliteInstance.close(); } catch (_) {}
+        sqliteInstance = null;
+    }
 }

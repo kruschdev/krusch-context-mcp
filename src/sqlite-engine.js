@@ -94,7 +94,8 @@ function resolveProjectPath(projectName) {
     // 2. Sibling directory match (homelab structure) with containment check
     const projectsRoot = path.resolve(__dirname, '../../');
     const siblingPath = path.resolve(projectsRoot, safeProjectName);
-    if (siblingPath.startsWith(projectsRoot) && fs.existsSync(siblingPath)) {
+    const rel = path.relative(projectsRoot, siblingPath);
+    if (!rel.startsWith('..') && !path.isAbsolute(rel) && rel !== '' && fs.existsSync(siblingPath)) {
         return siblingPath;
     }
 
@@ -327,4 +328,18 @@ export async function pushProjectMemory(projectName, db) {
     } finally {
         if (client) client.release();
     }
+}
+
+/**
+ * Safely closes all cached SQLite project databases.
+ */
+export function closeAllDatabases() {
+    for (const [name, entry] of dbCache.entries()) {
+        try {
+            if (entry && typeof entry.close === 'function') {
+                entry.close();
+            }
+        } catch (_) {}
+    }
+    dbCache.clear();
 }

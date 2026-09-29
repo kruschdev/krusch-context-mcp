@@ -93,6 +93,9 @@ export async function unifiedRetrieve({
 }) {
     const targetProject = project || detectCurrentProject();
     const items = [];
+    const cleanQuery = typeof query === 'string' ? query.trim() : (query ? String(query).trim() : '*');
+    const isWildcard = !cleanQuery || cleanQuery === '*';
+    const lowerQuery = cleanQuery.toLowerCase();
 
     // 1. If mode === 'state' or include_state is requested, compile state briefing
     let stateHeader = "";
@@ -108,8 +111,8 @@ export async function unifiedRetrieve({
         stateHeader = stateText + "\n\n---\n\n";
     }
 
-    // 2. Fetch seed embedding for semantic matching (or use precomputed _embedding)
-    const embeddingArray = _embedding || await getEmbedding(query);
+    // 2. Fetch seed embedding for semantic matching (skip for universal wildcard)
+    const embeddingArray = _embedding || (!isWildcard ? await getEmbedding(cleanQuery) : null);
 
     // 3. Search project memories from local SQLite cache
     if (targetProject) {
@@ -129,24 +132,27 @@ export async function unifiedRetrieve({
                 const rows = db.prepare(memSql).all(...params);
                 for (const r of rows) {
                     let score = 0.5;
-                    if (embeddingArray && r.embedding) {
-                        try {
-                            const vec = typeof r.embedding === 'string' ? JSON.parse(r.embedding) : r.embedding;
-                            score = cosineSimilarity(embeddingArray, vec);
-                        } catch {}
-                    }
-                    const lowerContent = r.content.toLowerCase();
-                    const lowerQuery = query.toLowerCase();
-                    if (lowerContent.includes(lowerQuery)) {
-                        score = Math.max(score, 0.85);
+                    if (isWildcard) {
+                        score = 0.85;
                     } else {
-                        // Multi-term keyword overlap
-                        const terms = lowerQuery.split(/\s+/).filter(t => t.length > 2);
-                        if (terms.length > 0) {
-                            const matches = terms.filter(t => lowerContent.includes(t)).length;
-                            if (matches > 0) {
-                                const overlap = matches / terms.length;
-                                score = Math.max(score, 0.5 + overlap * 0.35);
+                        if (embeddingArray && r.embedding) {
+                            try {
+                                const vec = typeof r.embedding === 'string' ? JSON.parse(r.embedding) : r.embedding;
+                                score = cosineSimilarity(embeddingArray, vec);
+                            } catch {}
+                        }
+                        const lowerContent = r.content.toLowerCase();
+                        if (lowerContent.includes(lowerQuery)) {
+                            score = Math.max(score, 0.85);
+                        } else {
+                            // Multi-term keyword overlap
+                            const terms = lowerQuery.split(/\s+/).filter(t => t.length > 2);
+                            if (terms.length > 0) {
+                                const matches = terms.filter(t => lowerContent.includes(t)).length;
+                                if (matches > 0) {
+                                    const overlap = matches / terms.length;
+                                    score = Math.max(score, 0.5 + overlap * 0.35);
+                                }
                             }
                         }
                     }
@@ -167,8 +173,8 @@ export async function unifiedRetrieve({
                 const nugMap = new Map();
                 for (const n of nugRows) nugMap.set(n.key, n);
                 for (const n of nugMap.values()) {
-                    let score = 0.4;
-                    if (n.key.toLowerCase().includes(query.toLowerCase()) || n.value.toLowerCase().includes(query.toLowerCase())) {
+                    let score = isWildcard ? 0.85 : 0.4;
+                    if (!isWildcard && (n.key.toLowerCase().includes(lowerQuery) || n.value.toLowerCase().includes(lowerQuery))) {
                         score = 0.8;
                     }
                     items.push({
@@ -191,7 +197,7 @@ export async function unifiedRetrieve({
     const packed = packTokenBudget(items, availableTokens);
 
     const stateBadge = (mode === 'state' || include_state) ? ' (State Included)' : '';
-    const fullPayload = `${stateHeader}# 🔍 Unified Context Retrieval: "${query}"${stateBadge}\n` +
+    const fullPayload = `${stateHeader}# 🔍 Unified Context Retrieval: "${cleanQuery}"${stateBadge}\n` +
         `**Tokens**: ~${packed.totalTokens + estimateTokens(stateHeader)} / Budget: ${safeLimitTokens} | ` +
         `**Items Packed**: ${packed.packedCount} / ${items.length} candidates\n\n` +
         packed.contextText;
