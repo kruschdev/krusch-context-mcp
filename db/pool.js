@@ -35,6 +35,11 @@ function getPoolInstance() {
         idleTimeoutMillis: 30000
     });
 
+    // Guard against uncaught idle client crashes (e.g. Postgres restart or network drops)
+    _pool.on('error', (err) => {
+        console.error('[krusch-context-mcp] PostgreSQL pool idle client error:', err.message);
+    });
+
     return _pool;
 }
 

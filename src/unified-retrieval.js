@@ -185,13 +185,14 @@ export async function unifiedRetrieve({
         }
     }
 
-    // 4. Pack token budget strictly
-    const availableTokens = Math.max(500, limit_tokens - estimateTokens(stateHeader));
+    // 4. Pack token budget strictly within bounded limits
+    const safeLimitTokens = Math.min(Math.max(100, Number(limit_tokens) || 4000), 32000);
+    const availableTokens = Math.max(100, safeLimitTokens - estimateTokens(stateHeader));
     const packed = packTokenBudget(items, availableTokens);
 
     const stateBadge = (mode === 'state' || include_state) ? ' (State Included)' : '';
     const fullPayload = `${stateHeader}# 🔍 Unified Context Retrieval: "${query}"${stateBadge}\n` +
-        `**Tokens**: ~${packed.totalTokens + estimateTokens(stateHeader)} / Budget: ${limit_tokens} | ` +
+        `**Tokens**: ~${packed.totalTokens + estimateTokens(stateHeader)} / Budget: ${safeLimitTokens} | ` +
         `**Items Packed**: ${packed.packedCount} / ${items.length} candidates\n\n` +
         packed.contextText;
 

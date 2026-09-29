@@ -78,22 +78,29 @@ export async function getProjectDb(projectName) {
  * Resolves repository path for a project name.
  */
 function resolveProjectPath(projectName) {
+    const rawProject = String(projectName || '').trim();
     // 1. Current workspace match
     const detected = detectCurrentProject();
-    if (projectName === detected || projectName === 'default') {
+    if (!rawProject || rawProject === detected || rawProject === 'default') {
         return process.cwd();
     }
     
-    // 2. Sibling directory match (homelab structure)
+    // Sanitize projectName to strip slashes and prevent directory traversal
+    const safeProjectName = path.basename(rawProject).replace(/[^a-zA-Z0-9_\-\.]/g, '');
+    if (!safeProjectName || safeProjectName === '.' || safeProjectName === '..') {
+        return process.cwd();
+    }
+    
+    // 2. Sibling directory match (homelab structure) with containment check
     const projectsRoot = path.resolve(__dirname, '../../');
-    const siblingPath = path.join(projectsRoot, projectName);
-    if (fs.existsSync(siblingPath)) {
+    const siblingPath = path.resolve(projectsRoot, safeProjectName);
+    if (siblingPath.startsWith(projectsRoot) && fs.existsSync(siblingPath)) {
         return siblingPath;
     }
 
     // 3. Fallback to isolated user project directory
     const homeDir = process.env.HOME || process.env.USERPROFILE || '/tmp';
-    return path.join(homeDir, '.krusch-context', 'projects', projectName);
+    return path.join(homeDir, '.krusch-context', 'projects', safeProjectName);
 }
 
 /**
@@ -110,6 +117,9 @@ async function _initProjectDb(projectName) {
     const dbPath = path.join(agentDir, 'context.db');
     const db = new DatabaseSync(dbPath);
     db.exec('PRAGMA journal_mode = WAL;');
+    db.exec('PRAGMA busy_timeout = 5000;');
+    db.exec('PRAGMA synchronous = NORMAL;');
+    db.exec('PRAGMA foreign_keys = ON;');
 
     
     // Polyfill db.transaction for better-sqlite3 compatibility
