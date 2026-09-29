@@ -42,8 +42,9 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
         }
     }
 
-    const client = await pool.connect();
+    let client = null;
     try {
+        client = await pool.connect();
         const res = await client.query(`
             INSERT INTO ide_agent_nuggets (key, value, kind, embedding)
             VALUES ($1, $2, $3, $4::vector)
@@ -51,11 +52,24 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
             SET value = EXCLUDED.value, kind = EXCLUDED.kind, embedding = EXCLUDED.embedding, updated_at = CURRENT_TIMESTAMP
             RETURNING id
         `, [key, value, kind, embeddingStr]);
+        return { content: [{ type: "text", text: `[krusch-context] 🧠 Global Nugget remembered (Postgres): '${key}'` }] };
+    } catch (err) {
+        console.warn(`[nuggets-engine] PostgreSQL unavailable for global nugget: ${err.message}`);
+        const fallbackProject = targetProject || 'default';
+        const localDb = await getProjectDb(fallbackProject);
+        if (localDb) {
+            localDb.prepare(`
+                INSERT INTO ide_agent_nuggets (key, value, kind, embedding, created_at, updated_at, pg_synced)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
+                ON CONFLICT (key) DO UPDATE 
+                SET value = excluded.value, kind = excluded.kind, embedding = excluded.embedding, updated_at = CURRENT_TIMESTAMP, pg_synced = 0
+            `).run(key, value, kind, embeddingStr);
+            return { content: [{ type: "text", text: `[krusch-context] 🧠 Nugget remembered natively in SQLite (.agent/memory.db) [PG fallback]: '${key}'` }] };
+        }
+        throw err;
     } finally {
-        client.release();
+        if (client) client.release();
     }
-    
-    return { content: [{ type: "text", text: `[krusch-context] 🧠 Global Nugget remembered (Postgres): '${key}'` }] };
 }
 
 
@@ -78,9 +92,10 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project, pr
 
     let combinedResults = [];
 
-    // 1. Fetch from Global Postgres
-    const client = await pool.connect();
+    // 1. Fetch from Global Postgres (if reachable)
+    let client = null;
     try {
+        client = await pool.connect();
         const embeddingStr = `[${embeddingArray.join(',')}]`;
         const fetchLimit = limit * 2;
 
@@ -101,8 +116,10 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project, pr
 
         const res = await client.query(sql, params);
         combinedResults.push(...res.rows);
+    } catch (_) {
+        // Postgres unreachable or table missing; proceed to local SQLite
     } finally {
-        client.release();
+        if (client) client.release();
     }
 
     // 2. Fetch from Local SQLite if project is provided and 'project' kind is allowed
@@ -176,12 +193,16 @@ export async function nuggetForget({ key, active_project, project }) {
         }
     }
 
-    // Fallback to Global Postgres
-    const res = await pool.query(`DELETE FROM ide_agent_nuggets WHERE key = $1 RETURNING key`, [key]);
-    if (res.rowCount === 0) {
+    // Fallback to Global Postgres (if reachable)
+    try {
+        const res = await pool.query(`DELETE FROM ide_agent_nuggets WHERE key = $1 RETURNING key`, [key]);
+        if (res.rowCount === 0) {
+            return { content: [{ type: "text", text: `[krusch-context] ⚠️ No nugget found with key: ${key}` }] };
+        }
+        return { content: [{ type: "text", text: `[krusch-context] 🗑️ Forgot global nugget (Postgres): ${key}` }] };
+    } catch (_) {
         return { content: [{ type: "text", text: `[krusch-context] ⚠️ No nugget found with key: ${key}` }] };
     }
-    return { content: [{ type: "text", text: `[krusch-context] 🗑️ Forgot global nugget (Postgres): ${key}` }] };
 }
 
 /**
@@ -196,9 +217,10 @@ export async function nuggetList({ kinds, active_project, project }) {
     const targetProject = active_project || project || null;
     let combinedResults = [];
 
-    // 1. Fetch from Global Postgres
-    const client = await pool.connect();
+    // 1. Fetch from Global Postgres (if reachable)
+    let client = null;
     try {
+        client = await pool.connect();
         let sql = `SELECT key, value, kind, created_at, updated_at, 'global' as source FROM ide_agent_nuggets`;
         let params = [];
         if (kinds && kinds.length > 0) {
@@ -208,8 +230,10 @@ export async function nuggetList({ kinds, active_project, project }) {
         sql += ` ORDER BY updated_at DESC`;
         const res = await client.query(sql, params);
         combinedResults.push(...res.rows);
+    } catch (_) {
+        // Postgres unreachable; proceed to local SQLite
     } finally {
-        client.release();
+        if (client) client.release();
     }
 
     // 2. Fetch from Local SQLite

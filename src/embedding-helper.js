@@ -187,14 +187,14 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
         }
     }
 
-    // Fallback to local Ollama getEmbedding
-    const vec = await getOllamaEmbedding(text, priority);
-    if (vec) return vec;
-
-    // Headless / CI fallback: If Ollama and cloud embeddings are unavailable in automated test environments
+    // Headless / CI fast bypass: If mock embeddings requested or running in CI/test environment without custom endpoint
     if (process.env.MOCK_EMBEDDINGS === '1' || process.env.CI || process.env.NODE_ENV === 'test') {
         return generateDeterministicVector(text, getConfiguredEmbeddingDim());
     }
+
+    // Fallback to local Ollama getEmbedding
+    const vec = await getOllamaEmbedding(text, priority);
+    if (vec) return vec;
 
     return null;
 }

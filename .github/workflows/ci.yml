@@ -27,17 +27,20 @@ jobs:
       - name: Run Test Suite
         env:
           MOCK_EMBEDDINGS: "1"
-        run: npm test
+        run: |
+          npm test 2>&1 | tee test.log
 
       - name: Instant Failure Push Notification
         if: failure()
         run: |
+          ERR_SNIPPET=$(tail -n 25 test.log 2>/dev/null || echo "No test log found")
           curl -s -X POST \
             -H "Title: 🚨 CI Failure: ${{ github.repository }} (Node 22)" \
             -H "Priority: urgent" \
             -H "Tags: rotating_light,x" \
             -H "Click: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            -d "Run #${{ github.run_number }} failed on ${{ github.ref_name }}. Commit: ${{ github.sha }} by ${{ github.actor }}." \
+            -d "Run #${{ github.run_number }} failed on ${{ github.ref_name }}. Commit: ${{ github.sha }} by ${{ github.actor }}.
+$ERR_SNIPPET" \
             https://ntfy.sh/krusch-ci-alerts || true
 
       - name: Dispatch Webhook Alert (Optional)

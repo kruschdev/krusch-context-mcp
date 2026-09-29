@@ -106,6 +106,16 @@ export async function generateTagsFromLLM(text, options = {}) {
         }
     }
 
+    // Headless / CI fast bypass: If mock embeddings requested or running in CI/test environment without custom endpoint
+    if (!process.env.COMPLETION_URL && !openrouterKey && (process.env.MOCK_EMBEDDINGS === '1' || process.env.CI || process.env.NODE_ENV === 'test')) {
+        const fallbackTags = extractHeuristicTags(text, 5);
+        if (fallbackTags.length > 0) {
+            const finalTags = lowercase ? fallbackTags.map(t => t.toLowerCase()) : fallbackTags;
+            return asJson ? JSON.stringify(finalTags) : finalTags;
+        }
+        return null;
+    }
+
     try {
         const tags = await ollamaQueue.enqueue(async (endpoint) => {
             const url = `${endpoint.replace(/\/$/, '')}/api/generate`;
