@@ -39,8 +39,7 @@ jobs:
             -H "Priority: urgent" \
             -H "Tags: rotating_light,x" \
             -H "Click: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            -d "Run #${{ github.run_number }} failed on ${{ github.ref_name }}. Commit: ${{ github.sha }} by ${{ github.actor }}.
-$ERR_SNIPPET" \
+            -d "Run #${{ github.run_number }} failed on ${{ github.ref_name }}. Commit: ${{ github.sha }} by ${{ github.actor }}. $ERR_SNIPPET" \
             https://ntfy.sh/krusch-ci-alerts || true
 
       - name: Dispatch Webhook Alert (Optional)
