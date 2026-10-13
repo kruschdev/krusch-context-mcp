@@ -1,11 +1,15 @@
-import { describe, it } from 'node:test';
+import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { addMemory, invalidateMemory } from '../src/memory-engine.js';
 import { unifiedRetrieve } from '../src/unified-retrieval.js';
-import { getSqliteDb } from '../src/storage-adapter.js';
+import { closeAllDatabases } from '../src/sqlite-engine.js';
 
 describe('Offline Smoke Test Suite (Zero-Docker, Zero-Embedding-Service)', () => {
   const testProject = `smoke_test_${Date.now()}`;
+  const projectDup = `smoke_dup_${Date.now()}`;
   const dummyEmbedding = new Array(1024).fill(0.05);
 
   it('1. remember invariant -> retrieve finds it', async () => {
@@ -55,7 +59,6 @@ describe('Offline Smoke Test Suite (Zero-Docker, Zero-Embedding-Service)', () =>
   });
 
   it('3. remember near-dup -> returns candidate id + supersede suggestion without blocking', async () => {
-    const projectDup = `smoke_dup_${Date.now()}`;
     const dupEmbedding = new Array(1024).fill(0).map((_, i) => i === 0 ? 1.0 : 0.0);
     const text = 'Near-duplicate invariant: Service workers must register within 500ms of boot.';
 
@@ -86,5 +89,14 @@ describe('Offline Smoke Test Suite (Zero-Docker, Zero-Embedding-Service)', () =>
     assert.equal(dupRes.suggested_action.action, 'supersede', 'Suggested action must be supersede');
     assert.equal(dupRes.suggested_action.target_id, firstRes.id, 'Suggested action target must be candidate ID');
     assert.ok(dupRes.id, 'Non-blocking: must assign new ID and not abort the write');
+  });
+
+  after(() => {
+    closeAllDatabases();
+    for (const p of [testProject, projectDup]) {
+      try {
+        fs.rmSync(path.join(os.homedir(), '.krusch-context', 'projects', p), { recursive: true, force: true });
+      } catch {}
+    }
   });
 });

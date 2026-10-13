@@ -5,13 +5,16 @@
 
 import test from 'node:test';
 import assert from 'node:assert';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { addMemory, searchMemory, supersedeMemory, invalidateMemory } from '../src/memory-engine.js';
-import { getProjectDb } from '../src/sqlite-engine.js';
+import { getProjectDb, closeAllDatabases } from '../src/sqlite-engine.js';
 import { pool } from '../db/pool.js';
 
 const mockEmbedding = new Array(1024).fill(0.1);
-const testProject = 'krusch-nexus';
 const runId = Date.now();
+const testProject = `test_inv_${runId}`;
 const keywordMarker = `rule_${runId}`;
 
 test('MobileMem Memory Invalidation & Superseding Engine', async (t) => {
@@ -120,6 +123,10 @@ test('MobileMem Memory Invalidation & Superseding Engine', async (t) => {
     });
 
     t.after(async () => {
+        closeAllDatabases();
+        try {
+            fs.rmSync(path.join(os.homedir(), '.krusch-context', 'projects', testProject), { recursive: true, force: true });
+        } catch {}
         await pool.end();
     });
 });

@@ -129,6 +129,7 @@ export async function unifiedRetrieve({
                     memSql += ` AND category = ?`;
                     params.push(category);
                 }
+                memSql += ` ORDER BY id DESC`;
                 const rows = db.prepare(memSql).all(...params);
                 for (const r of rows) {
                     let score = 0.5;

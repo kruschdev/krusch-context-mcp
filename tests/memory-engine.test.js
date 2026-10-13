@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import {
   addMemory,
   searchMemory,
@@ -10,11 +13,12 @@ import {
   getHealthStats,
   CLOSED_CATEGORIES
 } from '../src/memory-engine.js';
+import { closeAllDatabases } from '../src/sqlite-engine.js';
 import { pool } from '../db/pool.js';
 
 test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async (t) => {
-  const testProject = 'krusch-context-mcp';
   const uniqueTag = `run_${Date.now()}`;
+  const testProject = `test_mem_${uniqueTag}`;
 
   await t.test('1. Rejects invalid category outside closed taxonomy', async () => {
     await assert.rejects(
@@ -90,7 +94,7 @@ test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async
   await t.test('5. compileProjectState compiles closed categories, nuggets, and decay review', async () => {
     const res = await compileProjectState({ project: testProject });
     const text = res.content[0].text;
-    assert.ok(text.includes('Compiled Project State: krusch-context-mcp'));
+    assert.ok(text.includes(`Compiled Project State: ${testProject}`));
     assert.ok(text.includes('Decisions & Priorities'));
     assert.ok(text.includes('Project Invariants'));
   });
@@ -103,6 +107,10 @@ test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async
   });
 
   t.after(async () => {
+    closeAllDatabases();
+    try {
+      fs.rmSync(path.join(os.homedir(), '.krusch-context', 'projects', testProject), { recursive: true, force: true });
+    } catch {}
     try {
       await pool.end();
     } catch {}

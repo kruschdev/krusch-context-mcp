@@ -214,6 +214,9 @@ export async function pullProjectMemory(projectName, db) {
     if (!process.env.DATABASE_URL && !process.env.DB_PASSWORD) {
         return; // Skip if postgres not configured
     }
+    if (/^(test_|smoke_)/i.test(String(projectName || ''))) {
+        return; // Never pull into ephemeral test projects
+    }
     let client;
     try {
         client = await pool.connect();
@@ -267,6 +270,9 @@ export async function pullProjectMemory(projectName, db) {
 export async function pushProjectMemory(projectName, db) {
     if (!process.env.DATABASE_URL && !process.env.DB_PASSWORD) {
         return; // Skip if postgres not configured
+    }
+    if (/^(test_|smoke_)/i.test(String(projectName || ''))) {
+        return; // Never push ephemeral test projects to production Postgres
     }
     let client;
     try {
