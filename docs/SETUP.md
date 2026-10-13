@@ -121,6 +121,8 @@ EMBED_DIMS=1024
 
 Codebase search and domain-specific engines run as separate MCP servers:
 
+* **Personal AI Assistant**: [`krusch-companion`](https://github.com/kruschdev/krusch-companion)
+* **Microsecond Cascade Routing**: [`krusch-cascade-router`](https://github.com/kruschdev/krusch-cascade-router)
 * **Codebase RAG & AST Search**: [`krusch-git`](https://github.com/kruschdev/krusch-git)
 * **Document Ingestion**: [`krusch-nexus`](https://github.com/kruschdev/krusch-nexus)
 * **Statutory Compliance**: [`krusch-law`](https://github.com/kruschdev/krusch-law)
