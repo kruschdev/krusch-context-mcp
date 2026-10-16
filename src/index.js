@@ -85,6 +85,12 @@ export const CORE_TOOL_DEFINITIONS = [
   {
     name: "krusch_context_retrieve",
     description: "Universal context retrieval tool. Pulls active project memories, steering rules, and state briefings respecting token budget limits.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -101,6 +107,12 @@ export const CORE_TOOL_DEFINITIONS = [
   {
     name: "krusch_context_remember",
     description: "Unified write API for episodic memory and persistent steering nuggets. Includes automatic near-duplicate detection and provenance tracking.",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -128,6 +140,12 @@ export const CORE_TOOL_DEFINITIONS = [
   {
     name: "krusch_context_revise",
     description: "Unified knowledge revision API. Supports temporal superseding (updating stale knowledge with lineage) and explicit invalidations (revoking obsolete rules with mandatory reason).",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -146,6 +164,12 @@ export const CORE_TOOL_DEFINITIONS = [
   {
     name: "krusch_context_nudge",
     description: "Invariant auditor and alignment feedback loop. Checks proposed code diffs or actions against active project invariants, and adjusts rule weights based on developer feedback.",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -163,6 +187,12 @@ export const CORE_TOOL_DEFINITIONS = [
   {
     name: "krusch_context_health",
     description: "Operational health check, memory counts by closed taxonomy, storage mode, and 30-day TTL decay review.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       properties: {
