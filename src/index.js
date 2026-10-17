@@ -131,6 +131,9 @@ export const CORE_TOOL_DEFINITIONS = [
             end_line: { type: "number" },
             anchor_hash: { type: "string" },
             author: { type: "string", enum: ['human', 'agent'], default: 'agent' },
+            host_node: { type: "string", description: "Optional fleet node name (auto-detected if omitted)" },
+            client: { type: "string", description: "Optional MCP client/app name (auto-detected from MCP handshake if omitted)" },
+            model: { type: "string", description: "Optional AI model identifier (recorded only when supplied)" },
             confidence: { type: "number", default: 1.0 }
           },
           description: "Provenance & KruschNexus span-grounding metadata"
@@ -273,7 +276,11 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 
 // MCP Tool Execution Handler
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args = {} } = request.params;
+  const { name, arguments: rawArgs = {} } = request.params;
+  const connectedClient = server.getClientVersion?.()?.name || null;
+  const args = (connectedClient && !rawArgs?.provenance?.client)
+    ? { ...rawArgs, provenance: { ...(rawArgs.provenance || {}), client: connectedClient } }
+    : rawArgs;
 
   try {
     // 1. krusch_context_retrieve (alias: retrieve)

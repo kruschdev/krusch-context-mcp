@@ -99,6 +99,8 @@ export async function unifiedRetrieve({
 
     // 1. If mode === 'state' or include_state is requested, compile state briefing
     let stateHeader = "";
+    let statePackedIds = new Set();
+    let statePackedNuggets = new Set();
     if (mode === 'state' || include_state) {
         const stateRes = await compileProjectState({ project: targetProject });
         const stateText = stateRes?.content?.[0]?.text || "";
@@ -109,6 +111,12 @@ export async function unifiedRetrieve({
             };
         }
         stateHeader = stateText + "\n\n---\n\n";
+        if (Array.isArray(stateRes?.packedIds)) {
+            statePackedIds = new Set(stateRes.packedIds);
+        }
+        if (Array.isArray(stateRes?.packedNuggetKeys)) {
+            statePackedNuggets = new Set(stateRes.packedNuggetKeys);
+        }
     }
 
     // 2. Fetch seed embedding for semantic matching (skip for universal wildcard)
@@ -132,6 +140,9 @@ export async function unifiedRetrieve({
                 memSql += ` ORDER BY id DESC`;
                 const rows = db.prepare(memSql).all(...params);
                 for (const r of rows) {
+                    if (include_state && statePackedIds.has(r.id)) {
+                        continue; // Avoid re-packing memories already rendered in compileProjectState
+                    }
                     let score = 0.5;
                     if (isWildcard) {
                         score = 0.85;
@@ -174,6 +185,9 @@ export async function unifiedRetrieve({
                 const nugMap = new Map();
                 for (const n of nugRows) nugMap.set(n.key, n);
                 for (const n of nugMap.values()) {
+                    if (include_state && statePackedNuggets.has(n.key)) {
+                        continue; // Avoid re-packing nuggets already rendered in compileProjectState
+                    }
                     let score = isWildcard ? 0.85 : 0.4;
                     if (!isWildcard && (n.key.toLowerCase().includes(lowerQuery) || n.value.toLowerCase().includes(lowerQuery))) {
                         score = 0.8;

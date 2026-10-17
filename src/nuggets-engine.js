@@ -2,6 +2,7 @@ import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
+import { scanForSecretLeak } from './memory-engine.js';
 
 const VALID_KINDS = new Set(['project', 'user', 'agent']);
 
@@ -17,6 +18,14 @@ const VALID_KINDS = new Set(['project', 'user', 'agent']);
 export async function nuggetRemember({ key, value, kind = 'project', active_project, project, _embedding }) {
     if (!key || !value) throw new McpError(ErrorCode.InvalidParams, "Missing key or value");
     if (!VALID_KINDS.has(kind)) throw new McpError(ErrorCode.InvalidParams, `Invalid kind: ${kind}. Must be one of: ${[...VALID_KINDS].join(', ')}`);
+
+    const leakedSecretType = scanForSecretLeak(String(value));
+    if (leakedSecretType) {
+        throw new McpError(
+            ErrorCode.InvalidParams,
+            `Secret refusal: nugget rejected because value appears to contain a raw credential (${leakedSecretType}). Redact secrets as [REDACTED] before calling krusch_context_remember.`
+        );
+    }
 
     const targetProject = active_project || project || null;
     const embeddingArray = _embedding || await getEmbedding(value);

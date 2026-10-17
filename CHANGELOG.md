@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `evaluateMemorySpanDrift` in `src/memory-engine.js`: when `retrieve(include_state: true)` compiles project state, anchored memories verify their `anchor_hash` against disk. If lines shifted above the span (`quoted_sentence` still present verbatim), `start_line..end_line` self-heals automatically; if the anchored span was mutated or deleted, the memory is surfaced under `## ⚠️ Span-Grounded Drift Review` for `revise` review.
   - Enhanced `krusch_context_nudge` (`src/proactive-engine.js`) with deterministic file/span provenance matching so invariants anchored to a specific `provenance.file` or `provenance.quoted_sentence` trigger with high precision when that file or span is modified.
   - Added `anchored` and `drifted` span counts to `krusch_context_health`.
+- **Pre-Write Secret Refusal, Fleet Attribution & Session Briefing Hygiene**:
+  - Added deterministic secret refusal (`scanForSecretLeak`) in `addMemory` and `nuggetRemember` to block raw API keys, PATs, and private keys before persistence.
+  - Enriched `provenance` with `host_node`, `client` (auto-detected via MCP handshake `server.getClientVersion()`), and `model` attribution.
+  - Added dedicated `## 🤝 Active Session Handoff` banner (`key: 'handoff'`) and prioritized open `blocker` records ahead of resolved `bug` postmortems in `compileProjectState`.
+  - Deduplicated state-packed memory IDs and nugget keys in `unifiedRetrieve({ include_state: true })` so wildcard session hydrations never double-pack the top state header records.
 - **Database Connection String Support**:
   - Updated `db/pool.js` to accept `DATABASE_URL` or `DBOS_DATABASE_URL` directly when running in optional `postgres` storage mode.
 

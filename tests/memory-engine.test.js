@@ -161,6 +161,113 @@ test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async
     assert.ok(nudgeRes.content[0].text.includes('DRIFTED: config.js'));
   });
 
+  await t.test('8. Secret Refusal, Fleet Attribution, Handoff/Blocker Priority & State Deduplication', async () => {
+    const { nuggetRemember } = await import('../src/nuggets-engine.js');
+    const { unifiedRetrieve } = await import('../src/unified-retrieval.js');
+    const dummyEmb = new Array(1024).fill(0.05);
+
+    // 8a. Secret refusal blocks raw API keys in addMemory and nuggetRemember
+    await assert.rejects(
+      async () => {
+        await addMemory({
+          category: 'lesson',
+          content: 'Never commit key sk-proj-1234567890abcdefghijklmnop to git',
+          project: testProject,
+          _embedding: dummyEmb
+        });
+      },
+      (err) => {
+        assert.ok(err.message.includes('Secret refusal'));
+        return true;
+      }
+    );
+
+    await assert.rejects(
+      async () => {
+        await nuggetRemember({
+          key: 'api_token',
+          value: 'ghp_1234567890abcdefghijklmnopqrstuvwxyz',
+          project: testProject,
+          _embedding: dummyEmb
+        });
+      },
+      (err) => {
+        assert.ok(err.message.includes('Secret refusal'));
+        return true;
+      }
+    );
+
+    // 8b. Handoff nugget renders at top of compileProjectState, and blockers surface before bugs
+    await nuggetRemember({
+      key: 'handoff',
+      value: 'Paused after migrating schema; next step is running integration suite.',
+      project: testProject,
+      _embedding: dummyEmb
+    });
+
+    // Add 5 resolved bug records, then 1 active blocker
+    for (let i = 1; i <= 5; i++) {
+      await addMemory({
+        category: 'bug',
+        content: `Resolved historical bug #${i} (${uniqueTag})`,
+        tags: ['test'],
+        project: testProject,
+        force: true,
+        _embedding: dummyEmb
+      });
+    }
+    const blockerRes = await addMemory({
+      category: 'blocker',
+      content: `Critical active blocker: port 5432 firewall rule pending (${uniqueTag})`,
+      tags: ['test'],
+      project: testProject,
+      provenance: { client: 'antigravity', model: 'gemini-4-argon' },
+      force: true,
+      _embedding: dummyEmb
+    });
+
+    const stateRes = await compileProjectState({ project: testProject });
+    const stateText = stateRes.content[0].text;
+    assert.ok(stateText.includes('## 🤝 Active Session Handoff'), 'Must render Active Session Handoff banner');
+    assert.ok(stateText.includes('Paused after migrating schema'), 'Must include handoff note');
+    const blockerPos = stateText.indexOf(`#${blockerRes.id}** [blocker]`);
+    assert.ok(blockerPos !== -1, 'Active blocker must not be crowded out by resolved bugs');
+
+    // 8c. unifiedRetrieve with include_state=true does not re-pack items already in stateHeader
+    const extraDecision = await addMemory({
+      category: 'decision',
+      content: `Older decision #0 beyond top-5 state slice (${uniqueTag})`,
+      tags: ['test'],
+      project: testProject,
+      force: true,
+      _embedding: dummyEmb
+    });
+    for (let i = 1; i <= 5; i++) {
+      await addMemory({
+        category: 'decision',
+        content: `Top-5 decision #${i} in state header (${uniqueTag})`,
+        tags: ['test'],
+        project: testProject,
+        force: true,
+        _embedding: dummyEmb
+      });
+    }
+
+    const freshStateRes = await compileProjectState({ project: testProject });
+    const retRes = await unifiedRetrieve({
+      query: '*',
+      include_state: true,
+      limit_tokens: 4000,
+      project: testProject,
+      _embedding: dummyEmb
+    });
+    const citedIds = new Set(retRes.citations.filter(c => c.type === 'memory').map(c => c.id));
+    for (const packedId of freshStateRes.packedIds) {
+      assert.ok(!citedIds.has(packedId), `Memory #${packedId} already in stateHeader must not be duplicated in packed items`);
+    }
+    assert.ok(citedIds.has(extraDecision.id), 'Unpacked memory outside top-5 state slice should be packed in retrieval section');
+  });
+
   t.after(async () => {
     closeAllDatabases();
     try {

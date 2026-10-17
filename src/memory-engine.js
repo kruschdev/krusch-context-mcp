@@ -12,6 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
@@ -24,6 +25,27 @@ import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
 export const CLOSED_CATEGORIES = new Set(['decision', 'bug', 'invariant', 'lesson', 'blocker']);
 const DECAY_RATE = 0.01;
 const AUTO_TAG = true;
+
+const SECRET_PATTERNS = [
+    { label: 'OpenAI/Anthropic API Key', regex: /\bsk-(?:proj|ant|live)-[A-Za-z0-9_-]{20,}\b/ },
+    { label: 'GitHub Personal Access Token', regex: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}\b|\bgithub_pat_[A-Za-z0-9_]{35,}\b/ },
+    { label: 'Google API Key', regex: /\bAIza[0-9A-Za-z_-]{35}\b/ },
+    { label: 'AWS Access Key ID', regex: /\bAKIA[0-9A-Z]{16}\b/ },
+    { label: 'Slack Token', regex: /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/ },
+    { label: 'Private Key Block', regex: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/ }
+];
+
+/**
+ * Scans text for raw credentials/secrets before persistence (FlowState secrets_scan parity).
+ * Returns null if clean, or the matched secret pattern label if a leak is detected.
+ */
+export function scanForSecretLeak(text) {
+    if (!text || typeof text !== 'string') return null;
+    for (const { label, regex } of SECRET_PATTERNS) {
+        if (regex.test(text)) return label;
+    }
+    return null;
+}
 
 /**
  * Computes normalized SHA-256 hash of a text span or file page (KruschNexus INV-12 parity).
@@ -81,7 +103,8 @@ function getSpanLineRange(text, charStart, charEnd) {
 }
 
 /**
- * Enriches provenance metadata with KruschNexus-style citation spine coordinates and SHA-256 anchor_hash.
+ * Enriches provenance metadata with KruschNexus-style citation spine coordinates,
+ * SHA-256 anchor_hash, and multi-agent fleet attribution (host_node, client, model).
  */
 export function anchorProvenanceToFile(provenance, targetProject) {
     const base = {
@@ -89,6 +112,9 @@ export function anchorProvenanceToFile(provenance, targetProject) {
         commit: provenance?.commit || null,
         pr: provenance?.pr || null,
         author: provenance?.author || 'agent',
+        host_node: provenance?.host_node || process.env.KRUSCH_NODE || os.hostname(),
+        client: provenance?.client || process.env.MCP_CLIENT_NAME || null,
+        model: provenance?.model || process.env.KRUSCH_MODEL || null,
         confidence: provenance?.confidence ?? 1.0,
         locator: provenance?.locator || null,
         quoted_sentence: provenance?.quoted_sentence || null,
@@ -287,6 +313,14 @@ export async function addMemory({
 }) {
     if (!content || typeof content !== 'string' || !content.trim()) {
         throw new McpError(ErrorCode.InvalidParams, "Parameter 'content' must be non-empty text");
+    }
+
+    const leakedSecretType = scanForSecretLeak(content);
+    if (leakedSecretType) {
+        throw new McpError(
+            ErrorCode.InvalidParams,
+            `Secret refusal: write rejected because content appears to contain a raw credential (${leakedSecretType}). Redact secrets as [REDACTED] before calling krusch_context_remember.`
+        );
     }
 
     const normCat = normalizeCategory(category);
@@ -519,17 +553,21 @@ export async function compileProjectState({ project, active_project } = {}) {
 
     const decisions = [];
     const invariants = [];
+    const blockers = [];
     const bugs = [];
     const lessons = [];
+    const handoffs = [];
     const nuggets = [];
     const invalidated = [];
     const drifted = [];
+    const packedIds = [];
+    const packedNuggetKeys = [];
 
     if (db) {
         const rows = db.prepare(`
             SELECT id, category, content, status, invalidated_reason, provenance, created_at
             FROM ide_agent_memory
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
         `).all();
 
         for (const r of rows) {
@@ -547,14 +585,22 @@ export async function compileProjectState({ project, active_project } = {}) {
 
             if (r.category === 'decision') decisions.push(r);
             else if (r.category === 'invariant') invariants.push(r);
-            else if (r.category === 'bug' || r.category === 'blocker') bugs.push(r);
+            else if (r.category === 'blocker') blockers.push(r);
+            else if (r.category === 'bug') bugs.push(r);
             else lessons.push(r);
         }
 
         const nugRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets ORDER BY updated_at ASC`).all();
         const nugMap = new Map();
         for (const n of nugRows) nugMap.set(n.key, n);
-        nuggets.push(...nugMap.values());
+        for (const n of nugMap.values()) {
+            const lowerKey = String(n.key || '').toLowerCase();
+            if (lowerKey === 'handoff' || lowerKey.startsWith('handoff:')) {
+                handoffs.push(n);
+            } else {
+                nuggets.push(n);
+            }
+        }
     }
 
     const stale = await getStaleMemories({ project: targetProject, days: 30 });
@@ -566,30 +612,56 @@ export async function compileProjectState({ project, active_project } = {}) {
 
     let output = `# 🧠 Compiled Project State: ${targetProject}\n\n`;
 
+    if (handoffs.length > 0) {
+        output += `## 🤝 Active Session Handoff (${handoffs.length})\n`;
+        for (const h of handoffs) {
+            packedNuggetKeys.push(h.key);
+            output += `- **${h.key}**: ${h.value}\n`;
+        }
+        output += `\n`;
+    }
+
     output += `## 🎯 Decisions & Priorities (${decisions.length})\n`;
     if (decisions.length === 0) output += `- No active decisions or priorities recorded.\n`;
-    for (const d of decisions.slice(0, 5)) output += `- **#${d.id}**: ${d.content}${formatSpanBadge(d)}\n`;
+    for (const d of decisions.slice(0, 5)) {
+        packedIds.push(d.id);
+        output += `- **#${d.id}**: ${d.content}${formatSpanBadge(d)}\n`;
+    }
     output += `\n`;
 
 
     output += `## 🛡️ Project Invariants (${invariants.length})\n`;
     if (invariants.length === 0) output += `- No invariants recorded.\n`;
-    for (const inv of invariants.slice(0, 5)) output += `- **#${inv.id}**: ${inv.content}${formatSpanBadge(inv)}\n`;
+    for (const inv of invariants.slice(0, 5)) {
+        packedIds.push(inv.id);
+        output += `- **#${inv.id}**: ${inv.content}${formatSpanBadge(inv)}\n`;
+    }
     output += `\n`;
 
-    output += `## 🐛 Known Bugs & Blockers (${bugs.length})\n`;
-    if (bugs.length === 0) output += `- Zero active blockers.\n`;
-    for (const b of bugs.slice(0, 5)) output += `- **#${b.id}** [${b.category}]: ${b.content}${formatSpanBadge(b)}\n`;
+    // Active blockers always surface ahead of resolved historical bug postmortems
+    const bugsAndBlockers = [...blockers, ...bugs];
+    output += `## 🐛 Known Bugs & Blockers (${bugsAndBlockers.length})\n`;
+    if (bugsAndBlockers.length === 0) output += `- Zero active blockers.\n`;
+    for (const b of bugsAndBlockers.slice(0, 5)) {
+        packedIds.push(b.id);
+        output += `- **#${b.id}** [${b.category}]: ${b.content}${formatSpanBadge(b)}\n`;
+    }
     output += `\n`;
 
     output += `## 📖 Core Lessons (${lessons.length})\n`;
     if (lessons.length === 0) output += `- No lessons recorded yet.\n`;
-    for (const l of lessons.slice(0, 5)) output += `- **#${l.id}**: ${l.content}${formatSpanBadge(l)}\n`;
+    for (const l of lessons.slice(0, 5)) {
+        packedIds.push(l.id);
+        output += `- **#${l.id}**: ${l.content}${formatSpanBadge(l)}\n`;
+    }
     output += `\n`;
 
     if (nuggets.length > 0) {
         output += `## ⚡ Steering Nuggets (${nuggets.length})\n`;
-        for (const n of nuggets) output += `- **${n.key}**: ${n.value}\n`;
+        for (const n of nuggets) {
+            packedNuggetKeys.push(n.key);
+            output += `- **${n.key}**: ${n.value}\n`;
+        }
         output += `\n`;
     }
 
@@ -618,7 +690,11 @@ export async function compileProjectState({ project, active_project } = {}) {
         output += `\n`;
     }
 
-    return { content: [{ type: "text", text: output }] };
+    return {
+        content: [{ type: "text", text: output }],
+        packedIds,
+        packedNuggetKeys
+    };
 }
 
 /**
