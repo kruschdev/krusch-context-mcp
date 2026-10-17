@@ -13,7 +13,7 @@ A lean, durable, and domain-agnostic **Universal Memory and Steering Engine** fo
                                │ MCP Protocol (5 Verbs)
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  krusch-context-mcp (v1.8.0)                │
+│                  krusch-context-mcp (v1.8.1)                │
 │                                                             │
 │   retrieve        remember        revise     nudge   health │
 │   (budget)     (dup-detection)  (lineage)   (audit)  (TTL)  │
@@ -47,7 +47,7 @@ Stores historical learnings, decisions, and constraints with temporal lineage an
 | `supersedes_id`| `INTEGER` | ID of predecessor memory record this replaces. |
 | `superseded_by`| `INTEGER` | ID of successor memory record that superseded this record. |
 | `invalidated_reason` | `TEXT` | Mandatory justification required when invalidating. |
-| `provenance` | `TEXT` | JSON object: `{ file, commit, pr, author, confidence, recorded_at }`. |
+| `provenance` | `TEXT` | JSON object: `{ file, locator, quoted_sentence, start_line, end_line, anchor_hash, commit, pr, author, confidence, recorded_at }`. |
 | `created_at` | `DATETIME` | Timestamp of creation. |
 
 ### `ide_agent_nuggets` (Steering Rules)
@@ -95,6 +95,9 @@ Calling `revise` with `action: 'invalidate'` requires a non-empty `reason` strin
 
 ### 4. 30-Day TTL Decay Review
 Memories unreferenced or inactive for more than 30 days are surfaced in `health` and `retrieve({ include_state: true })` under the **Decay Review** section for developer evaluation.
+
+### 5. Span-Grounded Provenance & Drift Self-Healing (`INV-12`)
+When `remember` includes `provenance: { file, locator, quoted_sentence }`, the engine anchors the memory to an exact line range (`start_line..end_line`) and normalized SHA-256 `anchor_hash` without duplicating full file contents. On subsequent `retrieve({ include_state: true })` calls, `evaluateMemorySpanDrift` checks the anchored file on disk: if lines were inserted above the span (`quoted_sentence` still exists verbatim), line offsets self-heal automatically; if the span was mutated or deleted, the memory is flagged under `## ⚠️ Span-Grounded Drift Review`.
 
 ---
 
