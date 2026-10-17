@@ -1,4 +1,4 @@
-# 📖 Krusch Context MCP Tool Reference (v1.8.0)
+# 📖 Krusch Context MCP Tool Reference (v1.8.1)
 
 > Auto-generated from source definitions in `src/index.js`. Run `npm run docs:generate` to synchronize.
 
@@ -84,7 +84,7 @@ Decision to standardize on 5 canonical verbs.
 | `content` | `string` | **Yes** | The fact, lesson, decision, or invariant to remember |
 | `category` | `string` | No | Closed category taxonomy [decision, bug, invariant, lesson, blocker] (default: `lesson`) |
 | `key` | `string` | No | Optional key to store as a persistent steering nugget |
-| `provenance` | `object` | No | Provenance metadata |
+| `provenance` | `object` | No | Provenance & KruschNexus span-grounding metadata |
 | `tags` | `array` | No | Optional descriptive tags |
 | `force` | `boolean` | No | If true, bypasses near-duplicate warnings (default: `false`) |
 | `project` | `string` | No | Target project |

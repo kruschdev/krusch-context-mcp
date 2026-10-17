@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import { chat } from './llm.js';
-import { searchMemory } from './memory-engine.js';
+import { searchMemory, evaluateMemorySpanDrift } from './memory-engine.js';
 import { nuggetNudges } from './nuggets-engine.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
@@ -130,13 +130,14 @@ export async function handleProactiveNudge({
     // 3. Retrieve active project invariants & blockers
     const ruleWeights = await getRuleWeights(targetProject);
     const candidateRules = [];
+    let projectDb = null;
 
     if (targetProject) {
         try {
-            const db = await getProjectDb(targetProject);
-            if (db) {
-                const rows = db.prepare(`
-                    SELECT id, category, content
+            projectDb = await getProjectDb(targetProject);
+            if (projectDb) {
+                const rows = projectDb.prepare(`
+                    SELECT id, category, content, provenance
                     FROM ide_agent_memory
                     WHERE status = 'ACTIVE' AND category IN ('invariant', 'blocker', 'bug')
                 `).all();
@@ -144,12 +145,20 @@ export async function handleProactiveNudge({
                 for (const r of rows) {
                     const weight = ruleWeights.has(String(r.id)) ? ruleWeights.get(String(r.id)) : 1.0;
                     if (weight > 0.2) {
-                        candidateRules.push({ id: r.id, category: r.category, content: r.content, weight });
+                        const driftCheck = evaluateMemorySpanDrift(r, targetProject, projectDb);
+                        candidateRules.push({
+                            id: r.id,
+                            category: r.category,
+                            content: r.content,
+                            weight,
+                            provenance: driftCheck.provenance,
+                            is_drifted: driftCheck.is_drifted
+                        });
                     }
                 }
 
                 // Add active nuggets
-                const nugs = db.prepare(`SELECT key, value FROM ide_agent_nuggets`).all();
+                const nugs = projectDb.prepare(`SELECT key, value FROM ide_agent_nuggets`).all();
                 for (const n of nugs) {
                     const weight = ruleWeights.has(n.key) ? ruleWeights.get(n.key) : 1.0;
                     if (weight > 0.2) {
@@ -166,18 +175,41 @@ export async function handleProactiveNudge({
         return { content: [{ type: "text", text: "NO_NUDGES_REQUIRED" }] };
     }
 
-    // 4. Quick keyword/heuristic check to filter down relevant rules
+    // 4. Deterministic KruschNexus span/file matching first, then keyword/heuristic check
     const activeViolations = [];
+    const seenIds = new Set();
     const lowerQuery = queryText.toLowerCase();
+    const lowerFilePath = (file_path || '').toLowerCase();
 
     for (const rule of candidateRules) {
-        // Extract key terms (words > 4 chars) from rule content
-        const words = rule.content.toLowerCase().split(/\W+/).filter(w => w.length > 4 && !['should', 'always', 'never', 'before', 'after'].includes(w));
-        const matchedWord = words.find(w => lowerQuery.includes(w));
-        if (matchedWord) {
-            activeViolations.push(rule);
+        const prov = rule.provenance;
+        if (!prov) continue;
+        const provFile = (prov.file || '').toLowerCase();
+        const quotedSpan = (prov.quoted_sentence || '').toLowerCase();
+        const fileMatched = provFile && (
+            (lowerFilePath && (lowerFilePath.endsWith(provFile) || provFile.endsWith(lowerFilePath))) ||
+            lowerQuery.includes(provFile)
+        );
+        const quoteMatched = quotedSpan && lowerQuery.includes(quotedSpan);
+        if (fileMatched || quoteMatched || rule.is_drifted) {
+            activeViolations.push({ ...rule, spanMatched: true });
+            seenIds.add(rule.id);
         }
         if (activeViolations.length >= 3) break;
+    }
+
+    if (activeViolations.length < 3) {
+        for (const rule of candidateRules) {
+            if (seenIds.has(rule.id)) continue;
+            // Extract key terms (words > 4 chars) from rule content
+            const words = rule.content.toLowerCase().split(/\W+/).filter(w => w.length > 4 && !['should', 'always', 'never', 'before', 'after'].includes(w));
+            const matchedWord = words.find(w => lowerQuery.includes(w));
+            if (matchedWord) {
+                activeViolations.push(rule);
+                seenIds.add(rule.id);
+            }
+            if (activeViolations.length >= 3) break;
+        }
     }
 
     if (activeViolations.length === 0) {
@@ -190,7 +222,11 @@ export async function handleProactiveNudge({
     output += `Found ${activeViolations.length} relevant active invariant(s) for this action:\n\n`;
 
     for (const v of activeViolations) {
-        output += `* **Rule #${v.id}** [${v.category}]: ${v.content}\n`;
+        const cit = v.provenance?.citation || v.provenance?.file;
+        const badge = cit
+            ? (v.is_drifted ? ` ⚠️ *[DRIFTED: ${cit}]*` : ` *[Anchor: ${cit}]*`)
+            : '';
+        output += `* **Rule #${v.id}** [${v.category}]${badge}: ${v.content}\n`;
     }
     output += `\n*If this nudge is unhelpful or a false positive, call 'nudge' with action: 'feedback', rule_id: '<id>', feedback: 'false_positive'.*`;
 

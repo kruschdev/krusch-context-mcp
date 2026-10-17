@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-10-17
+
+### Added
+- **Span-Grounded Provenance & Automatic Drift Detection (`INV-12`)**:
+  - Extended `krusch_context_remember` provenance metadata (`file`, `locator`, `quoted_sentence`, `start_line`, `end_line`, `anchor_hash`) to anchor architectural decisions and invariants to exact source code or configuration spans without duplicating full file bodies in SQLite.
+  - Added `evaluateMemorySpanDrift` in `src/memory-engine.js`: when `retrieve(include_state: true)` compiles project state, anchored memories verify their `anchor_hash` against disk. If lines shifted above the span (`quoted_sentence` still present verbatim), `start_line..end_line` self-heals automatically; if the anchored span was mutated or deleted, the memory is surfaced under `## ⚠️ Span-Grounded Drift Review` for `revise` review.
+  - Enhanced `krusch_context_nudge` (`src/proactive-engine.js`) with deterministic file/span provenance matching so invariants anchored to a specific `provenance.file` or `provenance.quoted_sentence` trigger with high precision when that file or span is modified.
+  - Added `anchored` and `drifted` span counts to `krusch_context_health`.
+- **Database Connection String Support**:
+  - Updated `db/pool.js` to accept `DATABASE_URL` or `DBOS_DATABASE_URL` directly when running in optional `postgres` storage mode.
+
 ## [1.8.0] - 2026-09-23
 
 ### ⚠️ Breaking Changes & Migration Guide

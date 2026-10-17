@@ -68,7 +68,7 @@ async function verifyDatabase() {
     getSqliteDb();
 }
 
-export const VERSION = "1.8.0";
+export const VERSION = "1.8.1";
 const server = new Server({ name: "krusch-context-mcp", version: VERSION }, { capabilities: { tools: {}, prompts: {} } });
 
 // Core 5 Verbs
@@ -125,10 +125,15 @@ export const CORE_TOOL_DEFINITIONS = [
             file: { type: "string" },
             commit: { type: "string" },
             pr: { type: "string" },
+            locator: { type: "string", description: "Optional KruschNexus section/page locator" },
+            quoted_sentence: { type: "string", description: "Optional verbatim line/signature from file for INV-12 drift verification" },
+            start_line: { type: "number" },
+            end_line: { type: "number" },
+            anchor_hash: { type: "string" },
             author: { type: "string", enum: ['human', 'agent'], default: 'agent' },
             confidence: { type: "number", default: 1.0 }
           },
-          description: "Provenance metadata"
+          description: "Provenance & KruschNexus span-grounding metadata"
         },
         tags: { type: "array", items: { type: "string" }, description: "Optional descriptive tags" },
         force: { type: "boolean", default: false, description: "If true, bypasses near-duplicate warnings" },
@@ -288,8 +293,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       return await addMemory(args);
     }
-    if (name === "krusch_context_add_memory") {
-      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: 'krusch_context_add_memory' is deprecated in v1.8.0. Use 'krusch_context_remember({ content, category })' instead.`);
+    if (name === "krusch_context_add_memory" || name === "krusch_context_write_state") {
+      console.warn(`[krusch-context-mcp] ⚠️ DEPRECATED: '${name}' is deprecated in v1.8.0. Use 'krusch_context_remember({ content, category })' instead.`);
       return await addMemory(args);
     }
     if (name === "krusch_context_nugget_remember") {
@@ -358,8 +363,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return await nuggetNudges(args);
     }
 
-    // 5. krusch_context_health (alias: health)
-    if (name === "krusch_context_health" || name === "health") {
+    // 5. krusch_context_health (alias: health, krusch_context_health_check)
+    if (name === "krusch_context_health" || name === "health" || name === "krusch_context_health_check") {
       return await getHealthStats(args);
     }
 

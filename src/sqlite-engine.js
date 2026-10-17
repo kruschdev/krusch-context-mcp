@@ -77,7 +77,7 @@ export async function getProjectDb(projectName) {
 /**
  * Resolves repository path for a project name.
  */
-function resolveProjectPath(projectName) {
+export function resolveProjectPath(projectName) {
     const rawProject = String(projectName || '').trim();
     // 1. Current workspace match
     const detected = detectCurrentProject();
@@ -207,6 +207,35 @@ async function _initProjectDb(projectName) {
     return db;
 }
 
+let _pgSchemaInfo = null;
+
+async function getPgSchemaInfo(client) {
+    if (_pgSchemaInfo) return _pgSchemaInfo;
+    try {
+        const res = await client.query(
+            `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'ide_agent_memory'`
+        );
+        const cols = new Map(res.rows.map(r => [r.column_name, r.data_type]));
+        _pgSchemaInfo = {
+            hasStatus: cols.has('status'),
+            tagsIsArray: cols.get('tags') === 'ARRAY'
+        };
+    } catch {
+        _pgSchemaInfo = { hasStatus: false, tagsIsArray: false };
+    }
+    return _pgSchemaInfo;
+}
+
+function normalizeLegacyCat(cat) {
+    const lower = String(cat || 'lesson').toLowerCase().trim();
+    if (['decision', 'bug', 'invariant', 'lesson', 'blocker'].includes(lower)) return lower;
+    if (lower === 'priorities' || lower === 'priority' || lower === 'decisions') return 'decision';
+    if (lower === 'bugs') return 'bug';
+    if (lower === 'invariants') return 'invariant';
+    if (lower === 'blockers') return 'blocker';
+    return 'lesson';
+}
+
 /**
  * PULL: Object Storage (Postgres) -> Compute Cache (SQLite)
  */
@@ -225,20 +254,22 @@ export async function pullProjectMemory(projectName, db) {
     }
 
     try {
+        const schema = await getPgSchemaInfo(client);
         // 1. Pull Episodic Memories
-        const memRes = await client.query(
-            `SELECT id, category, content, tags, embedding::text, status, supersedes_id FROM ide_agent_memory WHERE project = $1`,
-            [projectName]
-        );
+        const memQuery = schema.hasStatus
+            ? `SELECT id::text as id, category, content, tags::text as tags, embedding::text, status, supersedes_id FROM ide_agent_memory WHERE project = $1 ORDER BY created_at DESC LIMIT 200`
+            : `SELECT id::text as id, category, content, tags::text as tags, embedding::text FROM ide_agent_memory WHERE project = $1 ORDER BY created_at DESC LIMIT 200`;
+        const memRes = await client.query(memQuery, [projectName]);
         
         const insertMem = db.prepare(`
             INSERT INTO ide_agent_memory (pg_id, category, content, tags, embedding, status, supersedes_id)
-            SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM ide_agent_memory WHERE pg_id = ?)
+            SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM ide_agent_memory WHERE pg_id = ? OR content = ?)
         `);
         
         withTransaction(db, () => {
             for (const row of memRes.rows) {
-                insertMem.run(row.id, row.category, row.content, row.tags, row.embedding, row.status || 'ACTIVE', row.supersedes_id || null, row.id);
+                const normCat = normalizeLegacyCat(row.category);
+                insertMem.run(row.id, normCat, row.content, row.tags, row.embedding, row.status || 'ACTIVE', row.supersedes_id || null, row.id, row.content);
             }
         });
 
@@ -282,6 +313,7 @@ export async function pushProjectMemory(projectName, db) {
     }
 
     try {
+        const schema = await getPgSchemaInfo(client);
         await client.query('BEGIN');
         
         // 1. Push unsynced episodic memories
@@ -294,16 +326,26 @@ export async function pushProjectMemory(projectName, db) {
             }
             
             let parsedTags = null;
-            try { parsedTags = mem.tags ? JSON.parse(mem.tags) : null; } catch { parsedTags = mem.tags; }
-            const res = await client.query(
-                `INSERT INTO ide_agent_memory (project, category, content, tags, embedding, status, supersedes_id, superseded_by)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-                [projectName, mem.category, mem.content, parsedTags, embedStr, mem.status || 'ACTIVE', mem.supersedes_id || null, mem.superseded_by || null]
-            );
+            if (schema.tagsIsArray) {
+                try { parsedTags = mem.tags ? JSON.parse(mem.tags) : null; } catch { parsedTags = mem.tags ? [String(mem.tags)] : null; }
+            } else {
+                parsedTags = mem.tags ? String(mem.tags) : null;
+            }
+            const res = schema.hasStatus
+                ? await client.query(
+                    `INSERT INTO ide_agent_memory (project, category, content, tags, embedding, status, supersedes_id, superseded_by)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id::text as id`,
+                    [projectName, mem.category, mem.content, parsedTags, embedStr, mem.status || 'ACTIVE', mem.supersedes_id || null, mem.superseded_by || null]
+                )
+                : await client.query(
+                    `INSERT INTO ide_agent_memory (project, category, content, tags, embedding)
+                     VALUES ($1, $2, $3, $4, $5) RETURNING id::text as id`,
+                    [projectName, mem.category, mem.content, parsedTags, embedStr]
+                );
             
             const newPgId = res.rows[0].id;
             pushedMemIds.push(newPgId);
-            db.prepare(`UPDATE ide_agent_memory SET pg_id = ? WHERE id = ?`).run(newPgId, mem.id);
+            db.prepare(`UPDATE ide_agent_memory SET pg_id = ? WHERE id = ?`).run(String(newPgId), mem.id);
         }
 
         // 2. Push unsynced nuggets

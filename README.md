@@ -95,6 +95,7 @@ To prevent memory hallucination and database pollution:
 2. **Near-Duplicate Detection**: If a proposed memory matches an existing active record ($\ge 0.85$ cosine similarity), the memory is saved with a warning proposing `revise(action: 'supersede', target_id: ...)`. This protects contrasting rules (e.g., "Allow CORS" vs "Do not allow CORS") while flagging twin facts.
 3. **Compulsory Invalidation Reasons**: Calling `revise(action: 'invalidate')` strictly requires a non-empty `reason`.
 4. **Focused Audits**: `nudge` caps findings at 3 with concrete evidence, rejecting `every_turn` triggers to eliminate auditor nagware.
+5. **Span-Grounded Provenance & Drift Self-Healing**: Passing `provenance: { file, locator, quoted_sentence }` to `remember` computes a normalized SHA-256 `anchor_hash` and line range (`start_line..end_line`). On subsequent `retrieve(include_state: true)` calls, the engine verifies the span on disk—automatically healing line numbers when code shifts above it, or flagging `[DRIFTED]` when the underlying code changes.
 
 ---
 

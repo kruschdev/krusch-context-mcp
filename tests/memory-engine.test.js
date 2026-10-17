@@ -106,6 +106,61 @@ test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async
     assert.ok(typeof health.stats.staleCount === 'number');
   });
 
+  await t.test('7. KruschNexus INV-12 Span-Grounded Provenance: auto-healing vs drift detection', async () => {
+    const { resolveProjectPath } = await import('../src/sqlite-engine.js');
+    const { handleProactiveNudge } = await import('../src/proactive-engine.js');
+    const projRoot = resolveProjectPath(testProject);
+    fs.mkdirSync(projRoot, { recursive: true });
+    const fixtureFile = path.join(projRoot, 'config.js');
+
+    // Step A: Write initial file and anchor an invariant with verbatim quoted_sentence
+    fs.writeFileSync(fixtureFile, `// App Config\nexport const MAX_POOL_SIZE = 20;\nexport const TIMEOUT_MS = 5000;\n`, 'utf8');
+
+    const memRes = await addMemory({
+      category: 'invariant',
+      content: 'Database pool size must remain capped at 20 connections.',
+      project: testProject,
+      provenance: {
+        file: 'config.js',
+        locator: 'Pool Limits',
+        quoted_sentence: 'export const MAX_POOL_SIZE = 20;'
+      },
+      force: true,
+      _embedding: new Array(1024).fill(0.05)
+    });
+    assert.ok(memRes.id);
+
+    let health = await getHealthStats({ project: testProject });
+    assert.equal(health.stats.anchoredCount, 1);
+    assert.equal(health.stats.driftedCount, 0);
+
+    // Step B: Edit file above the quote (shifts line from L2 to L4), quote stays verbatim -> Auto-Heal!
+    fs.writeFileSync(fixtureFile, `// App Config\n// Added header comment\n// Another comment\nexport const MAX_POOL_SIZE = 20;\nexport const TIMEOUT_MS = 5000;\n`, 'utf8');
+
+    health = await getHealthStats({ project: testProject });
+    assert.equal(health.stats.anchoredCount, 1);
+    assert.equal(health.stats.driftedCount, 0, 'Unchanged verbatim quote must auto-heal across line shifts');
+
+    // Step C: Mutate the anchored line -> Flags STALE_DRIFT (is_drifted = true)!
+    fs.writeFileSync(fixtureFile, `// App Config\nexport const MAX_POOL_SIZE = 100;\nexport const TIMEOUT_MS = 5000;\n`, 'utf8');
+
+    health = await getHealthStats({ project: testProject });
+    assert.equal(health.stats.driftedCount, 1, 'Mutated quoted_sentence must flag memory as drifted');
+
+    const stateRes = await compileProjectState({ project: testProject });
+    assert.ok(stateRes.content[0].text.includes('Span-Grounded Drift Review'));
+    assert.ok(stateRes.content[0].text.includes('DRIFTED: config.js'));
+
+    // Step D: Proactive nudge deterministically matches file_path anchor
+    const nudgeRes = await handleProactiveNudge({
+      trigger: 'pre_commit',
+      file_path: 'config.js',
+      code: 'export const MAX_POOL_SIZE = 100;',
+      project: testProject
+    });
+    assert.ok(nudgeRes.content[0].text.includes('DRIFTED: config.js'));
+  });
+
   t.after(async () => {
     closeAllDatabases();
     try {

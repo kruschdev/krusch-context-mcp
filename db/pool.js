@@ -24,7 +24,13 @@ function getPoolInstance() {
     }
 
     const { Pool } = pg;
-    _pool = new Pool({
+    const connStr = process.env.DATABASE_URL || process.env.DBOS_DATABASE_URL;
+    _pool = new Pool(connStr ? {
+        connectionString: connStr,
+        max: parseInt(process.env.DB_POOL_SIZE || '15', 10),
+        connectionTimeoutMillis: 5000,
+        idleTimeoutMillis: 30000
+    } : {
         host: process.env.DB_HOST || 'localhost',
         port: parseInt(process.env.DB_PORT || '5432', 10),
         database: process.env.DB_NAME || 'kdcode',

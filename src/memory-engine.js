@@ -10,10 +10,13 @@
  * 6. 30-day TTL decay review
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
+import { getProjectDb, cosineSimilarity, pushProjectMemory, resolveProjectPath } from './sqlite-engine.js';
 import { checkNearDuplicateMemory, getStorageMode } from './storage-adapter.js';
 import { generateTagsFromLLM } from './llm-tags.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
@@ -21,6 +24,220 @@ import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
 export const CLOSED_CATEGORIES = new Set(['decision', 'bug', 'invariant', 'lesson', 'blocker']);
 const DECAY_RATE = 0.01;
 const AUTO_TAG = true;
+
+/**
+ * Computes normalized SHA-256 hash of a text span or file page (KruschNexus INV-12 parity).
+ */
+export function computeNormalizedSpanHash(text) {
+    const normalized = String(text || '').replace(/\r\n/g, '\n').trim();
+    return crypto.createHash('sha256').update(normalized, 'utf8').digest('hex');
+}
+
+/**
+ * Safely resolves a provenance file path within a project workspace root (strict path-traversal guard).
+ */
+export function resolveAnchoredFilePath(fileRef, targetProject) {
+    if (!fileRef || typeof fileRef !== 'string') return null;
+    const cleaned = fileRef.trim();
+    if (!cleaned || cleaned.includes('\0')) return null;
+
+    const projectRoot = resolveProjectPath(targetProject);
+    const candidateRoots = [projectRoot, process.cwd()];
+
+    for (const rootDir of candidateRoots) {
+        if (!rootDir) continue;
+        const resolvedRoot = path.resolve(rootDir);
+        const resolvedTarget = path.resolve(resolvedRoot, cleaned.replace(/^[/\\]+/, ''));
+        const rel = path.relative(resolvedRoot, resolvedTarget);
+        if (!rel.startsWith('..') && !path.isAbsolute(rel) && rel !== '') {
+            if (fs.existsSync(resolvedTarget)) {
+                try {
+                    const st = fs.statSync(resolvedTarget);
+                    if (st.isFile() && st.size <= 5 * 1024 * 1024) {
+                        return resolvedTarget;
+                    }
+                } catch {}
+            }
+        }
+    }
+    // Return expected path inside projectRoot even if missing (for missing-file drift check)
+    const defaultTarget = path.resolve(projectRoot, cleaned.replace(/^[/\\]+/, ''));
+    const relDefault = path.relative(projectRoot, defaultTarget);
+    if (!relDefault.startsWith('..') && !path.isAbsolute(relDefault) && relDefault !== '') {
+        return defaultTarget;
+    }
+    return null;
+}
+
+/**
+ * Computes 1-based line numbers for a character span [charStart, charEnd] in text.
+ */
+function getSpanLineRange(text, charStart, charEnd) {
+    const prefix = text.slice(0, Math.max(0, charStart));
+    const span = text.slice(Math.max(0, charStart), Math.max(charStart, charEnd));
+    const startLine = prefix.split('\n').length;
+    const endLine = startLine + Math.max(0, span.split('\n').length - 1);
+    return { startLine, endLine };
+}
+
+/**
+ * Enriches provenance metadata with KruschNexus-style citation spine coordinates and SHA-256 anchor_hash.
+ */
+export function anchorProvenanceToFile(provenance, targetProject) {
+    const base = {
+        file: provenance?.file || null,
+        commit: provenance?.commit || null,
+        pr: provenance?.pr || null,
+        author: provenance?.author || 'agent',
+        confidence: provenance?.confidence ?? 1.0,
+        locator: provenance?.locator || null,
+        quoted_sentence: provenance?.quoted_sentence || null,
+        start_line: provenance?.start_line || null,
+        end_line: provenance?.end_line || null,
+        char_start: provenance?.char_start ?? null,
+        char_end: provenance?.char_end ?? null,
+        anchor_hash: provenance?.anchor_hash || null,
+        citation: provenance?.citation || null,
+        is_drifted: Boolean(provenance?.is_drifted),
+        recorded_at: new Date().toISOString()
+    };
+
+    if (!base.file) return base;
+
+    const absPath = resolveAnchoredFilePath(base.file, targetProject);
+    if (absPath && fs.existsSync(absPath)) {
+        try {
+            const fileText = fs.readFileSync(absPath, 'utf8');
+            if (!base.anchor_hash) {
+                base.anchor_hash = computeNormalizedSpanHash(fileText);
+            }
+            if (base.quoted_sentence && typeof base.quoted_sentence === 'string') {
+                const pos = fileText.indexOf(base.quoted_sentence);
+                if (pos !== -1) {
+                    base.char_start = pos;
+                    base.char_end = pos + base.quoted_sentence.length;
+                    const { startLine, endLine } = getSpanLineRange(fileText, base.char_start, base.char_end);
+                    base.start_line = startLine;
+                    base.end_line = endLine;
+                    base.is_drifted = false;
+                }
+            }
+            if (!base.citation) {
+                const lineSuffix = base.start_line
+                    ? `#L${base.start_line}${base.end_line && base.end_line !== base.start_line ? `-L${base.end_line}` : ''}`
+                    : '';
+                const locSuffix = base.locator ? ` [${base.locator}]` : '';
+                base.citation = `${base.file}${lineSuffix}${locSuffix}`;
+            }
+        } catch {}
+    }
+    return base;
+}
+
+/**
+ * Evaluates live KruschNexus INV-12 span drift for a memory record.
+ * - If the file hash matches anchor_hash -> VALID (is_drifted = false).
+ * - If the file mutated but quoted_sentence still exists verbatim -> Auto-heals offsets & anchor_hash!
+ * - If the file is missing or quoted_sentence was mutated/removed -> Flags is_drifted = true (STALE_DRIFT).
+ */
+export function evaluateMemorySpanDrift(row, targetProject, db = null) {
+    if (!row || !row.provenance) {
+        return { anchored: false, is_drifted: false, provenance: null };
+    }
+    let prov;
+    try {
+        prov = typeof row.provenance === 'string' ? JSON.parse(row.provenance) : { ...row.provenance };
+    } catch {
+        return { anchored: false, is_drifted: false, provenance: null };
+    }
+
+    if (!prov || (!prov.file && !prov.anchor_hash)) {
+        return { anchored: false, is_drifted: false, provenance: prov };
+    }
+
+    const absPath = resolveAnchoredFilePath(prov.file, targetProject);
+    if (!absPath || !fs.existsSync(absPath)) {
+        const driftedProv = { ...prov, is_drifted: true, drift_reason: 'file_missing' };
+        if (db && row.id && !prov.is_drifted) {
+            try {
+                db.prepare(`UPDATE ide_agent_memory SET provenance = ? WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
+            } catch {}
+        }
+        return { anchored: true, is_drifted: true, drift_reason: 'file_missing', provenance: driftedProv };
+    }
+
+    let fileText = '';
+    try {
+        fileText = fs.readFileSync(absPath, 'utf8');
+    } catch {
+        return { anchored: true, is_drifted: Boolean(prov.is_drifted), provenance: prov };
+    }
+
+    const currentHash = computeNormalizedSpanHash(fileText);
+    if (prov.anchor_hash && currentHash === prov.anchor_hash && !prov.is_drifted) {
+        return { anchored: true, is_drifted: false, current_hash: currentHash, provenance: prov };
+    }
+
+    // File hash changed or needs verification against verbatim quoted_sentence (INV-12)
+    if (prov.quoted_sentence && typeof prov.quoted_sentence === 'string') {
+        const pos = fileText.indexOf(prov.quoted_sentence);
+        if (pos !== -1) {
+            const charStart = pos;
+            const charEnd = pos + prov.quoted_sentence.length;
+            const { startLine, endLine } = getSpanLineRange(fileText, charStart, charEnd);
+            const lineSuffix = `#L${startLine}${endLine !== startLine ? `-L${endLine}` : ''}`;
+            const locSuffix = prov.locator ? ` [${prov.locator}]` : '';
+            const healedProv = {
+                ...prov,
+                char_start: charStart,
+                char_end: charEnd,
+                start_line: startLine,
+                end_line: endLine,
+                citation: `${prov.file}${lineSuffix}${locSuffix}`,
+                anchor_hash: currentHash,
+                is_drifted: false,
+                drift_reason: null
+            };
+            if (db && row.id) {
+                try {
+                    db.prepare(`UPDATE ide_agent_memory SET provenance = ? WHERE id = ?`).run(JSON.stringify(healedProv), row.id);
+                } catch {}
+            }
+            return { anchored: true, is_drifted: false, healed: true, current_hash: currentHash, provenance: healedProv };
+        } else {
+            const driftedProv = {
+                ...prov,
+                current_hash: currentHash,
+                is_drifted: true,
+                drift_reason: 'quoted_span_mutated'
+            };
+            if (db && row.id && !prov.is_drifted) {
+                try {
+                    db.prepare(`UPDATE ide_agent_memory SET provenance = ? WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
+                } catch {}
+            }
+            return { anchored: true, is_drifted: true, drift_reason: 'quoted_span_mutated', current_hash: currentHash, provenance: driftedProv };
+        }
+    }
+
+    // Whole-file hash anchor without quoted_sentence
+    if (prov.anchor_hash && currentHash !== prov.anchor_hash) {
+        const driftedProv = {
+            ...prov,
+            current_hash: currentHash,
+            is_drifted: true,
+            drift_reason: 'file_hash_mutated'
+        };
+        if (db && row.id && !prov.is_drifted) {
+            try {
+                db.prepare(`UPDATE ide_agent_memory SET provenance = ? WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
+            } catch {}
+        }
+        return { anchored: true, is_drifted: true, drift_reason: 'file_hash_mutated', current_hash: currentHash, provenance: driftedProv };
+    }
+
+    return { anchored: true, is_drifted: false, current_hash: currentHash, provenance: prov };
+}
 
 /**
  * Normalizes user-supplied category to the strict closed set.
@@ -55,7 +272,7 @@ export function filterActiveMemories(memories = []) {
 }
 
 /**
- * Adds or remembers a memory with duplicate check and provenance.
+ * Adds or remembers a memory with duplicate check and KruschNexus span-grounded provenance.
  */
 export async function addMemory({
     category,
@@ -98,15 +315,9 @@ export async function addMemory({
         finalTags = await generateTagsFromLLM(content, { asJson: true });
     }
 
-    // 4. Provenance
-    const provPayload = provenance ? JSON.stringify({
-        file: provenance.file || null,
-        commit: provenance.commit || null,
-        pr: provenance.pr || null,
-        author: provenance.author || 'agent',
-        confidence: provenance.confidence ?? 1.0,
-        recorded_at: new Date().toISOString()
-    }) : JSON.stringify({ author: 'agent', confidence: 1.0, recorded_at: new Date().toISOString() });
+    // 4. Provenance with KruschNexus INV-11/INV-12 Span & Hash Grounding
+    const anchoredProv = anchorProvenanceToFile(provenance, targetProject);
+    const provPayload = JSON.stringify(anchoredProv);
 
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 
@@ -300,7 +511,7 @@ export async function getStaleMemories({ project, days = 30 } = {}) {
 }
 
 /**
- * Compiles a consolidated project state briefing.
+ * Compiles a consolidated project state briefing with KruschNexus INV-12 span drift verification.
  */
 export async function compileProjectState({ project, active_project } = {}) {
     const targetProject = project || active_project || detectCurrentProject();
@@ -312,10 +523,11 @@ export async function compileProjectState({ project, active_project } = {}) {
     const lessons = [];
     const nuggets = [];
     const invalidated = [];
+    const drifted = [];
 
     if (db) {
         const rows = db.prepare(`
-            SELECT id, category, content, status, invalidated_reason, created_at
+            SELECT id, category, content, status, invalidated_reason, provenance, created_at
             FROM ide_agent_memory
             ORDER BY created_at DESC
         `).all();
@@ -326,6 +538,12 @@ export async function compileProjectState({ project, active_project } = {}) {
                 continue;
             }
             if (r.status !== 'ACTIVE') continue;
+
+            const driftCheck = evaluateMemorySpanDrift(r, targetProject, db);
+            r._drift = driftCheck;
+            if (driftCheck.is_drifted) {
+                drifted.push({ ...r, provenance: driftCheck.provenance, drift_reason: driftCheck.drift_reason });
+            }
 
             if (r.category === 'decision') decisions.push(r);
             else if (r.category === 'invariant') invariants.push(r);
@@ -340,33 +558,47 @@ export async function compileProjectState({ project, active_project } = {}) {
     }
 
     const stale = await getStaleMemories({ project: targetProject, days: 30 });
+    const formatSpanBadge = (r) => {
+        if (!r._drift?.anchored) return '';
+        const cit = r._drift.provenance?.citation || r._drift.provenance?.file || 'file';
+        return r._drift.is_drifted ? ` ⚠️ *[DRIFTED: ${cit}]*` : ` *[Anchor: ${cit}]*`;
+    };
 
     let output = `# 🧠 Compiled Project State: ${targetProject}\n\n`;
 
     output += `## 🎯 Decisions & Priorities (${decisions.length})\n`;
     if (decisions.length === 0) output += `- No active decisions or priorities recorded.\n`;
-    for (const d of decisions.slice(0, 5)) output += `- **#${d.id}**: ${d.content}\n`;
+    for (const d of decisions.slice(0, 5)) output += `- **#${d.id}**: ${d.content}${formatSpanBadge(d)}\n`;
     output += `\n`;
 
 
     output += `## 🛡️ Project Invariants (${invariants.length})\n`;
     if (invariants.length === 0) output += `- No invariants recorded.\n`;
-    for (const inv of invariants.slice(0, 5)) output += `- **#${inv.id}**: ${inv.content}\n`;
+    for (const inv of invariants.slice(0, 5)) output += `- **#${inv.id}**: ${inv.content}${formatSpanBadge(inv)}\n`;
     output += `\n`;
 
     output += `## 🐛 Known Bugs & Blockers (${bugs.length})\n`;
     if (bugs.length === 0) output += `- Zero active blockers.\n`;
-    for (const b of bugs.slice(0, 5)) output += `- **#${b.id}** [${b.category}]: ${b.content}\n`;
+    for (const b of bugs.slice(0, 5)) output += `- **#${b.id}** [${b.category}]: ${b.content}${formatSpanBadge(b)}\n`;
     output += `\n`;
 
     output += `## 📖 Core Lessons (${lessons.length})\n`;
     if (lessons.length === 0) output += `- No lessons recorded yet.\n`;
-    for (const l of lessons.slice(0, 5)) output += `- **#${l.id}**: ${l.content}\n`;
+    for (const l of lessons.slice(0, 5)) output += `- **#${l.id}**: ${l.content}${formatSpanBadge(l)}\n`;
     output += `\n`;
 
     if (nuggets.length > 0) {
         output += `## ⚡ Steering Nuggets (${nuggets.length})\n`;
         for (const n of nuggets) output += `- **${n.key}**: ${n.value}\n`;
+        output += `\n`;
+    }
+
+    if (drifted.length > 0) {
+        output += `## ⚠️ Span-Grounded Drift Review (${drifted.length} drifted)\n`;
+        for (const dr of drifted) {
+            const cit = dr.provenance?.citation || dr.provenance?.file || 'anchored file';
+            output += `- Memory #${dr.id} [${dr.category}] (${cit} — ${dr.drift_reason}): "${dr.content.substring(0, 80)}..."\n`;
+        }
         output += `\n`;
     }
 
@@ -390,7 +622,7 @@ export async function compileProjectState({ project, active_project } = {}) {
 }
 
 /**
- * Returns health diagnostic statistics.
+ * Returns health diagnostic statistics including KruschNexus INV-12 span drift metrics.
  */
 export async function getHealthStats({ project } = {}) {
     const targetProject = project || detectCurrentProject();
@@ -401,14 +633,21 @@ export async function getHealthStats({ project } = {}) {
     let supersededCount = 0;
     let invalidatedCount = 0;
     let nuggetCount = 0;
+    let anchoredCount = 0;
+    let driftedCount = 0;
     const categoryCounts = {};
 
     if (db) {
-        const memRows = db.prepare(`SELECT category, status FROM ide_agent_memory`).all();
+        const memRows = db.prepare(`SELECT id, category, status, provenance FROM ide_agent_memory`).all();
         for (const r of memRows) {
             if (r.status === 'ACTIVE') {
                 activeCount++;
                 categoryCounts[r.category] = (categoryCounts[r.category] || 0) + 1;
+                const driftCheck = evaluateMemorySpanDrift(r, targetProject, db);
+                if (driftCheck.anchored) {
+                    anchoredCount++;
+                    if (driftCheck.is_drifted) driftedCount++;
+                }
             } else if (r.status === 'SUPERSEDED') {
                 supersededCount++;
             } else if (r.status === 'INVALIDATED') {
@@ -430,6 +669,7 @@ export async function getHealthStats({ project } = {}) {
     for (const cat of CLOSED_CATEGORIES) {
         output += `  - ${cat}: ${categoryCounts[cat] || 0}\n`;
     }
+    output += `* **Span-Anchored Memories (INV-12)**: ${anchoredCount} (${driftedCount > 0 ? `⚠️ ${driftedCount} drifted` : '✅ 0 drifted'})\n`;
     output += `* **Superseded Lineage**: ${supersededCount}\n`;
     output += `* **Invalidated Records**: ${invalidatedCount}\n`;
     output += `* **Steering Nuggets**: ${nuggetCount}\n`;
@@ -445,6 +685,8 @@ export async function getHealthStats({ project } = {}) {
             storageMode: mode,
             project: targetProject,
             activeCount,
+            anchoredCount,
+            driftedCount,
             supersededCount,
             invalidatedCount,
             nuggetCount,
