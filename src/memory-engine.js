@@ -61,24 +61,34 @@ export function computeNormalizedSpanHash(text) {
 export function resolveAnchoredFilePath(fileRef, targetProject) {
     if (!fileRef || typeof fileRef !== 'string') return null;
     const cleaned = fileRef.trim();
-    if (!cleaned || cleaned.includes('\0')) return null;
+    if (!cleaned || cleaned.includes('\0') || cleaned.includes('..')) return null;
 
     const projectRoot = resolveProjectPath(targetProject);
     const candidateRoots = [projectRoot, process.cwd()];
+    for (const baseRoot of [projectRoot, process.cwd()]) {
+        if (baseRoot && path.basename(path.dirname(baseRoot)) === 'projects') {
+            candidateRoots.push(path.resolve(baseRoot, '../..'));
+        }
+    }
 
     for (const rootDir of candidateRoots) {
         if (!rootDir) continue;
         const resolvedRoot = path.resolve(rootDir);
-        const resolvedTarget = path.resolve(resolvedRoot, cleaned.replace(/^[/\\]+/, ''));
-        const rel = path.relative(resolvedRoot, resolvedTarget);
-        if (!rel.startsWith('..') && !path.isAbsolute(rel) && rel !== '') {
-            if (fs.existsSync(resolvedTarget)) {
-                try {
-                    const st = fs.statSync(resolvedTarget);
-                    if (st.isFile() && st.size <= 5 * 1024 * 1024) {
-                        return resolvedTarget;
-                    }
-                } catch {}
+        const candidates = path.isAbsolute(cleaned)
+            ? [path.resolve(cleaned), path.resolve(resolvedRoot, cleaned.replace(/^[/\\]+/, ''))]
+            : [path.resolve(resolvedRoot, cleaned)];
+
+        for (const resolvedTarget of candidates) {
+            const rel = path.relative(resolvedRoot, resolvedTarget);
+            if (!rel.startsWith('..') && !path.isAbsolute(rel) && rel !== '') {
+                if (fs.existsSync(resolvedTarget)) {
+                    try {
+                        const st = fs.statSync(resolvedTarget);
+                        if (st.isFile() && st.size <= 5 * 1024 * 1024) {
+                            return resolvedTarget;
+                        }
+                    } catch {}
+                }
             }
         }
     }
@@ -260,6 +270,21 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
             } catch {}
         }
         return { anchored: true, is_drifted: true, drift_reason: 'file_hash_mutated', current_hash: currentHash, provenance: driftedProv };
+    }
+
+    if (!prov.anchor_hash || prov.is_drifted) {
+        const healedProv = {
+            ...prov,
+            anchor_hash: prov.anchor_hash || currentHash,
+            is_drifted: false,
+            drift_reason: null
+        };
+        if (db && row.id) {
+            try {
+                db.prepare(`UPDATE ide_agent_memory SET provenance = ? WHERE id = ?`).run(JSON.stringify(healedProv), row.id);
+            } catch {}
+        }
+        return { anchored: true, is_drifted: false, healed: true, current_hash: currentHash, provenance: healedProv };
     }
 
     return { anchored: true, is_drifted: false, current_hash: currentHash, provenance: prov };

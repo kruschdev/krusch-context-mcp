@@ -25,7 +25,8 @@ export async function getOllamaEmbedding(text, priority = PRIORITY.LOW) {
                     body: JSON.stringify({ 
                         model, 
                         prompt: text,
-                        truncate: true
+                        truncate: true,
+                        keep_alive: -1
                     }),
                     signal: controller.signal
                 });
