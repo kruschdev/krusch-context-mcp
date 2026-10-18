@@ -88,7 +88,11 @@ export async function generateTagsFromLLM(text, options = {}) {
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     if (process.env.COMPLETION_URL || openrouterKey) {
         try {
-            const tagModel = process.env.TAG_MODEL || (openrouterKey ? 'meta-llama/llama-3.2-3b-instruct' : 'qwen2.5-coder:7b');
+            const rawTagModel = process.env.TAG_MODEL;
+            const isOpenRouterOnly = !process.env.COMPLETION_URL && Boolean(openrouterKey);
+            const tagModel = (isOpenRouterOnly && (!rawTagModel || !rawTagModel.includes('/')))
+                ? 'meta-llama/llama-3.2-3b-instruct'
+                : (rawTagModel || 'qwen2.5-coder:7b');
             const responseText = await chat(
                 "You are a helpful assistant that extracts keywords/tags from text.",
                 prompt,

@@ -86,7 +86,9 @@ export function getEmbeddingProvider() {
     const customUrl = process.env.EMBEDDING_URL;
     const dimensions = getConfiguredEmbeddingDim();
     if (openrouterKey || (customUrl && customUrl.includes('openrouter.ai'))) {
-        const model = process.env.EMBED_MODEL || process.env.EMBEDDING_MODEL || 'baai/bge-large-en-v1.5';
+        const rawModel = process.env.EMBED_MODEL || process.env.EMBEDDING_MODEL;
+        const isLocalBge = !rawModel || rawModel === 'bge-large' || rawModel === 'bge-large:latest';
+        const model = (!customUrl && isLocalBge) ? 'baai/bge-large-en-v1.5' : (rawModel || 'baai/bge-large-en-v1.5');
         return { provider: 'openrouter', model, dimensions, name: `OpenRouter Cloud (${model}, ${dimensions}d)` };
     }
     if (customUrl) {
@@ -107,7 +109,10 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     const customUrl = process.env.EMBEDDING_URL || (openrouterKey ? 'https://openrouter.ai/api/v1/embeddings' : null);
     const apiKey = process.env.EMBEDDING_API_KEY || openrouterKey || null;
-    const model = process.env.EMBED_MODEL || process.env.EMBEDDING_MODEL || (openrouterKey ? 'baai/bge-large-en-v1.5' : 'bge-large');
+    const rawModel = process.env.EMBED_MODEL || process.env.EMBEDDING_MODEL;
+    const isOpenRouterUrl = customUrl && customUrl.includes('openrouter.ai');
+    const isLocalBge = !rawModel || rawModel === 'bge-large' || rawModel === 'bge-large:latest';
+    const model = (isOpenRouterUrl && isLocalBge) ? 'baai/bge-large-en-v1.5' : (rawModel || (openrouterKey ? 'baai/bge-large-en-v1.5' : 'bge-large'));
 
     if (customUrl) {
         try {
@@ -183,8 +188,7 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
             
             throw new Error("Could not parse embedding array from custom response");
         } catch (e) {
-            console.error(`[Custom Embed] Error: ${e.message}`);
-            return null;
+            console.error(`[Custom Embed] Error: ${e.message} (falling back to local Ollama)`);
         }
     }
 
