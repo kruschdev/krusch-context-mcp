@@ -778,7 +778,9 @@ export async function getHealthStats({ project } = {}) {
         for (const r of memRows) {
             if (r.status === 'ACTIVE') {
                 activeCount++;
-                categoryCounts[r.category] = (categoryCounts[r.category] || 0) + 1;
+                let normCat = 'lesson';
+                try { normCat = normalizeCategory(r.category); } catch { normCat = 'lesson'; }
+                categoryCounts[normCat] = (categoryCounts[normCat] || 0) + 1;
                 const driftCheck = evaluateMemorySpanDrift(r, targetProject, db);
                 if (driftCheck.anchored) {
                     anchoredCount++;
