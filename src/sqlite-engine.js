@@ -26,19 +26,52 @@ export function withTransaction(db, fn) {
     }
 }
 
+const parsedVectorCache = new Map();
+const MAX_PARSED_VECTOR_CACHE = 2048;
+
 /**
- * Helper to compute cosine similarity between two numeric arrays.
+ * Parses and caches a row's embedding into a Float64Array to avoid repeated JSON.parse overhead.
+ */
+export function getParsedEmbedding(embeddingField) {
+    if (!embeddingField) return null;
+    if (Array.isArray(embeddingField) || ArrayBuffer.isView(embeddingField)) {
+        return embeddingField;
+    }
+    if (typeof embeddingField !== 'string') return null;
+
+    const cached = parsedVectorCache.get(embeddingField);
+    if (cached) return cached;
+
+    try {
+        const arr = JSON.parse(embeddingField);
+        if (!Array.isArray(arr) || arr.length === 0) return null;
+        const typed = Float64Array.from(arr);
+        if (parsedVectorCache.size >= MAX_PARSED_VECTOR_CACHE) {
+            const oldestKey = parsedVectorCache.keys().next().value;
+            parsedVectorCache.delete(oldestKey);
+        }
+        parsedVectorCache.set(embeddingField, typed);
+        return typed;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Helper to compute cosine similarity between two numeric arrays or Float64Arrays.
  */
 export function cosineSimilarity(vecA, vecB) {
-    if (!Array.isArray(vecA) || !Array.isArray(vecB) || vecA.length === 0 || vecB.length === 0) return 0;
+    if (!vecA || !vecB || !vecA.length || !vecB.length) return 0;
     let dotProduct = 0;
     let normA = 0;
     let normB = 0;
     const len = Math.min(vecA.length, vecB.length);
     for (let i = 0; i < len; i++) {
-        dotProduct += vecA[i] * vecB[i];
-        normA += vecA[i] * vecA[i];
-        normB += vecB[i] * vecB[i];
+        const a = vecA[i];
+        const b = vecB[i];
+        dotProduct += a * b;
+        normA += a * a;
+        normB += b * b;
     }
     if (normA === 0 || normB === 0) return 0;
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
@@ -177,6 +210,7 @@ async function _initProjectDb(projectName) {
     
     // Schema Evolution
     const columns = [
+        `ALTER TABLE ide_agent_memory ADD COLUMN project TEXT;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN pg_id INTEGER;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN status TEXT DEFAULT 'ACTIVE';`,
         `ALTER TABLE ide_agent_memory ADD COLUMN supersedes_id INTEGER;`,
@@ -184,7 +218,9 @@ async function _initProjectDb(projectName) {
         `ALTER TABLE ide_agent_memory ADD COLUMN valid_until DATETIME;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN invalidated_reason TEXT;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN provenance TEXT;`,
-        `ALTER TABLE ide_agent_nuggets ADD COLUMN pg_synced BOOLEAN DEFAULT 0;`
+        `ALTER TABLE ide_agent_nuggets ADD COLUMN project TEXT;`,
+        `ALTER TABLE ide_agent_nuggets ADD COLUMN pg_synced BOOLEAN DEFAULT 0;`,
+        `ALTER TABLE auditor_feedback ADD COLUMN project TEXT;`
     ];
 
     for (const colSql of columns) {
@@ -196,6 +232,13 @@ async function _initProjectDb(projectName) {
             }
         }
     }
+
+    // Performance Indexes
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_memory_status_cat ON ide_agent_memory(status, category);
+        CREATE INDEX IF NOT EXISTS idx_memory_created_at ON ide_agent_memory(created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_feedback_project_rule ON auditor_feedback(project, rule_id);
+    `);
     
     // Synchronous read-ahead: try pulling from Postgres if configured
     try {

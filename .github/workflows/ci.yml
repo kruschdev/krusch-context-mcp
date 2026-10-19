@@ -32,15 +32,19 @@ jobs:
 
       - name: Instant Failure Push Notification
         if: failure()
+        env:
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
         run: |
-          ERR_SNIPPET=$(tail -n 25 test.log 2>/dev/null || echo "No test log found")
-          curl -s -X POST \
-            -H "Title: 🚨 CI Failure: ${{ github.repository }} (Node 22)" \
-            -H "Priority: urgent" \
-            -H "Tags: rotating_light,x" \
-            -H "Click: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            -d "Run #${{ github.run_number }} failed on ${{ github.ref_name }}. Commit: ${{ github.sha }} by ${{ github.actor }}. $ERR_SNIPPET" \
-            https://ntfy.sh/krusch-ci-alerts || true
+          if [ -n "${NTFY_TOPIC_URL:-}" ]; then
+            ERR_SNIPPET=$(tail -n 25 test.log 2>/dev/null || echo "No test log found")
+            curl -s -X POST \
+              -H "Title: 🚨 CI Failure: ${{ github.repository }} (Node 22)" \
+              -H "Priority: urgent" \
+              -H "Tags: rotating_light,x" \
+              -H "Click: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              -d "Run #${{ github.run_number }} failed on $GITHUB_REF_NAME. Commit: ${{ github.sha }} by $GITHUB_ACTOR. $ERR_SNIPPET" \
+              "${NTFY_TOPIC_URL}" || true
+          fi
 
       - name: Dispatch Webhook Alert (Optional)
         if: failure() && env.CI_WEBHOOK != ''
@@ -48,5 +52,5 @@ jobs:
           CI_WEBHOOK: ${{ secrets.CI_FAILURE_WEBHOOK }}
         run: |
           curl -s -X POST -H "Content-Type: application/json" \
-            -d "{\"content\": \"🚨 **CI Failure**: [${{ github.repository }}#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) failed on \`${{ github.ref_name }}\` (Commit: \`${{ github.sha }}\`)\"}" \
+            -d "{\"content\": \"🚨 **CI Failure**: [${{ github.repository }}#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) failed on '$GITHUB_REF_NAME' (Commit: '$GITHUB_SHA')\"}" \
             "$CI_WEBHOOK" || true

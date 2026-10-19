@@ -50,7 +50,7 @@ import { pool } from '../db/pool.js';
 import { unifiedRetrieve } from './unified-retrieval.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
 import { getStorageMode, setStorageMode, getSqliteDb, closeSqliteDb } from './storage-adapter.js';
-import { closeAllDatabases } from './sqlite-engine.js';
+import { getProjectDb, closeAllDatabases } from './sqlite-engine.js';
 
 // Verify storage initialization (SQLite default, Postgres fallback)
 async function verifyDatabase() {
@@ -64,8 +64,8 @@ async function verifyDatabase() {
             setStorageMode('sqlite');
         }
     }
-    // Ensure SQLite storage is ready
-    getSqliteDb();
+    // Ensure active project SQLite storage is ready using unified handle
+    await getProjectDb();
 }
 
 export const VERSION = "1.8.1";
@@ -408,7 +408,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+let isShuttingDown = false;
 export async function shutdown() {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
   console.error('[krusch-context-mcp] Shutting down cleanly...');
   try { closeAllDatabases(); } catch (_) {}
   try { closeSqliteDb(); } catch (_) {}
@@ -418,10 +421,19 @@ export async function shutdown() {
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+process.on('uncaughtException', (err) => {
+  console.error('[krusch-context-mcp] Uncaught exception (server kept alive):', err?.stack || err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[krusch-context-mcp] Unhandled rejection (server kept alive):', reason?.stack || reason?.message || reason);
+});
 
 export async function runServer() {
   await verifyDatabase();
   const transport = new StdioServerTransport();
+  process.stdin.on('end', () => {
+    shutdown().catch(() => process.exit(0));
+  });
   await server.connect(transport);
   const mode = getStorageMode();
   console.error(`[krusch-context-mcp] v${VERSION} running on stdio (${CORE_TOOLS.size} core tools, storage: ${mode})`);

@@ -10,6 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS ide_agent_memory (
     id SERIAL PRIMARY KEY,
+    project VARCHAR(128),
     category VARCHAR(64) NOT NULL,
     content TEXT NOT NULL,
     embedding vector(1024),
@@ -27,7 +28,8 @@ CREATE TABLE IF NOT EXISTS ide_agent_memory (
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_memory_category ON ide_agent_memory(category);
-CREATE INDEX IF NOT EXISTS idx_agent_memory_project ON ide_agent_memory(active_project);
+CREATE INDEX IF NOT EXISTS idx_agent_memory_project ON ide_agent_memory(project);
+CREATE INDEX IF NOT EXISTS idx_agent_memory_active_project ON ide_agent_memory(active_project);
 CREATE INDEX IF NOT EXISTS idx_agent_memory_status ON ide_agent_memory(status);
 CREATE INDEX IF NOT EXISTS idx_agent_memory_embedding ON ide_agent_memory USING hnsw (embedding vector_cosine_ops);
 
@@ -54,9 +56,11 @@ CREATE TABLE IF NOT EXISTS auditor_feedback (
     id SERIAL PRIMARY KEY,
     project VARCHAR(128),
     rule_id TEXT NOT NULL,
-    feedback TEXT NOT NULL, -- 'helpful' | 'false_positive' | 'irrelevant'
+    feedback TEXT NOT NULL, -- 'helpful' | 'false_positive' | 'unhelpful'
+    weight REAL DEFAULT 1.0,
     context_diff TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_auditor_feedback_rule ON auditor_feedback(rule_id);
+CREATE INDEX IF NOT EXISTS idx_auditor_feedback_project_rule ON auditor_feedback(project, rule_id);

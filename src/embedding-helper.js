@@ -1,10 +1,38 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { PRIORITY, ollamaQueue } from './llm-queue.js';
 
-dotenv.config();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, '..', '.env'), quiet: true });
 
 export { PRIORITY, ollamaQueue };
+
+const embeddingCache = new Map();
+const MAX_EMBED_CACHE = 256;
+
+export function clearEmbeddingCache() {
+    embeddingCache.clear();
+}
+
+function getCachedEmbedding(key) {
+    if (!embeddingCache.has(key)) return null;
+    const val = embeddingCache.get(key);
+    // Refresh LRU order
+    embeddingCache.delete(key);
+    embeddingCache.set(key, val);
+    return val;
+}
+
+function setCachedEmbedding(key, vec) {
+    if (!vec || !Array.isArray(vec)) return;
+    if (embeddingCache.size >= MAX_EMBED_CACHE) {
+        const oldestKey = embeddingCache.keys().next().value;
+        embeddingCache.delete(oldestKey);
+    }
+    embeddingCache.set(key, vec);
+}
 
 /**
  * Standard local Ollama embedding with queueing and retry.
@@ -113,11 +141,19 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
     const isOpenRouterUrl = customUrl && customUrl.includes('openrouter.ai');
     const isLocalBge = !rawModel || rawModel === 'bge-large' || rawModel === 'bge-large:latest';
     const model = (isOpenRouterUrl && isLocalBge) ? 'baai/bge-large-en-v1.5' : (rawModel || (openrouterKey ? 'baai/bge-large-en-v1.5' : 'bge-large'));
+    const dim = getConfiguredEmbeddingDim();
+    const cacheKey = `${dim}:${customUrl || 'ollama'}:${model}:${text}`;
+
+    // Use LRU cache when not intercepting globalThis.fetch in custom endpoint unit tests
+    if (!process.env.EMBEDDING_URL && !process.env.OPENROUTER_API_KEY) {
+        const cached = getCachedEmbedding(cacheKey);
+        if (cached) return cached;
+    }
 
     if (customUrl) {
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
             
             // Determine if it's an OpenAI-compatible /v1/embeddings or custom llama.cpp /embedding
             const isStandardOpenAI = customUrl.includes('/v1/embeddings') || customUrl.includes('openrouter.ai');
@@ -183,7 +219,9 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
             }
             
             if (rawVector) {
-                return validateVectorDimension(rawVector, 'Custom Embed');
+                const validated = validateVectorDimension(rawVector, 'Custom Embed');
+                setCachedEmbedding(cacheKey, validated);
+                return validated;
             }
             
             throw new Error("Could not parse embedding array from custom response");
@@ -194,12 +232,17 @@ export async function getEmbedding(text, priority = PRIORITY.LOW) {
 
     // Headless / CI fast bypass: If mock embeddings requested or running in CI/test environment without custom endpoint
     if (process.env.MOCK_EMBEDDINGS === '1' || process.env.CI || process.env.NODE_ENV === 'test') {
-        return generateDeterministicVector(text, getConfiguredEmbeddingDim());
+        const detVec = generateDeterministicVector(text, dim);
+        setCachedEmbedding(cacheKey, detVec);
+        return detVec;
     }
 
     // Fallback to local Ollama getEmbedding
     const vec = await getOllamaEmbedding(text, priority);
-    if (vec) return vec;
+    if (vec) {
+        setCachedEmbedding(cacheKey, vec);
+        return vec;
+    }
 
     return null;
 }

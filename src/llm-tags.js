@@ -121,25 +121,33 @@ export async function generateTagsFromLLM(text, options = {}) {
     }
 
     try {
+        const timeoutMs = parseInt(process.env.LLM_TIMEOUT_MS || '10000', 10);
         const tags = await ollamaQueue.enqueue(async (endpoint) => {
-            const url = `${endpoint.replace(/\/$/, '')}/api/generate`;
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: process.env.TAG_MODEL || "qwen2.5-coder:7b",
-                    prompt,
-                    stream: false,
-                    keep_alive: -1
-                })
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const url = `${endpoint.replace(/\/$/, '')}/api/generate`;
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: process.env.TAG_MODEL || "qwen2.5-coder:7b",
+                        prompt,
+                        stream: false,
+                        keep_alive: -1
+                    }),
+                    signal: controller.signal
+                });
 
-            if (!res.ok) throw new Error(`Status ${res.status}`);
+                if (!res.ok) throw new Error(`Status ${res.status}`);
 
-            const data = await res.json();
-            let parsed = data.response.split(',').map(t => t.trim()).filter(t => t.length > 0);
-            if (lowercase) parsed = parsed.map(t => t.toLowerCase());
-            return parsed;
+                const data = await res.json();
+                let parsed = data.response.split(',').map(t => t.trim()).filter(t => t.length > 0);
+                if (lowercase) parsed = parsed.map(t => t.toLowerCase());
+                return parsed;
+            } finally {
+                clearTimeout(timeoutId);
+            }
         }, PRIORITY.MEDIUM);
 
         if (tags && tags.length > 0) {

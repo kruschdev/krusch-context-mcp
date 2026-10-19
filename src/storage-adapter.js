@@ -11,7 +11,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pool, query } from '../db/pool.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
-import { getProjectDb } from './sqlite-engine.js';
+import { getProjectDb, cosineSimilarity as engineCosineSimilarity, getParsedEmbedding } from './sqlite-engine.js';
 
 let activeStorageMode = null; // 'sqlite' | 'postgres'
 
@@ -73,7 +73,7 @@ export function getSqliteDb(workspaceDir = process.cwd()) {
     db.exec('PRAGMA synchronous = NORMAL;');
     db.exec('PRAGMA foreign_keys = ON;');
 
-    // Initialize Schema
+    // Initialize unified schema matching sqlite-engine.js
     db.exec(`
         CREATE TABLE IF NOT EXISTS ide_agent_memory (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,19 +88,20 @@ export function getSqliteDb(workspaceDir = process.cwd()) {
             invalidated_reason TEXT,
             provenance TEXT,
             valid_until DATETIME,
+            pg_id INTEGER,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS ide_agent_nuggets (
-            key TEXT NOT NULL,
+            key TEXT PRIMARY KEY,
             project TEXT,
             value TEXT NOT NULL,
             kind TEXT NOT NULL,
             embedding TEXT,
+            pg_synced BOOLEAN DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (key, project)
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_nuggets_key ON ide_agent_nuggets(key);
@@ -113,6 +114,10 @@ export function getSqliteDb(workspaceDir = process.cwd()) {
             weight REAL DEFAULT 1.0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE INDEX IF NOT EXISTS idx_memory_status_cat ON ide_agent_memory(status, category);
+        CREATE INDEX IF NOT EXISTS idx_memory_created_at ON ide_agent_memory(created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_feedback_project_rule ON auditor_feedback(project, rule_id);
     `);
 
     sqliteInstance = db;
@@ -123,18 +128,7 @@ export function getSqliteDb(workspaceDir = process.cwd()) {
  * Computes cosine similarity between two numerical vectors.
  */
 export function cosineSimilarity(vecA, vecB) {
-    if (!Array.isArray(vecA) || !Array.isArray(vecB) || vecA.length === 0 || vecB.length === 0) return 0;
-    let dot = 0;
-    let normA = 0;
-    let normB = 0;
-    const len = Math.min(vecA.length, vecB.length);
-    for (let i = 0; i < len; i++) {
-        dot += vecA[i] * vecB[i];
-        normA += vecA[i] * vecA[i];
-        normB += vecB[i] * vecB[i];
-    }
-    if (normA === 0 || normB === 0) return 0;
-    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    return engineCosineSimilarity(vecA, vecB);
 }
 
 /**
@@ -142,7 +136,7 @@ export function cosineSimilarity(vecA, vecB) {
  * Returns match object if similarity >= threshold, null otherwise.
  */
 export async function checkNearDuplicateMemory({ project, category, embedding, threshold = 0.85 }) {
-    if (!embedding || !Array.isArray(embedding)) return null;
+    if (!embedding || (!Array.isArray(embedding) && !ArrayBuffer.isView(embedding))) return null;
 
     const mode = getStorageMode();
     if (mode === 'postgres') {
@@ -169,7 +163,7 @@ export async function checkNearDuplicateMemory({ project, category, embedding, t
         }
     }
 
-    // SQLite in-memory cosine comparison
+    // SQLite in-memory cosine comparison with cached Float64Array vectors
     const db = await getProjectDb(project);
     if (!db) return null;
     const rows = db.prepare(`
@@ -178,21 +172,16 @@ export async function checkNearDuplicateMemory({ project, category, embedding, t
         WHERE status = 'ACTIVE'
     `).all();
 
-
     let bestMatch = null;
     let maxSim = 0;
 
     for (const row of rows) {
-        if (!row.embedding) continue;
-        try {
-            const rowVec = typeof row.embedding === 'string' ? JSON.parse(row.embedding) : row.embedding;
-            const sim = cosineSimilarity(embedding, rowVec);
-            if (sim > maxSim) {
-                maxSim = sim;
-                bestMatch = { id: row.id, content: row.content, category: row.category, similarity: sim };
-            }
-        } catch {
-            // skip malformed vector
+        const rowVec = getParsedEmbedding(row.embedding);
+        if (!rowVec) continue;
+        const sim = engineCosineSimilarity(embedding, rowVec);
+        if (sim > maxSim) {
+            maxSim = sim;
+            bestMatch = { id: row.id, content: row.content, category: row.category, similarity: sim };
         }
     }
 

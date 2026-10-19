@@ -17,9 +17,9 @@ import crypto from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { getProjectDb, cosineSimilarity, pushProjectMemory, resolveProjectPath } from './sqlite-engine.js';
+import { getProjectDb, cosineSimilarity, getParsedEmbedding, pushProjectMemory, resolveProjectPath } from './sqlite-engine.js';
 import { checkNearDuplicateMemory, getStorageMode } from './storage-adapter.js';
-import { generateTagsFromLLM } from './llm-tags.js';
+import { generateTagsFromLLM, extractHeuristicTags } from './llm-tags.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
 
 export const CLOSED_CATEGORIES = new Set(['decision', 'bug', 'invariant', 'lesson', 'blocker']);
@@ -27,11 +27,13 @@ const DECAY_RATE = 0.01;
 const AUTO_TAG = true;
 
 const SECRET_PATTERNS = [
+    { label: 'OpenRouter API Key', regex: /\bsk-or-v1-[A-Za-z0-9_-]{20,}\b/ },
     { label: 'OpenAI/Anthropic API Key', regex: /\bsk-(?:proj|ant|live)-[A-Za-z0-9_-]{20,}\b/ },
     { label: 'GitHub Personal Access Token', regex: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}\b|\bgithub_pat_[A-Za-z0-9_]{35,}\b/ },
     { label: 'Google API Key', regex: /\bAIza[0-9A-Za-z_-]{35}\b/ },
     { label: 'AWS Access Key ID', regex: /\bAKIA[0-9A-Z]{16}\b/ },
     { label: 'Slack Token', regex: /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/ },
+    { label: 'Database Connection URL Secret', regex: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^:\s/]+:(?!(?:password|REDACTED|pass|postgres|\*+)@)[^@\s]{6,}@[^\s/]+/i },
     { label: 'Private Key Block', regex: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/ }
 ];
 
@@ -53,6 +55,34 @@ export function scanForSecretLeak(text) {
 export function computeNormalizedSpanHash(text) {
     const normalized = String(text || '').replace(/\r\n/g, '\n').trim();
     return crypto.createHash('sha256').update(normalized, 'utf8').digest('hex');
+}
+
+const anchoredFileCache = new Map();
+const MAX_ANCHORED_FILE_CACHE = 128;
+
+/**
+ * Reads an anchored file and computes its normalized SHA-256 hash with (mtimeMs, size) memoization.
+ */
+function readAnchoredFileCached(absPath) {
+    try {
+        const st = fs.statSync(absPath);
+        if (!st.isFile() || st.size > 5 * 1024 * 1024) return null;
+        const cached = anchoredFileCache.get(absPath);
+        if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
+            return cached;
+        }
+        const fileText = fs.readFileSync(absPath, 'utf8');
+        const currentHash = computeNormalizedSpanHash(fileText);
+        const entry = { mtimeMs: st.mtimeMs, size: st.size, fileText, currentHash };
+        if (anchoredFileCache.size >= MAX_ANCHORED_FILE_CACHE) {
+            const oldestKey = anchoredFileCache.keys().next().value;
+            anchoredFileCache.delete(oldestKey);
+        }
+        anchoredFileCache.set(absPath, entry);
+        return entry;
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -141,11 +171,12 @@ export function anchorProvenanceToFile(provenance, targetProject) {
     if (!base.file) return base;
 
     const absPath = resolveAnchoredFilePath(base.file, targetProject);
-    if (absPath && fs.existsSync(absPath)) {
-        try {
-            const fileText = fs.readFileSync(absPath, 'utf8');
+    if (absPath) {
+        const cachedFile = readAnchoredFileCached(absPath);
+        if (cachedFile) {
+            const { fileText, currentHash } = cachedFile;
             if (!base.anchor_hash) {
-                base.anchor_hash = computeNormalizedSpanHash(fileText);
+                base.anchor_hash = currentHash;
             }
             if (base.quoted_sentence && typeof base.quoted_sentence === 'string') {
                 const pos = fileText.indexOf(base.quoted_sentence);
@@ -165,7 +196,7 @@ export function anchorProvenanceToFile(provenance, targetProject) {
                 const locSuffix = base.locator ? ` [${base.locator}]` : '';
                 base.citation = `${base.file}${lineSuffix}${locSuffix}`;
             }
-        } catch {}
+        }
     }
     return base;
 }
@@ -202,14 +233,12 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
         return { anchored: true, is_drifted: true, drift_reason: 'file_missing', provenance: driftedProv };
     }
 
-    let fileText = '';
-    try {
-        fileText = fs.readFileSync(absPath, 'utf8');
-    } catch {
+    const cachedFile = readAnchoredFileCached(absPath);
+    if (!cachedFile) {
         return { anchored: true, is_drifted: Boolean(prov.is_drifted), provenance: prov };
     }
 
-    const currentHash = computeNormalizedSpanHash(fileText);
+    const { fileText, currentHash } = cachedFile;
     if (prov.anchor_hash && currentHash === prov.anchor_hash && !prov.is_drifted) {
         return { anchored: true, is_drifted: false, current_hash: currentHash, provenance: prov };
     }
@@ -368,10 +397,15 @@ export async function addMemory({
         });
     }
 
-    // 3. Process tags
+    // 3. Process tags (fast deterministic heuristic by default; opt-in LLM tag generation via LLM_AUTO_TAG=true)
     let finalTags = tags ? JSON.stringify(tags) : null;
     if (!finalTags && AUTO_TAG) {
-        finalTags = await generateTagsFromLLM(content, { asJson: true });
+        if (process.env.LLM_AUTO_TAG === 'true' || process.env.LLM_AUTO_TAG === '1') {
+            finalTags = await generateTagsFromLLM(content, { asJson: true });
+        } else {
+            const heuristic = extractHeuristicTags(content, 5);
+            finalTags = heuristic.length > 0 ? JSON.stringify(heuristic) : null;
+        }
     }
 
     // 4. Provenance with KruschNexus INV-11/INV-12 Span & Hash Grounding
@@ -519,16 +553,17 @@ export async function searchMemory({
 
     const rows = db.prepare(sql).all(...params);
     const embeddingArray = _embedding || await getEmbedding(query);
+    const lowerQuery = query.toLowerCase();
 
     const scored = rows.map(r => {
         let score = 0.5;
         if (embeddingArray && r.embedding) {
-            try {
-                const vec = typeof r.embedding === 'string' ? JSON.parse(r.embedding) : r.embedding;
+            const vec = getParsedEmbedding(r.embedding);
+            if (vec) {
                 score = cosineSimilarity(embeddingArray, vec);
-            } catch {}
+            }
         }
-        if (r.content.toLowerCase().includes(query.toLowerCase())) {
+        if (r.content.toLowerCase().includes(lowerQuery)) {
             score = Math.max(score, 0.8);
         }
         return { ...r, score };
@@ -842,12 +877,19 @@ export async function deleteMemory({ id, project, active_project } = {}) {
 /**
  * Updates a memory record's content and tags (Admin tool for extended profile).
  */
-export async function updateMemory({ id, content, tags, project, active_project } = {}) {
+export async function updateMemory({ id, content, tags, project, active_project, _embedding } = {}) {
     if (!id || !content) throw new McpError(ErrorCode.InvalidParams, "Missing id or content");
+    const leakedSecretType = scanForSecretLeak(String(content));
+    if (leakedSecretType) {
+        throw new McpError(
+            ErrorCode.InvalidParams,
+            `Secret refusal: update rejected because content appears to contain a raw credential (${leakedSecretType}). Redact secrets as [REDACTED] before updating.`
+        );
+    }
     const targetProject = project || active_project || detectCurrentProject();
     const db = await getProjectDb(targetProject);
     if (db) {
-        const emb = await getEmbedding(content);
+        const emb = _embedding || await getEmbedding(content);
         const embStr = emb ? `[${emb.join(',')}]` : null;
         const tagStr = tags ? JSON.stringify(tags) : null;
         db.prepare(`UPDATE ide_agent_memory SET content = ?, tags = ?, embedding = ? WHERE id = ?`).run(content, tagStr, embStr, id);
@@ -870,17 +912,16 @@ export async function consolidateMemories({ category, project, active_project, t
     const pairs = [];
 
     for (let i = 0; i < rows.length; i++) {
+        const vecA = getParsedEmbedding(rows[i].embedding);
+        if (!vecA) continue;
         for (let j = i + 1; j < rows.length; j++) {
-            if (!rows[i].embedding || !rows[j].embedding) continue;
-            try {
-                const vecA = JSON.parse(rows[i].embedding);
-                const vecB = JSON.parse(rows[j].embedding);
-                const sim = cosineSimilarity(vecA, vecB);
-                const dist = 1 - sim;
-                if (dist <= threshold) {
-                    pairs.push({ a: rows[i], b: rows[j], dist });
-                }
-            } catch {}
+            const vecB = getParsedEmbedding(rows[j].embedding);
+            if (!vecB) continue;
+            const sim = cosineSimilarity(vecA, vecB);
+            const dist = 1 - sim;
+            if (dist <= threshold) {
+                pairs.push({ a: rows[i], b: rows[j], dist });
+            }
         }
     }
 

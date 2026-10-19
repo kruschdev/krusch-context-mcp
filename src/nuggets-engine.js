@@ -1,7 +1,9 @@
 import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { getProjectDb, cosineSimilarity, pushProjectMemory } from './sqlite-engine.js';
+import { getProjectDb, cosineSimilarity, getParsedEmbedding, pushProjectMemory } from './sqlite-engine.js';
+import { getStorageMode } from './storage-adapter.js';
+import { detectCurrentProject } from './project-helper.js';
 import { scanForSecretLeak } from './memory-engine.js';
 
 const VALID_KINDS = new Set(['project', 'user', 'agent']);
@@ -27,7 +29,8 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
         );
     }
 
-    const targetProject = active_project || project || null;
+    const mode = getStorageMode();
+    const targetProject = active_project || project || (mode === 'sqlite' ? detectCurrentProject() : null);
     const embeddingArray = _embedding || await getEmbedding(value);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
     const embeddingStr = `[${embeddingArray.join(',')}]`;
@@ -54,7 +57,7 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
     let client = null;
     try {
         client = await pool.connect();
-        const res = await client.query(`
+        await client.query(`
             INSERT INTO ide_agent_nuggets (key, value, kind, embedding)
             VALUES ($1, $2, $3, $4::vector)
             ON CONFLICT (key) DO UPDATE 
@@ -64,7 +67,7 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
         return { content: [{ type: "text", text: `[krusch-context] 🧠 Global Nugget remembered (Postgres): '${key}'` }] };
     } catch (err) {
         console.warn(`[nuggets-engine] PostgreSQL unavailable for global nugget: ${err.message}`);
-        const fallbackProject = targetProject || 'default';
+        const fallbackProject = targetProject || detectCurrentProject() || 'default';
         const localDb = await getProjectDb(fallbackProject);
         if (localDb) {
             localDb.prepare(`
@@ -95,40 +98,43 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
 export async function nuggetNudges({ query, kinds, limit = 3, active_project, project, _embedding }) {
     if (!query && !_embedding) throw new McpError(ErrorCode.InvalidParams, "Missing query or embedding");
 
-    const targetProject = active_project || project || null;
+    const mode = getStorageMode();
+    const targetProject = active_project || project || (mode === 'sqlite' ? detectCurrentProject() : null);
     const embeddingArray = _embedding || await getEmbedding(query);
     if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
 
     let combinedResults = [];
 
-    // 1. Fetch from Global Postgres (if reachable)
-    let client = null;
-    try {
-        client = await pool.connect();
-        const embeddingStr = `[${embeddingArray.join(',')}]`;
-        const fetchLimit = limit * 2;
+    // 1. Fetch from Global Postgres (only when in postgres mode or when no local project is targeted)
+    if (mode === 'postgres' || !targetProject) {
+        let client = null;
+        try {
+            client = await pool.connect();
+            const embeddingStr = `[${embeddingArray.join(',')}]`;
+            const fetchLimit = limit * 2;
 
-        let sql = `
-            SELECT key, value, kind, created_at, (embedding <=> $1::vector) as distance, 'global' as source
-            FROM ide_agent_nuggets
-            WHERE embedding IS NOT NULL
-        `;
-        let params = [embeddingStr];
-        
-        if (kinds && kinds.length > 0) {
-            sql += ` AND kind = ANY($2)`;
-            params.push(kinds);
+            let sql = `
+                SELECT key, value, kind, created_at, (embedding <=> $1::vector) as distance, 'global' as source
+                FROM ide_agent_nuggets
+                WHERE embedding IS NOT NULL
+            `;
+            let params = [embeddingStr];
+            
+            if (kinds && kinds.length > 0) {
+                sql += ` AND kind = ANY($2)`;
+                params.push(kinds);
+            }
+            
+            sql += ` ORDER BY embedding <=> $1::vector LIMIT $${params.length + 1}`;
+            params.push(fetchLimit);
+
+            const res = await client.query(sql, params);
+            combinedResults.push(...res.rows);
+        } catch (_) {
+            // Postgres unreachable or table missing; proceed to local SQLite
+        } finally {
+            if (client) client.release();
         }
-        
-        sql += ` ORDER BY embedding <=> $1::vector LIMIT $${params.length + 1}`;
-        params.push(fetchLimit);
-
-        const res = await client.query(sql, params);
-        combinedResults.push(...res.rows);
-    } catch (_) {
-        // Postgres unreachable or table missing; proceed to local SQLite
-    } finally {
-        if (client) client.release();
     }
 
     // 2. Fetch from Local SQLite if project is provided and 'project' kind is allowed
@@ -145,21 +151,21 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project, pr
             const localRows = kinds && kinds.length > 0 ? stmt.all(...kinds) : stmt.all();
             
             for (const row of localRows) {
-                try {
-                    const dbEmbedding = JSON.parse(row.embedding);
-                    const similarity = cosineSimilarity(embeddingArray, dbEmbedding);
-                    const distance = 1 - similarity;
-                    combinedResults.push({
-                        key: row.key,
-                        value: row.value,
-                        kind: row.kind,
-                        created_at: row.created_at,
-                        distance: distance,
-                        source: `sqlite:${targetProject}`
-                    });
-                } catch (e) {
+                const dbEmbedding = getParsedEmbedding(row.embedding);
+                if (!dbEmbedding) {
                     console.warn(`[krusch-context] Warning: Failed to parse JSON embedding for nugget key '${row.key}'`);
+                    continue;
                 }
+                const similarity = cosineSimilarity(embeddingArray, dbEmbedding);
+                const distance = 1 - similarity;
+                combinedResults.push({
+                    key: row.key,
+                    value: row.value,
+                    kind: row.kind,
+                    created_at: row.created_at,
+                    distance: distance,
+                    source: `sqlite:${targetProject}`
+                });
             }
         }
     }
@@ -190,7 +196,8 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project, pr
 export async function nuggetForget({ key, active_project, project }) {
     if (!key) throw new McpError(ErrorCode.InvalidParams, "Missing key");
 
-    const targetProject = active_project || project || null;
+    const mode = getStorageMode();
+    const targetProject = active_project || project || (mode === 'sqlite' ? detectCurrentProject() : null);
     // Try SQLite first if targetProject is provided
     if (targetProject) {
         const localDb = await getProjectDb(targetProject);
@@ -203,15 +210,18 @@ export async function nuggetForget({ key, active_project, project }) {
     }
 
     // Fallback to Global Postgres (if reachable)
-    try {
-        const res = await pool.query(`DELETE FROM ide_agent_nuggets WHERE key = $1 RETURNING key`, [key]);
-        if (res.rowCount === 0) {
-            return { content: [{ type: "text", text: `[krusch-context] ⚠️ No nugget found with key: ${key}` }] };
+    if (mode === 'postgres' || !targetProject) {
+        try {
+            const res = await pool.query(`DELETE FROM ide_agent_nuggets WHERE key = $1 RETURNING key`, [key]);
+            if (res.rowCount === 0) {
+                return { content: [{ type: "text", text: `[krusch-context] ⚠️ No nugget found with key: ${key}` }] };
+            }
+            return { content: [{ type: "text", text: `[krusch-context] 🗑️ Forgot global nugget (Postgres): ${key}` }] };
+        } catch (_) {
+            // Fall through
         }
-        return { content: [{ type: "text", text: `[krusch-context] 🗑️ Forgot global nugget (Postgres): ${key}` }] };
-    } catch (_) {
-        return { content: [{ type: "text", text: `[krusch-context] ⚠️ No nugget found with key: ${key}` }] };
     }
+    return { content: [{ type: "text", text: `[krusch-context] ⚠️ No nugget found with key: ${key}` }] };
 }
 
 /**
@@ -223,26 +233,29 @@ export async function nuggetForget({ key, active_project, project }) {
  * @returns {Promise<{content: Array}>} MCP tool response
  */
 export async function nuggetList({ kinds, active_project, project }) {
-    const targetProject = active_project || project || null;
+    const mode = getStorageMode();
+    const targetProject = active_project || project || (mode === 'sqlite' ? detectCurrentProject() : null);
     let combinedResults = [];
 
-    // 1. Fetch from Global Postgres (if reachable)
-    let client = null;
-    try {
-        client = await pool.connect();
-        let sql = `SELECT key, value, kind, created_at, updated_at, 'global' as source FROM ide_agent_nuggets`;
-        let params = [];
-        if (kinds && kinds.length > 0) {
-            sql += ` WHERE kind = ANY($1)`;
-            params.push(kinds);
+    // 1. Fetch from Global Postgres (if in postgres mode or no local project)
+    if (mode === 'postgres' || !targetProject) {
+        let client = null;
+        try {
+            client = await pool.connect();
+            let sql = `SELECT key, value, kind, created_at, updated_at, 'global' as source FROM ide_agent_nuggets`;
+            let params = [];
+            if (kinds && kinds.length > 0) {
+                sql += ` WHERE kind = ANY($1)`;
+                params.push(kinds);
+            }
+            sql += ` ORDER BY updated_at DESC`;
+            const res = await client.query(sql, params);
+            combinedResults.push(...res.rows);
+        } catch (_) {
+            // Postgres unreachable; proceed to local SQLite
+        } finally {
+            if (client) client.release();
         }
-        sql += ` ORDER BY updated_at DESC`;
-        const res = await client.query(sql, params);
-        combinedResults.push(...res.rows);
-    } catch (_) {
-        // Postgres unreachable; proceed to local SQLite
-    } finally {
-        if (client) client.release();
     }
 
     // 2. Fetch from Local SQLite

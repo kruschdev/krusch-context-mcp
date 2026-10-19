@@ -10,10 +10,10 @@
 
 import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
-import { prunePreSynthesis } from './prune-helper.js';
+import { prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from './prune-helper.js';
 import { detectCurrentProject } from './project-helper.js';
 import { compileProjectState, searchMemory } from './memory-engine.js';
-import { getProjectDb, cosineSimilarity } from './sqlite-engine.js';
+import { getProjectDb, cosineSimilarity, getParsedEmbedding } from './sqlite-engine.js';
 
 const DECAY_RATE = 0.01;
 
@@ -36,12 +36,13 @@ export function estimateTokens(text) {
  */
 export function packTokenBudget(items, limitTokens = 4000) {
     const sorted = [...items].sort((a, b) => b.score - a.score);
+    const deduped = prunePostRetrieval(sorted, { similarityThreshold: 0.88 });
     
     let currentTokens = 0;
     const packed = [];
     const citations = [];
     
-    for (const item of sorted) {
+    for (const item of deduped) {
         const header = `### [${item.type.toUpperCase()}] ${item.title} (Score: ${(item.score * 100).toFixed(1)}%)\n`;
         const cleanedBody = prunePreSynthesis(item.content || '').trim() + '\n\n';
         const itemTokens = estimateTokens(header + cleanedBody);
@@ -93,9 +94,11 @@ export async function unifiedRetrieve({
 }) {
     const targetProject = project || detectCurrentProject();
     const items = [];
-    const cleanQuery = typeof query === 'string' ? query.trim() : (query ? String(query).trim() : '*');
-    const isWildcard = !cleanQuery || cleanQuery === '*';
+    const rawQuery = typeof query === 'string' ? query.trim() : (query ? String(query).trim() : '*');
+    const isWildcard = !rawQuery || rawQuery === '*';
+    const cleanQuery = isWildcard ? '*' : prunePreRetrieval(rawQuery);
     const lowerQuery = cleanQuery.toLowerCase();
+    const queryTerms = !isWildcard ? lowerQuery.split(/\s+/).filter(t => t.length > 2) : [];
 
     // 1. If mode === 'state' or include_state is requested, compile state briefing
     let stateHeader = "";
@@ -139,6 +142,8 @@ export async function unifiedRetrieve({
                 }
                 memSql += ` ORDER BY id DESC`;
                 const rows = db.prepare(memSql).all(...params);
+                const nowMs = Date.now();
+
                 for (const r of rows) {
                     if (include_state && statePackedIds.has(r.id)) {
                         continue; // Avoid re-packing memories already rendered in compileProjectState
@@ -148,23 +153,28 @@ export async function unifiedRetrieve({
                         score = 0.85;
                     } else {
                         if (embeddingArray && r.embedding) {
-                            try {
-                                const vec = typeof r.embedding === 'string' ? JSON.parse(r.embedding) : r.embedding;
+                            const vec = getParsedEmbedding(r.embedding);
+                            if (vec) {
                                 score = cosineSimilarity(embeddingArray, vec);
-                            } catch {}
+                            }
                         }
                         const lowerContent = r.content.toLowerCase();
+                        const lowerTags = r.tags ? String(r.tags).toLowerCase() : '';
                         if (lowerContent.includes(lowerQuery)) {
                             score = Math.max(score, 0.85);
-                        } else {
-                            // Multi-term keyword overlap
-                            const terms = lowerQuery.split(/\s+/).filter(t => t.length > 2);
-                            if (terms.length > 0) {
-                                const matches = terms.filter(t => lowerContent.includes(t)).length;
-                                if (matches > 0) {
-                                    const overlap = matches / terms.length;
-                                    score = Math.max(score, 0.5 + overlap * 0.35);
-                                }
+                        } else if (queryTerms.length > 0) {
+                            const matches = queryTerms.filter(t => lowerContent.includes(t) || lowerTags.includes(t)).length;
+                            if (matches > 0) {
+                                const overlap = matches / queryTerms.length;
+                                score = Math.max(score, 0.5 + overlap * 0.35);
+                            }
+                        }
+                        // Gentle temporal recency factor (up to +0.02 for fresh records)
+                        if (r.created_at) {
+                            const ageDays = Math.max(0, (nowMs - new Date(r.created_at).getTime()) / 86_400_000);
+                            if (Number.isFinite(ageDays)) {
+                                const recencyBoost = 0.02 * Math.exp(-DECAY_RATE * ageDays);
+                                score = Math.min(1.0, score + recencyBoost);
                             }
                         }
                     }
@@ -212,13 +222,12 @@ export async function unifiedRetrieve({
     const packed = packTokenBudget(items, availableTokens);
 
     const stateBadge = (mode === 'state' || include_state) ? ' (State Included)' : '';
-    const fullPayload = `${stateHeader}# 🔍 Unified Context Retrieval: "${cleanQuery}"${stateBadge}\n` +
+    const fullPayload = `${stateHeader}# 🔍 Unified Context Retrieval: "${rawQuery}"${stateBadge}\n` +
         `**Tokens**: ~${packed.totalTokens + estimateTokens(stateHeader)} / Budget: ${safeLimitTokens} | ` +
         `**Items Packed**: ${packed.packedCount} / ${items.length} candidates\n\n` +
         packed.contextText;
 
     return {
-
         content: [{ type: "text", text: fullPayload }],
         citations: packed.citations
     };

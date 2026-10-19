@@ -3,38 +3,41 @@
  * Comprehensive Memory Retrieval, Precision, Setwise Reranking, and Latency Benchmark Suite for krusch-context-mcp.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { pool } from '../db/pool.js';
-import { getEmbedding } from '../src/embedding-helper.js';
 import { searchMemory, addMemory } from '../src/memory-engine.js';
 import { unifiedRetrieve } from '../src/unified-retrieval.js';
 import { selectMinimalCoveringSet } from '../src/prune-helper.js';
+import { closeAllDatabases } from '../src/sqlite-engine.js';
 
-// Needle-in-a-haystack test dataset
+// Needle-in-a-haystack test dataset (Closed Taxonomy)
 const NEEDLE_DATASET = [
     {
         needle_id: "NEEDLE_01",
-        category: "bugs",
+        category: "bug",
         content: "CRITICAL_BUG_9941: Database deadlock occurs when concurrent WAL checkpoint runs simultaneously with sqlite push on primary-db:5432. Solution: wrap sqlite-engine push in explicit transaction lock.",
         query: "database deadlock WAL checkpoint sqlite push transaction lock",
         expected_needle: "CRITICAL_BUG_9941"
     },
     {
         needle_id: "NEEDLE_02",
-        category: "lessons",
+        category: "invariant",
         content: "LESSON_7732: Never run rsync --delete without excluding postgres/ and redis/ data directories, as it wipes production db containers.",
         query: "rsync delete safety postgres data directory exclusion rule",
         expected_needle: "LESSON_7732"
     },
     {
         needle_id: "NEEDLE_03",
-        category: "priorities",
+        category: "decision",
         content: "PRIORITY_1109: Upgrade Company Brain ingestion workers to use pgContext HNSW index on port 5432 for single-pass metadata filtering.",
         query: "company brain ingestion workers pgContext HNSW port 5432 filtering",
         expected_needle: "PRIORITY_1109"
     },
     {
         needle_id: "NEEDLE_04",
-        category: "outcomes",
+        category: "lesson",
         content: "OUTCOME_5520: Media server hardware acceleration enabled via GPU VAAPI, reducing CPU load from 98% to 14%.",
         query: "media server hardware acceleration VAAPI CPU load reduction",
         expected_needle: "OUTCOME_5520"
@@ -57,45 +60,38 @@ async function runBenchmark() {
     console.log("===============================================================\n");
 
     const benchmarkStart = Date.now();
-    const insertedIds = [];
+    const benchProject = `test_bench_${Date.now()}`;
+    let seededCount = 0;
 
     try {
-        // Step 1: Seed Needle & Haystack Memory
+        // Step 1: Seed Needle & Haystack Memory into isolated SQLite project DB
         console.log("1️⃣ Seeding Test Memory Store (Needles + Haystack)...");
+        const writeLatencies = [];
         for (const item of NEEDLE_DATASET) {
-            const embed = await getEmbedding(item.content);
-            if (embed) {
-                const client = await pool.connect();
-                try {
-                    const res = await client.query(`
-                        INSERT INTO ide_agent_memory (category, content, project, embedding)
-                        VALUES ($1, $2, 'benchmark_test', $3::vector)
-                        RETURNING id
-                    `, [item.category, item.content, `[${embed.join(',')}]`]);
-                    insertedIds.push(res.rows[0].id);
-                } finally {
-                    client.release();
-                }
-            }
+            const wStart = Date.now();
+            await addMemory({
+                category: item.category,
+                content: item.content,
+                project: benchProject,
+                force: true
+            });
+            writeLatencies.push(Date.now() - wStart);
+            seededCount++;
         }
 
         for (const noise of HAYSTACK_NOISE) {
-            const embed = await getEmbedding(noise);
-            if (embed) {
-                const client = await pool.connect();
-                try {
-                    const res = await client.query(`
-                        INSERT INTO ide_agent_memory (category, content, project, embedding)
-                        VALUES ('activity', $1, 'benchmark_test', $2::vector)
-                        RETURNING id
-                    `, [noise, `[${embed.join(',')}]`]);
-                    insertedIds.push(res.rows[0].id);
-                } finally {
-                    client.release();
-                }
-            }
+            const wStart = Date.now();
+            await addMemory({
+                category: 'lesson',
+                content: noise,
+                project: benchProject,
+                force: true
+            });
+            writeLatencies.push(Date.now() - wStart);
+            seededCount++;
         }
-        console.log(`✅ Seeded ${insertedIds.length} test memory items into database.\n`);
+        const avgWriteMs = (writeLatencies.reduce((a, b) => a + b, 0) / writeLatencies.length).toFixed(1);
+        console.log(`✅ Seeded ${seededCount} test memory items into SQLite (avg write: ${avgWriteMs}ms).\n`);
 
         // Step 2: Evaluate Needle Retrieval (Recall@1, Recall@3, Recall@5, MRR)
         console.log("2️⃣ Benchmarking Needle-in-a-Haystack (NIAH) Memory Retrieval...");
@@ -110,7 +106,7 @@ async function runBenchmark() {
             const searchRes = await searchMemory({
                 category: testCase.category,
                 query: testCase.query,
-                active_project: 'benchmark_test',
+                project: benchProject,
                 limit: 5
             });
             const duration = Date.now() - queryStart;
@@ -172,10 +168,9 @@ async function runBenchmark() {
             const uStart = Date.now();
             await unifiedRetrieve({
                 query: "database lock transaction and pgvector optimization",
-                project: "benchmark_test",
-                graph_hops: 1,
-                limit_tokens: 3000,
-                setwise_rerank: true
+                project: benchProject,
+                include_state: true,
+                limit_tokens: 3000
             });
             unifiedLatencies.push(Date.now() - uStart);
         }
@@ -201,21 +196,16 @@ async function runBenchmark() {
 
     } catch (err) {
         console.error("❌ Benchmark failed with error:", err);
+        process.exitCode = 1;
     } finally {
-        // Cleanup benchmark test entries
-        if (insertedIds.length > 0) {
-            console.log("\n🧹 Cleaning up benchmark test records...");
-            const client = await pool.connect();
-            try {
-                await client.query(`DELETE FROM ide_agent_memory WHERE project = 'benchmark_test'`);
-                console.log("✅ Cleanup complete.");
-            } catch (_) {}
-            finally {
-                client.release();
-            }
-        }
-        await pool.end();
-        process.exit(0);
+        closeAllDatabases();
+        try {
+            fs.rmSync(path.join(os.homedir(), '.krusch-context', 'projects', benchProject), { recursive: true, force: true });
+        } catch {}
+        try {
+            await pool.end();
+        } catch {}
+        process.exit(process.exitCode || 0);
     }
 }
 

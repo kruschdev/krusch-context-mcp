@@ -268,6 +268,46 @@ test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async
     assert.ok(citedIds.has(extraDecision.id), 'Unpacked memory outside top-5 state slice should be packed in retrieval section');
   });
 
+  await t.test('9. Expanded Secret Refusal (OpenRouter, DB URLs, updateMemory) & Vector Cache Optimization', async () => {
+    const { updateMemory, scanForSecretLeak } = await import('../src/memory-engine.js');
+    const { getParsedEmbedding } = await import('../src/sqlite-engine.js');
+    const dummyEmb = new Array(1024).fill(0.05);
+
+    assert.equal(scanForSecretLeak('sk-or-v1-1234567890abcdefghijklmnop'), 'OpenRouter API Key');
+    assert.equal(scanForSecretLeak('postgresql://admin:superSecretProdPass99@db.internal:5432/prod'), 'Database Connection URL Secret');
+    assert.equal(scanForSecretLeak('postgresql://kdcode:password@localhost:5432/kdcode'), null, 'Placeholder password should be allowed');
+
+    const cleanMem = await addMemory({
+      category: 'lesson',
+      content: `Clean record before update (${uniqueTag})`,
+      project: testProject,
+      force: true,
+      _embedding: dummyEmb
+    });
+
+    await assert.rejects(
+      async () => {
+        await updateMemory({
+          id: cleanMem.id,
+          content: 'Leaked OpenRouter key sk-or-v1-1234567890abcdefghijklmnop',
+          project: testProject,
+          _embedding: dummyEmb
+        });
+      },
+      (err) => {
+        assert.ok(err.message.includes('Secret refusal'));
+        return true;
+      }
+    );
+
+    // Verify getParsedEmbedding caches identical JSON string into same Float64Array reference
+    const rawJson = JSON.stringify([0.25, 0.5, 0.75]);
+    const parsedA = getParsedEmbedding(rawJson);
+    const parsedB = getParsedEmbedding(rawJson);
+    assert.ok(parsedA instanceof Float64Array, 'Must parse into Float64Array');
+    assert.strictEqual(parsedA, parsedB, 'Must return cached Float64Array reference on second call');
+  });
+
   t.after(async () => {
     closeAllDatabases();
     try {

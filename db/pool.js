@@ -29,7 +29,8 @@ function getPoolInstance() {
         connectionString: connStr,
         max: parseInt(process.env.DB_POOL_SIZE || '15', 10),
         connectionTimeoutMillis: 5000,
-        idleTimeoutMillis: 30000
+        idleTimeoutMillis: 30000,
+        allowExitOnIdle: true
     } : {
         host: process.env.DB_HOST || 'localhost',
         port: parseInt(process.env.DB_PORT || '5432', 10),
@@ -38,7 +39,8 @@ function getPoolInstance() {
         password: process.env.DB_PASSWORD || 'password',
         max: parseInt(process.env.DB_POOL_SIZE || '15', 10),
         connectionTimeoutMillis: 5000,
-        idleTimeoutMillis: 30000
+        idleTimeoutMillis: 30000,
+        allowExitOnIdle: true
     });
 
     // Guard against uncaught idle client crashes (e.g. Postgres restart or network drops)
