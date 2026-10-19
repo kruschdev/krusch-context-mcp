@@ -17,7 +17,7 @@ import crypto from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { getProjectDb, cosineSimilarity, getParsedEmbedding, pushProjectMemory, resolveProjectPath } from './sqlite-engine.js';
+import { getProjectDb, cosineSimilarity, getParsedEmbedding, pushProjectMemory, resolveProjectPath, withTransaction } from './sqlite-engine.js';
 import { checkNearDuplicateMemory, getStorageMode } from './storage-adapter.js';
 import { generateTagsFromLLM, extractHeuristicTags } from './llm-tags.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
@@ -28,7 +28,7 @@ const AUTO_TAG = true;
 
 const SECRET_PATTERNS = [
     { label: 'OpenRouter API Key', regex: /\bsk-or-v1-[A-Za-z0-9_-]{20,}\b/ },
-    { label: 'OpenAI/Anthropic API Key', regex: /\bsk-(?:proj|ant|live)-[A-Za-z0-9_-]{20,}\b/ },
+    { label: 'OpenAI/Anthropic API Key', regex: /\bsk-(?:proj-|ant-|live-|svcacct-)?[A-Za-z0-9_-]{20,}\b/ },
     { label: 'GitHub Personal Access Token', regex: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}\b|\bgithub_pat_[A-Za-z0-9_]{35,}\b/ },
     { label: 'Google API Key', regex: /\bAIza[0-9A-Za-z_-]{35}\b/ },
     { label: 'AWS Access Key ID', regex: /\bAKIA[0-9A-Z]{16}\b/ },
@@ -36,6 +36,18 @@ const SECRET_PATTERNS = [
     { label: 'Database Connection URL Secret', regex: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^:\s/]+:(?!(?:password|REDACTED|pass|postgres|\*+)@)[^@\s]{6,}@[^\s/]+/i },
     { label: 'Private Key Block', regex: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/ }
 ];
+
+/**
+ * Checks whether a candidate file path points to a sensitive secret dotfile or key file.
+ */
+function isSensitiveAnchorFile(filePath) {
+    if (!filePath || typeof filePath !== 'string') return true;
+    const base = path.basename(filePath).toLowerCase();
+    if (base === '.env' || base.startsWith('.env.')) return true;
+    if (base === 'id_rsa' || base === 'id_ed25519' || base === 'id_ecdsa' || base === 'id_dsa') return true;
+    if (base.endsWith('.pem') || base.endsWith('.key')) return true;
+    return false;
+}
 
 /**
  * Scans text for raw credentials/secrets before persistence (FlowState secrets_scan parity).
@@ -86,12 +98,13 @@ function readAnchoredFileCached(absPath) {
 }
 
 /**
- * Safely resolves a provenance file path within a project workspace root (strict path-traversal guard).
+ * Safely resolves a provenance file path within a project workspace root (strict path-traversal & symlink guard).
  */
 export function resolveAnchoredFilePath(fileRef, targetProject) {
     if (!fileRef || typeof fileRef !== 'string') return null;
     const cleaned = fileRef.trim();
     if (!cleaned || cleaned.includes('\0') || cleaned.includes('..')) return null;
+    if (isSensitiveAnchorFile(cleaned)) return null;
 
     const projectRoot = resolveProjectPath(targetProject);
     const candidateRoots = [projectRoot, process.cwd()];
@@ -104,29 +117,57 @@ export function resolveAnchoredFilePath(fileRef, targetProject) {
     for (const rootDir of candidateRoots) {
         if (!rootDir) continue;
         const resolvedRoot = path.resolve(rootDir);
+        let realRoot = resolvedRoot;
+        try {
+            if (fs.existsSync(resolvedRoot)) {
+                realRoot = fs.realpathSync(resolvedRoot);
+            }
+        } catch {
+            continue;
+        }
         const candidates = path.isAbsolute(cleaned)
             ? [path.resolve(cleaned), path.resolve(resolvedRoot, cleaned.replace(/^[/\\]+/, ''))]
             : [path.resolve(resolvedRoot, cleaned)];
 
         for (const resolvedTarget of candidates) {
+            if (isSensitiveAnchorFile(resolvedTarget)) continue;
             const rel = path.relative(resolvedRoot, resolvedTarget);
             if (!rel.startsWith('..') && !path.isAbsolute(rel) && rel !== '') {
                 if (fs.existsSync(resolvedTarget)) {
                     try {
-                        const st = fs.statSync(resolvedTarget);
+                        const realTarget = fs.realpathSync(resolvedTarget);
+                        if (isSensitiveAnchorFile(realTarget)) continue;
+                        const realRel = path.relative(realRoot, realTarget);
+                        if (realRel.startsWith('..') || path.isAbsolute(realRel) || realRel === '') {
+                            continue;
+                        }
+                        const st = fs.statSync(realTarget);
                         if (st.isFile() && st.size <= 5 * 1024 * 1024) {
-                            return resolvedTarget;
+                            return realTarget;
                         }
                     } catch {}
                 }
             }
         }
     }
-    // Return expected path inside projectRoot even if missing (for missing-file drift check)
+    // Return expected path inside projectRoot ONLY if the target does not exist on disk (for missing-file drift check)
+    if (path.isAbsolute(cleaned)) {
+        const relAbs = path.relative(projectRoot, path.resolve(cleaned));
+        if (relAbs.startsWith('..') || path.isAbsolute(relAbs) || relAbs === '') {
+            return null;
+        }
+    }
     const defaultTarget = path.resolve(projectRoot, cleaned.replace(/^[/\\]+/, ''));
+    if (isSensitiveAnchorFile(defaultTarget)) return null;
     const relDefault = path.relative(projectRoot, defaultTarget);
     if (!relDefault.startsWith('..') && !path.isAbsolute(relDefault) && relDefault !== '') {
-        return defaultTarget;
+        try {
+            // If the path or symlink exists on disk here, it failed validation above -> reject!
+            fs.lstatSync(defaultTarget);
+            return null;
+        } catch {
+            return defaultTarget;
+        }
     }
     return null;
 }
@@ -165,6 +206,7 @@ export function anchorProvenanceToFile(provenance, targetProject) {
         anchor_hash: provenance?.anchor_hash || null,
         citation: provenance?.citation || null,
         is_drifted: Boolean(provenance?.is_drifted),
+        drift_reason: provenance?.drift_reason || null,
         recorded_at: new Date().toISOString()
     };
 
@@ -175,18 +217,24 @@ export function anchorProvenanceToFile(provenance, targetProject) {
         const cachedFile = readAnchoredFileCached(absPath);
         if (cachedFile) {
             const { fileText, currentHash } = cachedFile;
+            const normalizedFileText = fileText.replace(/\r\n/g, '\n');
             if (!base.anchor_hash) {
                 base.anchor_hash = currentHash;
             }
             if (base.quoted_sentence && typeof base.quoted_sentence === 'string') {
-                const pos = fileText.indexOf(base.quoted_sentence);
+                const normalizedQuote = base.quoted_sentence.replace(/\r\n/g, '\n');
+                const pos = normalizedFileText.indexOf(normalizedQuote);
                 if (pos !== -1) {
                     base.char_start = pos;
-                    base.char_end = pos + base.quoted_sentence.length;
-                    const { startLine, endLine } = getSpanLineRange(fileText, base.char_start, base.char_end);
+                    base.char_end = pos + normalizedQuote.length;
+                    const { startLine, endLine } = getSpanLineRange(normalizedFileText, base.char_start, base.char_end);
                     base.start_line = startLine;
                     base.end_line = endLine;
                     base.is_drifted = false;
+                    base.drift_reason = null;
+                } else {
+                    base.is_drifted = true;
+                    base.drift_reason = 'quoted_span_not_found';
                 }
             }
             if (!base.citation) {
@@ -227,7 +275,7 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
         const driftedProv = { ...prov, is_drifted: true, drift_reason: 'file_missing' };
         if (db && row.id && !prov.is_drifted) {
             try {
-                db.prepare(`UPDATE ide_agent_memory SET provenance = ? WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
+                db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
             } catch {}
         }
         return { anchored: true, is_drifted: true, drift_reason: 'file_missing', provenance: driftedProv };
@@ -245,11 +293,13 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
 
     // File hash changed or needs verification against verbatim quoted_sentence (INV-12)
     if (prov.quoted_sentence && typeof prov.quoted_sentence === 'string') {
-        const pos = fileText.indexOf(prov.quoted_sentence);
+        const normalizedFileText = fileText.replace(/\r\n/g, '\n');
+        const normalizedQuote = prov.quoted_sentence.replace(/\r\n/g, '\n');
+        const pos = normalizedFileText.indexOf(normalizedQuote);
         if (pos !== -1) {
             const charStart = pos;
-            const charEnd = pos + prov.quoted_sentence.length;
-            const { startLine, endLine } = getSpanLineRange(fileText, charStart, charEnd);
+            const charEnd = pos + normalizedQuote.length;
+            const { startLine, endLine } = getSpanLineRange(normalizedFileText, charStart, charEnd);
             const lineSuffix = `#L${startLine}${endLine !== startLine ? `-L${endLine}` : ''}`;
             const locSuffix = prov.locator ? ` [${prov.locator}]` : '';
             const healedProv = {
@@ -265,23 +315,24 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
             };
             if (db && row.id) {
                 try {
-                    db.prepare(`UPDATE ide_agent_memory SET provenance = ? WHERE id = ?`).run(JSON.stringify(healedProv), row.id);
+                    db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(healedProv), row.id);
                 } catch {}
             }
             return { anchored: true, is_drifted: false, healed: true, current_hash: currentHash, provenance: healedProv };
         } else {
+            const reason = prov.drift_reason === 'quoted_span_not_found' ? 'quoted_span_not_found' : 'quoted_span_mutated';
             const driftedProv = {
                 ...prov,
                 current_hash: currentHash,
                 is_drifted: true,
-                drift_reason: 'quoted_span_mutated'
+                drift_reason: reason
             };
             if (db && row.id && !prov.is_drifted) {
                 try {
-                    db.prepare(`UPDATE ide_agent_memory SET provenance = ? WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
+                    db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
                 } catch {}
             }
-            return { anchored: true, is_drifted: true, drift_reason: 'quoted_span_mutated', current_hash: currentHash, provenance: driftedProv };
+            return { anchored: true, is_drifted: true, drift_reason: reason, current_hash: currentHash, provenance: driftedProv };
         }
     }
 
@@ -295,7 +346,7 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
         };
         if (db && row.id && !prov.is_drifted) {
             try {
-                db.prepare(`UPDATE ide_agent_memory SET provenance = ? WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
+                db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
             } catch {}
         }
         return { anchored: true, is_drifted: true, drift_reason: 'file_hash_mutated', current_hash: currentHash, provenance: driftedProv };
@@ -310,7 +361,7 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
         };
         if (db && row.id) {
             try {
-                db.prepare(`UPDATE ide_agent_memory SET provenance = ? WHERE id = ?`).run(JSON.stringify(healedProv), row.id);
+                db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(healedProv), row.id);
             } catch {}
         }
         return { anchored: true, is_drifted: false, healed: true, current_hash: currentHash, provenance: healedProv };
@@ -369,16 +420,35 @@ export async function addMemory({
         throw new McpError(ErrorCode.InvalidParams, "Parameter 'content' must be non-empty text");
     }
 
-    const leakedSecretType = scanForSecretLeak(content);
+    const leakedSecretType =
+        scanForSecretLeak(content) ||
+        (provenance ? scanForSecretLeak(JSON.stringify(provenance)) : null) ||
+        (tags ? scanForSecretLeak(JSON.stringify(tags)) : null);
     if (leakedSecretType) {
         throw new McpError(
             ErrorCode.InvalidParams,
-            `Secret refusal: write rejected because content appears to contain a raw credential (${leakedSecretType}). Redact secrets as [REDACTED] before calling krusch_context_remember.`
+            `Secret refusal: write rejected because payload appears to contain a raw credential (${leakedSecretType}). Redact secrets as [REDACTED] before calling krusch_context_remember.`
         );
     }
 
-    const normCat = normalizeCategory(category);
     const targetProject = project || active_project || detectCurrentProject();
+    const db = await getProjectDb(targetProject);
+
+    let resolvedCategory = category;
+    if (supersedes_id && db) {
+        const targetRow = db.prepare(`SELECT id, category FROM ide_agent_memory WHERE id = ?`).get(supersedes_id);
+        if (!targetRow) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `Target memory #${supersedes_id} not found in project '${targetProject}'.`
+            );
+        }
+        if (!resolvedCategory) {
+            resolvedCategory = targetRow.category;
+        }
+    }
+
+    const normCat = normalizeCategory(resolvedCategory);
     
     // 1. Compute embedding
     const embeddingArray = _embedding || await getEmbedding(content);
@@ -414,22 +484,30 @@ export async function addMemory({
 
     const embeddingStr = `[${embeddingArray.join(',')}]`;
 
-    // 5. Insert into SQLite project DB
-    const db = await getProjectDb(targetProject);
+    // 5. Insert into SQLite project DB atomically
     if (db) {
-        const info = db.prepare(`
-            INSERT INTO ide_agent_memory (category, content, tags, embedding, status, supersedes_id, provenance)
-            VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?)
-        `).run(normCat, content, finalTags, embeddingStr, supersedes_id || null, provPayload);
+        const newId = withTransaction(db, () => {
+            const info = db.prepare(`
+                INSERT INTO ide_agent_memory (category, content, tags, embedding, status, supersedes_id, provenance, pg_synced)
+                VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, 0)
+            `).run(normCat, content, finalTags, embeddingStr, supersedes_id || null, provPayload);
 
-        const newId = info.lastInsertRowid;
-        if (supersedes_id) {
-            try {
-                db.prepare(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = ? WHERE id = ?`).run(newId, supersedes_id);
-            } catch (err) {
-                console.warn(`[memory-engine] SQLite supersede update warning: ${err.message}`);
+            const insertedId = info.lastInsertRowid;
+            if (supersedes_id) {
+                const upd = db.prepare(`
+                    UPDATE ide_agent_memory
+                    SET status = 'SUPERSEDED', superseded_by = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                `).run(insertedId, supersedes_id);
+                if (upd.changes === 0) {
+                    throw new McpError(
+                        ErrorCode.InvalidParams,
+                        `Target memory #${supersedes_id} not found in project '${targetProject}'.`
+                    );
+                }
             }
-        }
+            return insertedId;
+        });
 
         // Push behind if postgres available
         pushProjectMemory(targetProject, db).catch(() => {});
@@ -470,25 +548,41 @@ export async function addMemory({
 /**
  * Supersedes an outdated memory with updated knowledge.
  */
-export async function supersedeMemory({ id, category, content, project, active_project, tags, provenance }) {
-    if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing parameter 'id'");
+export async function supersedeMemory({ id, target_id, category, content, project, active_project, tags, provenance, _embedding }) {
+    const resolvedTargetId = target_id ?? id;
+    if (!resolvedTargetId) throw new McpError(ErrorCode.InvalidParams, "Missing parameter 'id'");
     if (!content) throw new McpError(ErrorCode.InvalidParams, "Missing parameter 'content'");
+
+    const targetProject = project || active_project || detectCurrentProject();
+    const db = await getProjectDb(targetProject);
+    if (!db) throw new McpError(ErrorCode.InternalError, "Failed to access local database");
+
+    const targetRow = db.prepare(`SELECT id, category FROM ide_agent_memory WHERE id = ?`).get(resolvedTargetId);
+    if (!targetRow) {
+        throw new McpError(
+            ErrorCode.InvalidParams,
+            `Target memory #${resolvedTargetId} not found in project '${targetProject}'.`
+        );
+    }
+
     return await addMemory({
-        category,
+        category: category || targetRow.category,
         content,
         tags,
-        project: project || active_project,
-        supersedes_id: id,
+        project: targetProject,
+        supersedes_id: resolvedTargetId,
         provenance,
-        force: true
+        force: true,
+        _embedding
     });
 }
 
 /**
  * Explicitly invalidates a memory with a mandatory reason.
  */
-export async function invalidateMemory({ id, reason, project, active_project }) {
-    if (!id) throw new McpError(ErrorCode.InvalidParams, "Missing parameter 'id'");
+export async function invalidateMemory({ id, target_id, reason, project, active_project }) {
+    const resolvedId = target_id ?? id;
+    if (!resolvedId) throw new McpError(ErrorCode.InvalidParams, "Missing parameter 'id'");
     if (!reason || typeof reason !== 'string' || !reason.trim()) {
         throw new McpError(
             ErrorCode.InvalidParams,
@@ -496,19 +590,36 @@ export async function invalidateMemory({ id, reason, project, active_project }) 
         );
     }
 
+    const leakedSecretType = scanForSecretLeak(reason);
+    if (leakedSecretType) {
+        throw new McpError(
+            ErrorCode.InvalidParams,
+            `Secret refusal: invalidation rejected because reason appears to contain a raw credential (${leakedSecretType}). Redact secrets as [REDACTED] before calling krusch_context_revise.`
+        );
+    }
+
     const targetProject = project || active_project || detectCurrentProject();
     const db = await getProjectDb(targetProject);
     if (db) {
-        db.prepare(`
+        const info = db.prepare(`
             UPDATE ide_agent_memory 
-            SET status = 'INVALIDATED', invalidated_reason = ? 
+            SET status = 'INVALIDATED', invalidated_reason = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        `).run(reason.trim(), id);
+        `).run(reason.trim(), resolvedId);
+
+        if (info.changes === 0) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `Target memory #${resolvedId} not found in project '${targetProject}'.`
+            );
+        }
+
+        pushProjectMemory(targetProject, db).catch(() => {});
 
         return {
             content: [{
                 type: "text",
-                text: `[krusch-context] 🗑️ Memory #${id} marked as INVALIDATED.\nReason: "${reason.trim()}"`
+                text: `[krusch-context] 🗑️ Memory #${resolvedId} marked as INVALIDATED.\nReason: "${reason.trim()}"`
             }]
         };
     }
@@ -585,21 +696,22 @@ export async function searchMemory({
 }
 
 /**
- * Returns memories unreferenced or older than 30 days for decay review.
+ * Returns memories unreferenced or older than 30 days for decay review, prioritizing non-invariant records.
  */
-export async function getStaleMemories({ project, days = 30 } = {}) {
+export async function getStaleMemories({ project, days = 30, limit = 10 } = {}) {
     const targetProject = project || detectCurrentProject();
     const db = await getProjectDb(targetProject);
     if (!db) return [];
 
     const rows = db.prepare(`
-        SELECT id, category, content, created_at
+        SELECT id, category, content, created_at, updated_at
         FROM ide_agent_memory
         WHERE status = 'ACTIVE'
-          AND created_at < datetime('now', '-' || ? || ' days')
-        ORDER BY created_at ASC
-        LIMIT 10
-    `).all(days);
+          AND COALESCE(updated_at, created_at) < datetime('now', '-' || ? || ' days')
+        ORDER BY CASE WHEN category = 'invariant' THEN 1 ELSE 0 END ASC,
+                 COALESCE(updated_at, created_at) ASC
+        LIMIT ?
+    `).all(days, limit);
 
     return rows;
 }
@@ -771,6 +883,7 @@ export async function getHealthStats({ project } = {}) {
     let nuggetCount = 0;
     let anchoredCount = 0;
     let driftedCount = 0;
+    let staleCount = 0;
     const categoryCounts = {};
 
     if (db) {
@@ -794,9 +907,16 @@ export async function getHealthStats({ project } = {}) {
         }
         const nugRow = db.prepare(`SELECT count(*) as count FROM ide_agent_nuggets`).get();
         nuggetCount = nugRow ? nugRow.count : 0;
+
+        const staleRow = db.prepare(`
+            SELECT count(*) as count
+            FROM ide_agent_memory
+            WHERE status = 'ACTIVE'
+              AND COALESCE(updated_at, created_at) < datetime('now', '-30 days')
+        `).get();
+        staleCount = staleRow ? staleRow.count : 0;
     }
 
-    const stale = await getStaleMemories({ project: targetProject, days: 30 });
     const worktree = getWorktreeStatus();
 
     let output = `# 🩺 Krusch Context Health Status\n\n`;
@@ -811,8 +931,8 @@ export async function getHealthStats({ project } = {}) {
     output += `* **Superseded Lineage**: ${supersededCount}\n`;
     output += `* **Invalidated Records**: ${invalidatedCount}\n`;
     output += `* **Steering Nuggets**: ${nuggetCount}\n`;
-    if (stale.length > 0) {
-        output += `* **Decay Review**: ⏳ ${stale.length} memories have not been referenced in >30 days.\n`;
+    if (staleCount > 0) {
+        output += `* **Decay Review**: ⏳ ${staleCount} memories have not been referenced in >30 days.\n`;
     } else {
         output += `* **Decay Review**: ✅ All active memories fresh (<30 days).\n`;
     }
@@ -828,7 +948,7 @@ export async function getHealthStats({ project } = {}) {
             supersededCount,
             invalidatedCount,
             nuggetCount,
-            staleCount: stale.length
+            staleCount
         }
     };
 }
@@ -881,11 +1001,13 @@ export async function deleteMemory({ id, project, active_project } = {}) {
  */
 export async function updateMemory({ id, content, tags, project, active_project, _embedding } = {}) {
     if (!id || !content) throw new McpError(ErrorCode.InvalidParams, "Missing id or content");
-    const leakedSecretType = scanForSecretLeak(String(content));
+    const leakedSecretType =
+        scanForSecretLeak(String(content)) ||
+        (tags ? scanForSecretLeak(JSON.stringify(tags)) : null);
     if (leakedSecretType) {
         throw new McpError(
             ErrorCode.InvalidParams,
-            `Secret refusal: update rejected because content appears to contain a raw credential (${leakedSecretType}). Redact secrets as [REDACTED] before updating.`
+            `Secret refusal: update rejected because payload appears to contain a raw credential (${leakedSecretType}). Redact secrets as [REDACTED] before updating.`
         );
     }
     const targetProject = project || active_project || detectCurrentProject();
@@ -894,7 +1016,8 @@ export async function updateMemory({ id, content, tags, project, active_project,
         const emb = _embedding || await getEmbedding(content);
         const embStr = emb ? `[${emb.join(',')}]` : null;
         const tagStr = tags ? JSON.stringify(tags) : null;
-        db.prepare(`UPDATE ide_agent_memory SET content = ?, tags = ?, embedding = ? WHERE id = ?`).run(content, tagStr, embStr, id);
+        db.prepare(`UPDATE ide_agent_memory SET content = ?, tags = ?, embedding = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(content, tagStr, embStr, id);
+        pushProjectMemory(targetProject, db).catch(() => {});
         return { content: [{ type: "text", text: `[krusch-context] ✅ Updated memory record #${id}` }] };
     }
     throw new McpError(ErrorCode.InternalError, "Database unavailable");
@@ -942,9 +1065,10 @@ export async function consolidateMemories({ category, project, active_project, t
     let mergedCount = 0;
     for (const p of pairs) {
         // Mark the newer one as superseded by the older one
-        db.prepare(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = ? WHERE id = ?`).run(p.a.id, p.b.id);
+        db.prepare(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(p.a.id, p.b.id);
         mergedCount++;
     }
+    pushProjectMemory(targetProject, db).catch(() => {});
 
     return { content: [{ type: "text", text: `🔗 Consolidated ${mergedCount} duplicate pairs in category '${normCat}'.` }] };
 }

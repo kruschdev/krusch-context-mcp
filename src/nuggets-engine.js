@@ -21,11 +21,11 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
     if (!key || !value) throw new McpError(ErrorCode.InvalidParams, "Missing key or value");
     if (!VALID_KINDS.has(kind)) throw new McpError(ErrorCode.InvalidParams, `Invalid kind: ${kind}. Must be one of: ${[...VALID_KINDS].join(', ')}`);
 
-    const leakedSecretType = scanForSecretLeak(String(value));
+    const leakedSecretType = scanForSecretLeak(String(value)) || scanForSecretLeak(String(key));
     if (leakedSecretType) {
         throw new McpError(
             ErrorCode.InvalidParams,
-            `Secret refusal: nugget rejected because value appears to contain a raw credential (${leakedSecretType}). Redact secrets as [REDACTED] before calling krusch_context_remember.`
+            `Secret refusal: nugget rejected because key or value appears to contain a raw credential (${leakedSecretType}). Redact secrets as [REDACTED] before calling krusch_context_remember.`
         );
     }
 
@@ -198,28 +198,39 @@ export async function nuggetForget({ key, active_project, project }) {
 
     const mode = getStorageMode();
     const targetProject = active_project || project || (mode === 'sqlite' ? detectCurrentProject() : null);
-    // Try SQLite first if targetProject is provided
+    let deletedSqlite = false;
+    let deletedPg = false;
+
+    // 1. Delete from SQLite if targetProject is provided
     if (targetProject) {
         const localDb = await getProjectDb(targetProject);
         if (localDb) {
             const res = localDb.prepare(`DELETE FROM ide_agent_nuggets WHERE key = ?`).run(key);
             if (res.changes > 0) {
-                return { content: [{ type: "text", text: `[krusch-context] 🗑️ Forgot nugget natively from SQLite (.agent/memory.db): ${key}` }] };
+                deletedSqlite = true;
             }
         }
     }
 
-    // Fallback to Global Postgres (if reachable)
-    if (mode === 'postgres' || !targetProject) {
+    // 2. Also delete from Global Postgres when configured or in postgres mode
+    if (mode === 'postgres' || !targetProject || process.env.DATABASE_URL || process.env.DB_PASSWORD) {
         try {
-            const res = await pool.query(`DELETE FROM ide_agent_nuggets WHERE key = $1 RETURNING key`, [key]);
-            if (res.rowCount === 0) {
-                return { content: [{ type: "text", text: `[krusch-context] ⚠️ No nugget found with key: ${key}` }] };
+            const res = targetProject
+                ? await pool.query(`DELETE FROM ide_agent_nuggets WHERE key = $1 AND (project = $2 OR project IS NULL) RETURNING key`, [key, targetProject])
+                : await pool.query(`DELETE FROM ide_agent_nuggets WHERE key = $1 RETURNING key`, [key]);
+            if (res && res.rowCount > 0) {
+                deletedPg = true;
             }
-            return { content: [{ type: "text", text: `[krusch-context] 🗑️ Forgot global nugget (Postgres): ${key}` }] };
         } catch (_) {
-            // Fall through
+            // Fall through if Postgres is unreachable
         }
+    }
+
+    if (deletedSqlite) {
+        return { content: [{ type: "text", text: `[krusch-context] 🗑️ Forgot nugget natively from SQLite (.agent/memory.db): ${key}` }] };
+    }
+    if (deletedPg) {
+        return { content: [{ type: "text", text: `[krusch-context] 🗑️ Forgot global nugget (Postgres): ${key}` }] };
     }
     return { content: [{ type: "text", text: `[krusch-context] ⚠️ No nugget found with key: ${key}` }] };
 }

@@ -308,6 +308,224 @@ test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async
     assert.strictEqual(parsedA, parsedB, 'Must return cached Float64Array reference on second call');
   });
 
+  await t.test('10. Audit Remediations: Weight Decay (CTX-02), Symlink/Dotfile Guard (CTX-03), Deep Secret Scan (CTX-04), Lineage Validation (CTX-05), Retrieval Filtering (CTX-07), Quote Drift (CTX-08), Stale Count (CTX-09), & Path Boundary Nudge (CTX-10)', async () => {
+    const { resolveAnchoredFilePath, anchorProvenanceToFile, scanForSecretLeak } = await import('../src/memory-engine.js');
+    const { resolveProjectPath, getProjectDb } = await import('../src/sqlite-engine.js');
+    const { handleProactiveNudge, recordNudgeFeedback } = await import('../src/proactive-engine.js');
+    const { nuggetRemember } = await import('../src/nuggets-engine.js');
+    const { unifiedRetrieve } = await import('../src/unified-retrieval.js');
+    const dummyEmb = new Array(1024).fill(0.05);
+    const ctxProject = `test_ctx_remed_${uniqueTag}`;
+    const projRoot = resolveProjectPath(ctxProject);
+    fs.mkdirSync(projRoot, { recursive: true });
+
+    // CTX-03: Reject sensitive dotfiles and symlinks escaping projectRoot
+    fs.writeFileSync(path.join(projRoot, '.env'), 'SECRET=123\n', 'utf8');
+    fs.writeFileSync(path.join(projRoot, '.env.local'), 'SECRET=456\n', 'utf8');
+    fs.writeFileSync(path.join(projRoot, 'id_rsa'), 'PRIVATE KEY\n', 'utf8');
+    fs.writeFileSync(path.join(projRoot, 'cert.pem'), 'CERT\n', 'utf8');
+    assert.equal(resolveAnchoredFilePath('.env', ctxProject), null);
+    assert.equal(resolveAnchoredFilePath('.env.local', ctxProject), null);
+    assert.equal(resolveAnchoredFilePath('id_rsa', ctxProject), null);
+    assert.equal(resolveAnchoredFilePath('id_ed25519', ctxProject), null);
+    assert.equal(resolveAnchoredFilePath('cert.pem', ctxProject), null);
+
+    const outsideFile = path.join(os.tmpdir(), `outside_${uniqueTag}.txt`);
+    fs.writeFileSync(outsideFile, 'outside content\n', 'utf8');
+    const symlinkPath = path.join(projRoot, 'escape_link.txt');
+    try {
+      fs.symlinkSync(outsideFile, symlinkPath);
+      assert.equal(resolveAnchoredFilePath('escape_link.txt', ctxProject), null, 'Symlink escaping projectRoot must be rejected');
+    } finally {
+      try { fs.unlinkSync(symlinkPath); } catch {}
+      try { fs.unlinkSync(outsideFile); } catch {}
+    }
+
+    // CTX-04: Broadened sk- regex & secret scans across provenance, tags, reason, and nugget key
+    assert.equal(scanForSecretLeak('sk-svcacct-1234567890abcdefghijklmnop'), 'OpenAI/Anthropic API Key');
+    assert.equal(scanForSecretLeak('sk-1234567890abcdefghijklmnop'), 'OpenAI/Anthropic API Key');
+
+    await assert.rejects(
+      () => addMemory({
+        category: 'lesson',
+        content: 'Clean content',
+        provenance: { quoted_sentence: 'const k = "sk-svcacct-1234567890abcdefghijklmnop";' },
+        project: ctxProject,
+        _embedding: dummyEmb
+      }),
+      (err) => err.message.includes('Secret refusal')
+    );
+
+    await assert.rejects(
+      () => addMemory({
+        category: 'lesson',
+        content: 'Clean content',
+        tags: ['sk-1234567890abcdefghijklmnop'],
+        project: ctxProject,
+        _embedding: dummyEmb
+      }),
+      (err) => err.message.includes('Secret refusal')
+    );
+
+    await assert.rejects(
+      () => nuggetRemember({
+        key: 'sk-1234567890abcdefghijklmnop',
+        value: 'clean value',
+        project: ctxProject,
+        _embedding: dummyEmb
+      }),
+      (err) => err.message.includes('Secret refusal')
+    );
+
+    // CTX-05: supersedeMemory and invalidateMemory validate target_id existence & category inheritance
+    await assert.rejects(
+      () => supersedeMemory({
+        id: 999999,
+        content: 'Should fail because target does not exist',
+        project: ctxProject,
+        _embedding: dummyEmb
+      }),
+      (err) => err.message.includes('not found')
+    );
+
+    await assert.rejects(
+      () => invalidateMemory({
+        id: 999999,
+        reason: 'Valid non-empty reason',
+        project: ctxProject
+      }),
+      (err) => err.message.includes('not found')
+    );
+
+    const baseInv = await addMemory({
+      category: 'invariant',
+      content: 'Original invariant rule before supersede',
+      project: ctxProject,
+      force: true,
+      _embedding: dummyEmb
+    });
+
+    await assert.rejects(
+      () => invalidateMemory({
+        id: baseInv.id,
+        reason: 'Deprecated key sk-1234567890abcdefghijklmnop',
+        project: ctxProject
+      }),
+      (err) => err.message.includes('Secret refusal')
+    );
+
+    // Supersede without passing category -> inherits 'invariant' from baseInv
+    const supRes = await supersedeMemory({
+      target_id: baseInv.id,
+      content: 'Superseded invariant rule inheriting category automatically',
+      project: ctxProject,
+      _embedding: dummyEmb
+    });
+    assert.ok(supRes.content[0].text.includes('(invariant)'));
+
+    // CTX-08: anchorProvenanceToFile marks missing quoted_sentence as drifted & normalizes CRLF
+    const crlfFile = path.join(projRoot, 'auth.js');
+    fs.writeFileSync(crlfFile, 'export function verifyAuth() {\r\n  return true;\r\n}\r\n', 'utf8');
+    const crlfAnchor = anchorProvenanceToFile({
+      file: 'auth.js',
+      quoted_sentence: 'export function verifyAuth() {\n  return true;\n}'
+    }, ctxProject);
+    assert.equal(crlfAnchor.is_drifted, false, 'CRLF file should match LF multi-line quote');
+    assert.equal(crlfAnchor.start_line, 1);
+    assert.equal(crlfAnchor.end_line, 3);
+
+    const missingQuoteAnchor = anchorProvenanceToFile({
+      file: 'auth.js',
+      quoted_sentence: 'export function nonExistentFunction() {}'
+    }, ctxProject);
+    assert.equal(missingQuoteAnchor.is_drifted, true, 'Missing quote at creation time must mark is_drifted=true');
+    assert.equal(missingQuoteAnchor.drift_reason, 'quoted_span_not_found');
+
+    // CTX-10: Path boundary matching in handleProactiveNudge & unrelated drifted rule filtering
+    const driftedOtherFile = path.join(projRoot, 'unrelated.js');
+    fs.writeFileSync(driftedOtherFile, 'export const X = 1;\n', 'utf8');
+    await addMemory({
+      category: 'invariant',
+      content: 'Unrelated invariant anchored to unrelated.js',
+      project: ctxProject,
+      provenance: { file: 'unrelated.js', quoted_sentence: 'export const X = 999;' },
+      force: true,
+      _embedding: dummyEmb
+    });
+    const authRule = await addMemory({
+      category: 'invariant',
+      content: 'Auth verification must validate token signatures',
+      project: ctxProject,
+      provenance: { file: 'auth.js', quoted_sentence: 'export function verifyAuth() {' },
+      force: true,
+      _embedding: dummyEmb
+    });
+
+    // Auditing 'src/oauth.js' with unrelated code must NOT match 'auth.js' or unrelated drifted 'unrelated.js'
+    const oauthNudge = await handleProactiveNudge({
+      trigger: 'pre_commit',
+      file_path: 'src/oauth.js',
+      code: 'const y = 42;',
+      project: ctxProject
+    });
+    assert.equal(oauthNudge.content[0].text, 'NO_NUDGES_REQUIRED');
+
+    // Auditing 'src/auth.js' MUST match 'auth.js' boundary
+    const authNudge = await handleProactiveNudge({
+      trigger: 'pre_commit',
+      file_path: 'src/auth.js',
+      code: 'const y = 42;',
+      project: ctxProject
+    });
+    assert.ok(authNudge.content[0].text.includes(`Rule #${authRule.id}`));
+
+    // CTX-02: Repeated 'unhelpful' feedback decays weight below 0.2 threshold (1.0 -> 0.7 -> 0.4 -> 0.1)
+    await recordNudgeFeedback({ rule_id: String(authRule.id), feedback: 'unhelpful', project: ctxProject });
+    await recordNudgeFeedback({ rule_id: String(authRule.id), feedback: 'unhelpful', project: ctxProject });
+    await recordNudgeFeedback({ rule_id: String(authRule.id), feedback: 'unhelpful', project: ctxProject });
+
+    const suppressedNudge = await handleProactiveNudge({
+      trigger: 'pre_commit',
+      file_path: 'src/auth.js',
+      code: 'const y = 42;',
+      project: ctxProject
+    });
+    assert.equal(suppressedNudge.content[0].text, 'NO_NUDGES_REQUIRED', 'Rule decayed to 0.1 must be suppressed');
+
+    // CTX-07: unifiedRetrieve normalizes category and skips nuggets when mode==='memory' or category is set
+    await nuggetRemember({
+      key: 'style_guide',
+      value: 'Use 2 spaces for indentation',
+      project: ctxProject,
+      _embedding: dummyEmb
+    });
+    const catRet = await unifiedRetrieve({
+      query: '*',
+      category: 'invariants',
+      project: ctxProject,
+      _embedding: dummyEmb
+    });
+    assert.ok(catRet.citations.every(c => c.type === 'memory' && c.category === 'invariant'), 'Category retrieve must normalize plural and exclude nuggets');
+
+    // CTX-09: True staleCount > 10 in getHealthStats and non-invariant prioritization in getStaleMemories
+    const db = await getProjectDb(ctxProject);
+    for (let i = 1; i <= 12; i++) {
+      db.prepare(`
+        INSERT INTO ide_agent_memory (category, content, status, created_at, updated_at)
+        VALUES (?, ?, 'ACTIVE', datetime('now', '-45 days'), datetime('now', '-45 days'))
+      `).run(i <= 6 ? 'invariant' : 'lesson', `Stale item #${i}`);
+    }
+    const staleList = await getStaleMemories({ project: ctxProject, days: 30 });
+    assert.equal(staleList.length, 10);
+    assert.equal(staleList[0].category, 'lesson', 'Non-invariant records must be prioritized first in decay review');
+    const ctxHealth = await getHealthStats({ project: ctxProject });
+    assert.equal(ctxHealth.stats.staleCount, 12, 'getHealthStats must report true total staleCount beyond LIMIT 10');
+
+    try {
+      fs.rmSync(projRoot, { recursive: true, force: true });
+    } catch {}
+  });
+
   t.after(async () => {
     closeAllDatabases();
     try {

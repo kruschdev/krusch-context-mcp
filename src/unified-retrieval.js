@@ -12,7 +12,7 @@ import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from './prune-helper.js';
 import { detectCurrentProject } from './project-helper.js';
-import { compileProjectState, searchMemory } from './memory-engine.js';
+import { compileProjectState, searchMemory, normalizeCategory } from './memory-engine.js';
 import { getProjectDb, cosineSimilarity, getParsedEmbedding } from './sqlite-engine.js';
 
 const DECAY_RATE = 0.01;
@@ -93,6 +93,7 @@ export async function unifiedRetrieve({
     _embedding = null
 }) {
     const targetProject = project || detectCurrentProject();
+    const normCategory = category ? normalizeCategory(category) : null;
     const items = [];
     const rawQuery = typeof query === 'string' ? query.trim() : (query ? String(query).trim() : '*');
     const isWildcard = !rawQuery || rawQuery === '*';
@@ -136,9 +137,9 @@ export async function unifiedRetrieve({
                     WHERE status = 'ACTIVE'
                 `;
                 const params = [];
-                if (category) {
+                if (normCategory) {
                     memSql += ` AND category = ?`;
-                    params.push(category);
+                    params.push(normCategory);
                 }
                 memSql += ` ORDER BY id DESC`;
                 const rows = db.prepare(memSql).all(...params);
@@ -190,25 +191,27 @@ export async function unifiedRetrieve({
                     }
                 }
 
-                // Search steering nuggets (deduplicated by key)
-                const nugRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets ORDER BY updated_at ASC`).all();
-                const nugMap = new Map();
-                for (const n of nugRows) nugMap.set(n.key, n);
-                for (const n of nugMap.values()) {
-                    if (include_state && statePackedNuggets.has(n.key)) {
-                        continue; // Avoid re-packing nuggets already rendered in compileProjectState
+                // Search steering nuggets (deduplicated by key) only when not restricted to episodic memory or a specific category
+                if (mode !== 'memory' && !normCategory) {
+                    const nugRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets ORDER BY updated_at ASC`).all();
+                    const nugMap = new Map();
+                    for (const n of nugRows) nugMap.set(n.key, n);
+                    for (const n of nugMap.values()) {
+                        if (include_state && statePackedNuggets.has(n.key)) {
+                            continue; // Avoid re-packing nuggets already rendered in compileProjectState
+                        }
+                        let score = isWildcard ? 0.85 : 0.4;
+                        if (!isWildcard && (n.key.toLowerCase().includes(lowerQuery) || n.value.toLowerCase().includes(lowerQuery))) {
+                            score = 0.8;
+                        }
+                        items.push({
+                            type: 'nugget',
+                            key: n.key,
+                            title: `Nugget: ${n.key} (${n.kind})`,
+                            content: n.value,
+                            score
+                        });
                     }
-                    let score = isWildcard ? 0.85 : 0.4;
-                    if (!isWildcard && (n.key.toLowerCase().includes(lowerQuery) || n.value.toLowerCase().includes(lowerQuery))) {
-                        score = 0.8;
-                    }
-                    items.push({
-                        type: 'nugget',
-                        key: n.key,
-                        title: `Nugget: ${n.key} (${n.kind})`,
-                        content: n.value,
-                        score
-                    });
                 }
             }
         } catch (e) {

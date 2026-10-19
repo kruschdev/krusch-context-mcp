@@ -174,6 +174,7 @@ async function _initProjectDb(projectName) {
             provenance TEXT,
             valid_until DATETIME,
             pg_id INTEGER,
+            pg_synced BOOLEAN DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
@@ -212,6 +213,7 @@ async function _initProjectDb(projectName) {
     const columns = [
         `ALTER TABLE ide_agent_memory ADD COLUMN project TEXT;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN pg_id INTEGER;`,
+        `ALTER TABLE ide_agent_memory ADD COLUMN pg_synced BOOLEAN DEFAULT 0;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN status TEXT DEFAULT 'ACTIVE';`,
         `ALTER TABLE ide_agent_memory ADD COLUMN supersedes_id INTEGER;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN superseded_by INTEGER;`,
@@ -261,10 +263,17 @@ async function getPgSchemaInfo(client) {
         const cols = new Map(res.rows.map(r => [r.column_name, r.data_type]));
         _pgSchemaInfo = {
             hasStatus: cols.has('status'),
+            hasInvalidatedReason: cols.has('invalidated_reason'),
+            hasProvenance: cols.has('provenance'),
             tagsIsArray: cols.get('tags') === 'ARRAY'
         };
     } catch {
-        _pgSchemaInfo = { hasStatus: false, tagsIsArray: false };
+        _pgSchemaInfo = {
+            hasStatus: false,
+            hasInvalidatedReason: false,
+            hasProvenance: false,
+            tagsIsArray: false
+        };
     }
     return _pgSchemaInfo;
 }
@@ -305,8 +314,8 @@ export async function pullProjectMemory(projectName, db) {
         const memRes = await client.query(memQuery, [projectName]);
         
         const insertMem = db.prepare(`
-            INSERT INTO ide_agent_memory (pg_id, category, content, tags, embedding, status, supersedes_id)
-            SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM ide_agent_memory WHERE pg_id = ? OR content = ?)
+            INSERT INTO ide_agent_memory (pg_id, category, content, tags, embedding, status, supersedes_id, pg_synced)
+            SELECT ?, ?, ?, ?, ?, ?, ?, 1 WHERE NOT EXISTS (SELECT 1 FROM ide_agent_memory WHERE pg_id = ? OR content = ?)
         `);
         
         withTransaction(db, () => {
@@ -358,9 +367,28 @@ export async function pushProjectMemory(projectName, db) {
     try {
         const schema = await getPgSchemaInfo(client);
         await client.query('BEGIN');
+
+        // Map local SQLite ID -> Postgres pg_id so self-referencing FK constraints never fail
+        const mappedRows = db.prepare(`SELECT id, pg_id FROM ide_agent_memory WHERE pg_id IS NOT NULL`).all();
+        const localToPgId = new Map();
+        for (const r of mappedRows) {
+            const numPgId = Number(r.pg_id);
+            if (Number.isFinite(numPgId) && numPgId > 0) {
+                localToPgId.set(Number(r.id), numPgId);
+            }
+        }
+        const resolvePgRef = (localRefId) => {
+            if (localRefId === null || localRefId === undefined) return null;
+            return localToPgId.get(Number(localRefId)) ?? null;
+        };
         
-        // 1. Push unsynced episodic memories
-        const unsyncedMems = db.prepare(`SELECT id, category, content, tags, embedding, status, supersedes_id, superseded_by FROM ide_agent_memory WHERE pg_id IS NULL`).all();
+        // 1a. Push unsynced new episodic memories (ordered by id ASC so older lineage parents map first)
+        const unsyncedMems = db.prepare(`
+            SELECT id, category, content, tags, embedding, status, supersedes_id, superseded_by, invalidated_reason, provenance
+            FROM ide_agent_memory
+            WHERE pg_id IS NULL
+            ORDER BY id ASC
+        `).all();
         const pushedMemIds = [];
         for (const mem of unsyncedMems) {
             let embedStr = mem.embedding;
@@ -374,21 +402,94 @@ export async function pushProjectMemory(projectName, db) {
             } else {
                 parsedTags = mem.tags ? String(mem.tags) : null;
             }
-            const res = schema.hasStatus
-                ? await client.query(
+
+            const pgSupersedesId = resolvePgRef(mem.supersedes_id);
+            const pgSupersededBy = resolvePgRef(mem.superseded_by);
+            let parsedProv = null;
+            if (mem.provenance) {
+                try { parsedProv = JSON.parse(mem.provenance); } catch { parsedProv = null; }
+            }
+
+            let res;
+            if (schema.hasStatus && schema.hasInvalidatedReason && schema.hasProvenance) {
+                res = await client.query(
+                    `INSERT INTO ide_agent_memory (project, category, content, tags, embedding, status, supersedes_id, superseded_by, invalidated_reason, provenance)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id::text as id`,
+                    [
+                        projectName,
+                        mem.category,
+                        mem.content,
+                        parsedTags,
+                        embedStr,
+                        mem.status || 'ACTIVE',
+                        pgSupersedesId,
+                        pgSupersededBy,
+                        mem.invalidated_reason || null,
+                        parsedProv
+                    ]
+                );
+            } else if (schema.hasStatus) {
+                res = await client.query(
                     `INSERT INTO ide_agent_memory (project, category, content, tags, embedding, status, supersedes_id, superseded_by)
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id::text as id`,
-                    [projectName, mem.category, mem.content, parsedTags, embedStr, mem.status || 'ACTIVE', mem.supersedes_id || null, mem.superseded_by || null]
-                )
-                : await client.query(
+                    [projectName, mem.category, mem.content, parsedTags, embedStr, mem.status || 'ACTIVE', pgSupersedesId, pgSupersededBy]
+                );
+            } else {
+                res = await client.query(
                     `INSERT INTO ide_agent_memory (project, category, content, tags, embedding)
                      VALUES ($1, $2, $3, $4, $5) RETURNING id::text as id`,
                     [projectName, mem.category, mem.content, parsedTags, embedStr]
                 );
+            }
             
             const newPgId = res.rows[0].id;
             pushedMemIds.push(newPgId);
-            db.prepare(`UPDATE ide_agent_memory SET pg_id = ? WHERE id = ?`).run(String(newPgId), mem.id);
+            const numNewPgId = Number(newPgId);
+            if (Number.isFinite(numNewPgId) && numNewPgId > 0) {
+                localToPgId.set(Number(mem.id), numNewPgId);
+            }
+            const needsDeferredLineage = Boolean(
+                (mem.supersedes_id && !pgSupersedesId) ||
+                (mem.superseded_by && !pgSupersededBy)
+            );
+            db.prepare(`UPDATE ide_agent_memory SET pg_id = ?, pg_synced = ? WHERE id = ?`)
+              .run(String(newPgId), needsDeferredLineage ? 0 : 1, mem.id);
+        }
+
+        // 1b. Sync modified existing memories (status, supersedes_id, superseded_by, invalidated_reason, provenance)
+        if (schema.hasStatus) {
+            const dirtyMems = db.prepare(`
+                SELECT id, pg_id, status, supersedes_id, superseded_by, invalidated_reason, provenance
+                FROM ide_agent_memory
+                WHERE pg_id IS NOT NULL AND COALESCE(pg_synced, 0) = 0
+                ORDER BY id ASC
+            `).all();
+
+            for (const mem of dirtyMems) {
+                const pgSupersedesId = resolvePgRef(mem.supersedes_id);
+                const pgSupersededBy = resolvePgRef(mem.superseded_by);
+                let parsedProv = null;
+                if (mem.provenance) {
+                    try { parsedProv = JSON.parse(mem.provenance); } catch { parsedProv = null; }
+                }
+
+                if (schema.hasInvalidatedReason && schema.hasProvenance) {
+                    await client.query(
+                        `UPDATE ide_agent_memory
+                         SET status = $1, supersedes_id = $2, superseded_by = $3, invalidated_reason = $4, provenance = $5, updated_at = CURRENT_TIMESTAMP
+                         WHERE id = $6`,
+                        [mem.status || 'ACTIVE', pgSupersedesId, pgSupersededBy, mem.invalidated_reason || null, parsedProv, Number(mem.pg_id)]
+                    );
+                } else {
+                    await client.query(
+                        `UPDATE ide_agent_memory
+                         SET status = $1, supersedes_id = $2, superseded_by = $3
+                         WHERE id = $4`,
+                        [mem.status || 'ACTIVE', pgSupersedesId, pgSupersededBy, Number(mem.pg_id)]
+                    );
+                }
+                db.prepare(`UPDATE ide_agent_memory SET pg_synced = 1 WHERE id = ?`).run(mem.id);
+            }
         }
 
         // 2. Push unsynced nuggets

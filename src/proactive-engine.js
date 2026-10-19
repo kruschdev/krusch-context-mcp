@@ -33,7 +33,7 @@ export async function recordNudgeFeedback({ rule_id, feedback, project }) {
         try {
             const db = await getProjectDb(targetProject);
             if (db) {
-                const existing = db.prepare(`SELECT weight FROM auditor_feedback WHERE rule_id = ?`).get(String(rule_id));
+                const existing = db.prepare(`SELECT weight FROM auditor_feedback WHERE project = ? AND rule_id = ? ORDER BY id DESC LIMIT 1`).get(targetProject, String(rule_id));
                 const newWeight = existing ? Math.max(0.0, existing.weight + weightDelta) : Math.max(0.0, 1.0 + weightDelta);
                 db.prepare(`
                     INSERT INTO auditor_feedback (project, rule_id, feedback, weight)
@@ -51,6 +51,20 @@ export async function recordNudgeFeedback({ rule_id, feedback, project }) {
             text: `[krusch-context] ✅ Recorded '${feedback}' feedback for rule #${rule_id}. Weight updated.`
         }]
     };
+}
+
+/**
+ * Checks whether two file paths refer to the same file respecting '/' path boundaries.
+ */
+function matchesFilePathBoundary(pathA, pathB) {
+    if (!pathA || !pathB) return false;
+    const normA = pathA.replace(/\\/g, '/').replace(/^(?:\.\/|\/)+/, '');
+    const normB = pathB.replace(/\\/g, '/').replace(/^(?:\.\/|\/)+/, '');
+    if (!normA || !normB) return false;
+    if (normA === normB) return true;
+    if (normA.endsWith('/' + normB)) return true;
+    if (normB.endsWith('/' + normA)) return true;
+    return false;
 }
 
 /**
@@ -187,11 +201,11 @@ export async function handleProactiveNudge({
         const provFile = (prov.file || '').toLowerCase();
         const quotedSpan = (prov.quoted_sentence || '').toLowerCase();
         const fileMatched = provFile && (
-            (lowerFilePath && (lowerFilePath.endsWith(provFile) || provFile.endsWith(lowerFilePath))) ||
+            matchesFilePathBoundary(lowerFilePath, provFile) ||
             lowerQuery.includes(provFile)
         );
         const quoteMatched = quotedSpan && lowerQuery.includes(quotedSpan);
-        if (fileMatched || quoteMatched || rule.is_drifted) {
+        if (fileMatched || quoteMatched) {
             activeViolations.push({ ...rule, spanMatched: true });
             seenIds.add(rule.id);
         }
