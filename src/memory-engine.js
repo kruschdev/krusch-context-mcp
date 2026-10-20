@@ -741,6 +741,7 @@ export async function compileProjectState({ project, active_project } = {}) {
             FROM ide_agent_memory
             ORDER BY created_at DESC, id DESC
         `).all();
+        const seenContents = new Set();
 
         for (const r of rows) {
             if (r.status === 'INVALIDATED') {
@@ -748,6 +749,7 @@ export async function compileProjectState({ project, active_project } = {}) {
                 continue;
             }
             if (r.status !== 'ACTIVE') continue;
+            seenContents.add(String(r.content || '').trim());
 
             const driftCheck = evaluateMemorySpanDrift(r, targetProject, db);
             r._drift = driftCheck;
@@ -760,6 +762,36 @@ export async function compileProjectState({ project, active_project } = {}) {
             else if (r.category === 'blocker') blockers.push(r);
             else if (r.category === 'bug') bugs.push(r);
             else lessons.push(r);
+        }
+
+        // Also surface [targetProject]-tagged active audit memories from jean-sre if present
+        if (targetProject !== 'jean-sre' && !/^(test_|smoke_)/i.test(String(targetProject || ''))) {
+            try {
+                const jeanDbPath = path.join(resolveProjectPath('jean-sre'), '.agent', 'context.db');
+                if (fs.existsSync(jeanDbPath)) {
+                    const jeanDb = await getProjectDb('jean-sre');
+                    if (jeanDb) {
+                        const prefixPattern = `[${String(targetProject).toLowerCase()}]%`;
+                        const jeanRows = jeanDb.prepare(`
+                            SELECT id, category, content, status, provenance, created_at
+                            FROM ide_agent_memory
+                            WHERE status = 'ACTIVE' AND LOWER(content) LIKE ?
+                            ORDER BY created_at DESC, id DESC
+                            LIMIT 10
+                        `).all(prefixPattern);
+                        for (const jr of jeanRows) {
+                            const normContent = String(jr.content || '').trim();
+                            if (seenContents.has(normContent)) continue;
+                            seenContents.add(normContent);
+                            if (jr.category === 'decision') decisions.push(jr);
+                            else if (jr.category === 'invariant') invariants.push(jr);
+                            else if (jr.category === 'blocker') blockers.push(jr);
+                            else if (jr.category === 'bug') bugs.push(jr);
+                            else lessons.push(jr);
+                        }
+                    }
+                }
+            } catch {}
         }
 
         const nugRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets ORDER BY updated_at ASC`).all();

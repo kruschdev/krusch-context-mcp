@@ -125,11 +125,18 @@ export function resolveProjectPath(projectName) {
     }
     
     // 2. Sibling directory match (homelab structure) with containment check
-    const projectsRoot = path.resolve(__dirname, '../../');
-    const siblingPath = path.resolve(projectsRoot, safeProjectName);
-    const rel = path.relative(projectsRoot, siblingPath);
-    if (!rel.startsWith('..') && !path.isAbsolute(rel) && rel !== '' && fs.existsSync(siblingPath)) {
-        return siblingPath;
+    const candidateRoots = [
+        path.resolve(__dirname, '../../'),
+        process.env.HOMELAB_PATH ? path.resolve(process.env.HOMELAB_PATH, 'projects') : null,
+        '/home/agent/homelab/projects'
+    ].filter(Boolean);
+
+    for (const projectsRoot of candidateRoots) {
+        const siblingPath = path.resolve(projectsRoot, safeProjectName);
+        const rel = path.relative(projectsRoot, siblingPath);
+        if (!rel.startsWith('..') && !path.isAbsolute(rel) && rel !== '' && fs.existsSync(siblingPath)) {
+            return siblingPath;
+        }
     }
 
     // 3. Fallback to isolated user project directory
