@@ -108,7 +108,23 @@ test('SQLite project-scoped memory isolation', async (t) => {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
+    await t.test('SEC-01: cleanStaleMcpSchemas rejects malicious relative HOME path before filesystem operations', async () => {
+        const { cleanStaleMcpSchemas } = await import('../bin/cli.js');
+        const prevHome = process.env.HOME;
+        try {
+            process.env.HOME = '../../etc';
+            assert.throws(
+                () => cleanStaleMcpSchemas(),
+                /Invalid HOME directory path/
+            );
+        } finally {
+            if (prevHome === undefined) delete process.env.HOME;
+            else process.env.HOME = prevHome;
+        }
+    });
+
     t.after(async () => {
+
         closeAllDatabases();
         try {
             fs.rmSync(path.join(os.homedir(), '.krusch-context', 'projects', testProject), { recursive: true, force: true });

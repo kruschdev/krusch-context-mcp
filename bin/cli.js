@@ -37,6 +37,23 @@ const isDirectRun = process.argv[1] && (
     scriptName === 'krusch-context-mcp'
 );
 
+export const CLI_SCRIPT_REGISTRY = Object.freeze({
+    'benchmark-latency': '../scripts/benchmark_latency.js',
+    'benchmark-memory': '../scripts/benchmark_memory_eval.js',
+    'clear-embeddings': '../scripts/clear_sqlite_embeddings.js',
+    'generate-docs': '../scripts/generate_docs.js',
+    'install-git-hook': '../scripts/install_git_hook.js',
+    'stress-consolidation': '../scripts/stress_test_consolidation.js'
+});
+
+export function resolveCliScriptPath(subcommand) {
+    const rel = CLI_SCRIPT_REGISTRY[subcommand];
+    if (!rel) {
+        throw new Error(`Unknown CLI script subcommand: '${subcommand}'. Available: ${Object.keys(CLI_SCRIPT_REGISTRY).join(', ')}`);
+    }
+    return path.resolve(__dirname, rel);
+}
+
 if (isDirectRun) {
     const cmd = process.argv[2];
     if (cmd === 'init') {
@@ -49,6 +66,12 @@ if (isDirectRun) {
             console.error('❌ Health check error:', err.message);
             process.exit(1);
         });
+    } else if (cmd === 'script') {
+        const sub = process.argv[3];
+        import(resolveCliScriptPath(sub)).catch(err => {
+            console.error('❌ Script error:', err.message);
+            process.exit(1);
+        });
     } else {
         // Default: run MCP server
         runServer().catch(err => {
@@ -58,12 +81,31 @@ if (isDirectRun) {
     }
 }
 
-function cleanStaleMcpSchemas() {
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+export function resolveValidatedHomeDir(rawHome = process.env.HOME || process.env.USERPROFILE) {
+    const candidate = typeof rawHome === 'string' ? rawHome.trim() : '';
+    if (!candidate || candidate.includes('\0') || !path.isAbsolute(candidate)) {
+        throw new Error(`Invalid HOME directory path: expected a non-empty existing absolute path, received '${candidate}'`);
+    }
+    const normalized = path.resolve(candidate);
+    let stat;
+    try {
+        stat = fs.statSync(normalized);
+    } catch {
+        throw new Error(`HOME directory does not exist: '${normalized}'`);
+    }
+    if (!stat.isDirectory()) {
+        throw new Error(`HOME path is not a directory: '${normalized}'`);
+    }
+    return normalized;
+}
+
+export function cleanStaleMcpSchemas(rawHome = process.env.HOME || process.env.USERPROFILE) {
+    const homeDir = resolveValidatedHomeDir(rawHome);
     const mcpDirs = [
         path.join(homeDir, '.gemini', 'antigravity-ide', 'mcp', 'krusch-context-mcp'),
         path.join(homeDir, '.gemini', 'antigravity', 'mcp', 'krusch-context-mcp')
     ];
+
     const coreNames = new Set([
         'krusch_context_retrieve',
         'krusch_context_remember',
@@ -85,7 +127,11 @@ function cleanStaleMcpSchemas() {
                         }
                     }
                 }
-            } catch {}
+            } catch (err) {
+                if (process.env.KRUSCH_DEBUG) {
+                    console.warn(`[krusch-context] cleanStaleMcpSchemas warning (${d}): ${err.message}`);
+                }
+            }
         }
     }
     if (cleaned > 0) {
@@ -98,8 +144,17 @@ export function migrateLegacyDatabase(targetDir) {
     const legacyDb = path.join(agentDir, 'memory.db');
     const contextDb = path.join(agentDir, 'context.db');
     if (fs.existsSync(legacyDb) && !fs.existsSync(contextDb)) {
-        fs.copyFileSync(legacyDb, contextDb);
-        return true;
+        try {
+            const stat = fs.statSync(legacyDb);
+            if (stat.isFile() && stat.size > 0) {
+                fs.copyFileSync(legacyDb, contextDb);
+                return true;
+            }
+        } catch (err) {
+            if (process.env.KRUSCH_DEBUG) {
+                console.warn(`[krusch-context] migrateLegacyDatabase warning: ${err.message}`);
+            }
+        }
     }
     return false;
 }
@@ -115,7 +170,11 @@ async function runInit() {
     try {
         gitRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
         isGit = true;
-    } catch {}
+    } catch (err) {
+        if (process.env.KRUSCH_DEBUG) {
+            console.warn(`[krusch-context] Non-git directory fallback (${cwd}): ${err.message}`);
+        }
+    }
 
     const projectName = path.basename(gitRoot || cwd);
     console.log(`📁 Project detected: \x1b[36m${projectName}\x1b[0m ${isGit ? '(git repo)' : ''}`);

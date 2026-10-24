@@ -2,7 +2,8 @@ node_modules/
 .env
 *.log
 GEMINI_INFLIGHT.md
-INFLIGHT.md
+JEAN_INFLIGHT.md
+*INFLIGHT.md
 *SESSION_REVIEW.md
 spec.md
 /AGENTS.md

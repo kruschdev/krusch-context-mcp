@@ -83,7 +83,9 @@ async function getRuleWeights(project) {
                 }
             }
         }
-    } catch {}
+    } catch (e) {
+        console.error('[krusch-context-mcp] getRuleWeights warning:', e.message);
+    }
     return weights;
 }
 

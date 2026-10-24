@@ -167,17 +167,22 @@ test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async
     const dummyEmb = new Array(1024).fill(0.05);
 
     // 8a. Secret refusal blocks raw API keys in addMemory and nuggetRemember
+    // SEC-01: Never hard-code raw secret literals in source; use env or runtime-assembled fixture
+    const syntheticOpenAiKey = ['sk', 'proj', '1234567890abcdefghijklmnop'].join('-');
+    const syntheticGithubToken = process.env.TEST_GITHUB_TOKEN || ['ghp', '1234567890abcdefghijklmnopqrstuvwxyz'].join('_');
+
     await assert.rejects(
       async () => {
         await addMemory({
           category: 'lesson',
-          content: 'Never commit key sk-proj-1234567890abcdefghijklmnop to git',
+          content: `Never commit key ${syntheticOpenAiKey} to git`,
           project: testProject,
           _embedding: dummyEmb
         });
       },
       (err) => {
         assert.ok(err.message.includes('Secret refusal'));
+        assert.equal(err.message.includes(syntheticOpenAiKey), false);
         return true;
       }
     );
@@ -186,13 +191,14 @@ test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async
       async () => {
         await nuggetRemember({
           key: 'api_token',
-          value: 'ghp_1234567890abcdefghijklmnopqrstuvwxyz',
+          value: syntheticGithubToken,
           project: testProject,
           _embedding: dummyEmb
         });
       },
       (err) => {
         assert.ok(err.message.includes('Secret refusal'));
+        assert.equal(err.message.includes(syntheticGithubToken), false);
         return true;
       }
     );
@@ -520,6 +526,52 @@ test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async
     assert.equal(staleList[0].category, 'lesson', 'Non-invariant records must be prioritized first in decay review');
     const ctxHealth = await getHealthStats({ project: ctxProject });
     assert.equal(ctxHealth.stats.staleCount, 12, 'getHealthStats must report true total staleCount beyond LIMIT 10');
+
+    // BUG-01: Concurrent readAnchoredFileCachedAsync invocations return consistent SHA-256 hash
+    const { readAnchoredFileCached, readAnchoredFileCachedAsync, computeNormalizedSpanHash, evaluateMemorySpanDrift } = await import('../src/memory-engine.js');
+    fs.mkdirSync(projRoot, { recursive: true });
+    const targetFile = path.join(projRoot, 'concurrent_anchor.js');
+    fs.writeFileSync(targetFile, 'export function verifyAuth() { return true; }\n', 'utf8');
+    const expectedHash = computeNormalizedSpanHash(fs.readFileSync(targetFile, 'utf8'));
+    const concurrentReads = await Promise.all(
+      Array.from({ length: 10 }, () => readAnchoredFileCachedAsync(targetFile))
+    );
+    for (const r of concurrentReads) {
+      assert.ok(r);
+      assert.equal(r.currentHash, expectedHash);
+    }
+
+    // BUG-01 (Pass #6): readAnchoredFileCached logs and propagates filesystem I/O errors
+    const failingFs = {
+      statSync() {
+        const ioErr = new Error('Synthetic EIO permission/disk failure');
+        ioErr.code = 'EIO';
+        throw ioErr;
+      }
+    };
+    assert.throws(
+      () => readAnchoredFileCached(targetFile, { fsImpl: failingFs }),
+      /Synthetic EIO permission\/disk failure/
+    );
+
+    // BUG-02: evaluateMemorySpanDrift logs and rethrows provenance DB update errors instead of silently swallowing
+    const brokenDb = {
+      prepare() {
+        return {
+          run() {
+            throw new Error('Synthetic SQLite disk I/O error');
+          }
+        };
+      }
+    };
+    assert.throws(
+      () => evaluateMemorySpanDrift(
+        { id: 999, provenance: JSON.stringify({ file: 'missing_file.js', is_drifted: false }) },
+        ctxProject,
+        brokenDb
+      ),
+      /Synthetic SQLite disk I\/O error/
+    );
 
     try {
       fs.rmSync(projRoot, { recursive: true, force: true });

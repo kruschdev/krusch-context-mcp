@@ -11,12 +11,27 @@ export const PRIORITY = {
     LOW: 3       // Bulk embeddings / offline tasks
 };
 
-class PriorityQueue {
-    constructor(concurrency) {
+export function validateOllamaConfig(env = process.env) {
+    const fleetUrls = env.OLLAMA_FLEET_URLS || env.OLLAMA_NODES;
+    if (fleetUrls) {
+        const parsed = String(fleetUrls).split(',').map(n => n.trim()).filter(Boolean);
+        if (parsed.length > 0) return parsed;
+    }
+    const confUrl = env.OLLAMA_URL || env.OLLAMA_BASE_URL;
+    if (confUrl && String(confUrl).trim()) {
+        return [String(confUrl).trim()];
+    }
+    throw new Error(
+        '[OllamaQueue] Missing Ollama endpoint configuration: set OLLAMA_URL, OLLAMA_BASE_URL, OLLAMA_FLEET_URLS, or OLLAMA_NODES.'
+    );
+}
+
+export class PriorityQueue {
+    constructor(concurrency, options = {}) {
         this.concurrency = concurrency;
         this.active = 0;
         this.queue = [];
-        this.endpoints = this.initEndpoints();
+        this.endpoints = this.initEndpoints(options);
         this.rrIndex = 0;
         /** @type {Map<string, { successes: number, failures: number, lastFailAt: number }>} */
         this.stats = new Map();
@@ -26,19 +41,30 @@ class PriorityQueue {
         }
     }
 
-    initEndpoints() {
-        const fleetUrls = process.env.OLLAMA_FLEET_URLS || process.env.OLLAMA_NODES;
-        if (fleetUrls) {
-            return fleetUrls.split(',').map(n => n.trim()).filter(Boolean);
+    initEndpoints(options = {}) {
+        const env = options.env || process.env;
+        try {
+            return validateOllamaConfig(env);
+        } catch (err) {
+            if (options.strict) {
+                throw err;
+            }
+            return [];
         }
-        const confUrl = process.env.OLLAMA_URL || process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-        return [confUrl];
     }
 
     /**
      * Get the next endpoint, preferring healthy ones (circuit breaker).
      */
     getNextEndpoint() {
+        if (this.endpoints.length === 0) {
+            this.endpoints = validateOllamaConfig(process.env);
+            for (const ep of this.endpoints) {
+                if (!this.stats.has(ep)) {
+                    this.stats.set(ep, { successes: 0, failures: 0, lastFailAt: 0 });
+                }
+            }
+        }
         const now = Date.now();
         for (let i = 0; i < this.endpoints.length; i++) {
             const idx = (this.rrIndex + i) % this.endpoints.length;
@@ -101,6 +127,15 @@ class PriorityQueue {
             if (item.priority <= PRIORITY.HIGH) {
                 console.error(`[OllamaQueue] 🚀 Starting task ${item.taskId} (Priority: ${item.priority}, Wait time: ${Date.now() - item.queuedAt}ms)`);
             }
+
+            if (this.endpoints.length === 0) {
+                try {
+                    this.endpoints = validateOllamaConfig(process.env);
+                } catch (cfgErr) {
+                    item.reject(cfgErr);
+                    return;
+                }
+            }
             
             let attempts = 0;
             const maxAttempts = this.endpoints.length;
@@ -140,3 +175,4 @@ class PriorityQueue {
 }
 
 export const ollamaQueue = new PriorityQueue(process.env.OLLAMA_MAX_CONCURRENCY ? parseInt(process.env.OLLAMA_MAX_CONCURRENCY, 10) : 3);
+

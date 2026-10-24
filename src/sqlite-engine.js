@@ -156,11 +156,31 @@ async function _initProjectDb(projectName) {
     }
     
     const dbPath = path.join(agentDir, 'context.db');
-    const db = new DatabaseSync(dbPath);
-    db.exec('PRAGMA journal_mode = WAL;');
-    db.exec('PRAGMA busy_timeout = 5000;');
-    db.exec('PRAGMA synchronous = NORMAL;');
-    db.exec('PRAGMA foreign_keys = ON;');
+    let db = new DatabaseSync(dbPath);
+    try {
+        db.exec('PRAGMA journal_mode = WAL;');
+        db.exec('PRAGMA busy_timeout = 5000;');
+        db.exec('PRAGMA synchronous = NORMAL;');
+        db.exec('PRAGMA foreign_keys = ON;');
+        const check = db.prepare('PRAGMA quick_check;').get();
+        if (check && check.quick_check && check.quick_check !== 'ok') {
+            throw new Error(`SQLite quick_check failed: ${check.quick_check}`);
+        }
+    } catch (corruptErr) {
+        console.error(`[krusch-context-mcp] Corrupted SQLite cache at ${dbPath} (${corruptErr.message}) — rotating and rebuilding from PostgreSQL...`);
+        try { db.close(); } catch {}
+        const backupSuffix = `.corrupt.${Date.now()}`;
+        for (const ext of ['', '-wal', '-shm']) {
+            if (fs.existsSync(`${dbPath}${ext}`)) {
+                try { fs.renameSync(`${dbPath}${ext}`, `${dbPath}${ext}${backupSuffix}`); } catch {}
+            }
+        }
+        db = new DatabaseSync(dbPath);
+        db.exec('PRAGMA journal_mode = WAL;');
+        db.exec('PRAGMA busy_timeout = 5000;');
+        db.exec('PRAGMA synchronous = NORMAL;');
+        db.exec('PRAGMA foreign_keys = ON;');
+    }
 
     
     // Polyfill db.transaction for better-sqlite3 compatibility
@@ -246,6 +266,7 @@ async function _initProjectDb(projectName) {
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_memory_status_cat ON ide_agent_memory(status, category);
         CREATE INDEX IF NOT EXISTS idx_memory_created_at ON ide_agent_memory(created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_memory_pg_id ON ide_agent_memory(pg_id);
         CREATE INDEX IF NOT EXISTS idx_feedback_project_rule ON auditor_feedback(project, rule_id);
     `);
     

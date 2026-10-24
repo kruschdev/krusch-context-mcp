@@ -69,32 +69,58 @@ export function computeNormalizedSpanHash(text) {
     return crypto.createHash('sha256').update(normalized, 'utf8').digest('hex');
 }
 
+/**
+ * Concurrency contract: single-writer, multiple-reader bounded cache for anchored files (BUG-01).
+ * Asynchronous writes/reads acquire anchoredCacheMutex to prevent interleaved state corruption.
+ */
 const anchoredFileCache = new Map();
 const MAX_ANCHORED_FILE_CACHE = 128;
+let _anchoredCacheLock = Promise.resolve();
+
+export async function withAnchoredCacheLock(fn) {
+    const next = _anchoredCacheLock.then(fn, fn);
+    _anchoredCacheLock = next.catch((err) => {
+        console.error('[AnchoredCacheLock] Lock task error:', err?.message || err);
+    });
+    return next;
+}
 
 /**
  * Reads an anchored file and computes its normalized SHA-256 hash with (mtimeMs, size) memoization.
  */
-function readAnchoredFileCached(absPath) {
+export function readAnchoredFileCached(absPath, { fsImpl = fs, throwOnError = false } = {}) {
     try {
-        const st = fs.statSync(absPath);
+        const st = fsImpl.statSync(absPath);
         if (!st.isFile() || st.size > 5 * 1024 * 1024) return null;
         const cached = anchoredFileCache.get(absPath);
         if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
             return cached;
         }
-        const fileText = fs.readFileSync(absPath, 'utf8');
+        const fileText = fsImpl.readFileSync(absPath, 'utf8');
         const currentHash = computeNormalizedSpanHash(fileText);
-        const entry = { mtimeMs: st.mtimeMs, size: st.size, fileText, currentHash };
+        const entry = Object.freeze({ mtimeMs: st.mtimeMs, size: st.size, fileText, currentHash });
         if (anchoredFileCache.size >= MAX_ANCHORED_FILE_CACHE) {
             const oldestKey = anchoredFileCache.keys().next().value;
             anchoredFileCache.delete(oldestKey);
         }
         anchoredFileCache.set(absPath, entry);
         return entry;
-    } catch {
+    } catch (err) {
+        console.error(JSON.stringify({
+            module: 'memory-engine',
+            operation: 'readAnchoredFileCached',
+            path: absPath,
+            error: err.message
+        }));
+        if (throwOnError || (err && err.code && err.code !== 'ENOENT')) {
+            throw err;
+        }
         return null;
     }
+}
+
+export async function readAnchoredFileCachedAsync(absPath, options = {}) {
+    return withAnchoredCacheLock(async () => readAnchoredFileCached(absPath, options));
 }
 
 /**
@@ -122,7 +148,13 @@ export function resolveAnchoredFilePath(fileRef, targetProject) {
             if (fs.existsSync(resolvedRoot)) {
                 realRoot = fs.realpathSync(resolvedRoot);
             }
-        } catch {
+        } catch (err) {
+            console.error(JSON.stringify({
+                module: 'memory-engine',
+                operation: 'resolveAnchorRoot',
+                target: resolvedRoot,
+                error: err.message
+            }));
             continue;
         }
         const candidates = path.isAbsolute(cleaned)
@@ -145,7 +177,15 @@ export function resolveAnchoredFilePath(fileRef, targetProject) {
                         if (st.isFile() && st.size <= 5 * 1024 * 1024) {
                             return realTarget;
                         }
-                    } catch {}
+                    } catch (err) {
+                        console.error(JSON.stringify({
+                            module: 'memory-engine',
+                            operation: 'resolveAnchorTarget',
+                            target: resolvedTarget,
+                            error: err.message,
+                            stack: err.stack
+                        }));
+                    }
                 }
             }
         }
@@ -183,6 +223,13 @@ function getSpanLineRange(text, charStart, charEnd) {
     return { startLine, endLine };
 }
 
+function sanitizeProvenanceToken(val, pattern = /^[a-zA-Z0-9._:@/-]+$/, maxLen = 128) {
+    if (typeof val !== 'string') return null;
+    const trimmed = val.trim();
+    if (!trimmed || trimmed.length > maxLen) return null;
+    return pattern.test(trimmed) ? trimmed : null;
+}
+
 /**
  * Enriches provenance metadata with KruschNexus-style citation spine coordinates,
  * SHA-256 anchor_hash, and multi-agent fleet attribution (host_node, client, model).
@@ -193,9 +240,18 @@ export function anchorProvenanceToFile(provenance, targetProject) {
         commit: provenance?.commit || null,
         pr: provenance?.pr || null,
         author: provenance?.author || 'agent',
-        host_node: provenance?.host_node || process.env.KRUSCH_NODE || os.hostname(),
-        client: provenance?.client || process.env.MCP_CLIENT_NAME || null,
-        model: provenance?.model || process.env.KRUSCH_MODEL || null,
+        host_node:
+            sanitizeProvenanceToken(provenance?.host_node, /^[a-zA-Z0-9._-]+$/) ||
+            sanitizeProvenanceToken(process.env.KRUSCH_NODE, /^[a-zA-Z0-9._-]+$/) ||
+            os.hostname(),
+        client:
+            sanitizeProvenanceToken(provenance?.client) ||
+            sanitizeProvenanceToken(process.env.MCP_CLIENT_NAME) ||
+            null,
+        model:
+            sanitizeProvenanceToken(provenance?.model) ||
+            sanitizeProvenanceToken(process.env.KRUSCH_MODEL) ||
+            null,
         confidence: provenance?.confidence ?? 1.0,
         locator: provenance?.locator || null,
         quoted_sentence: provenance?.quoted_sentence || null,
@@ -276,7 +332,10 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
         if (db && row.id && !prov.is_drifted) {
             try {
                 db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
-            } catch {}
+            } catch (err) {
+                console.error('[memory-engine] Failed to update provenance:', err);
+                throw err;
+            }
         }
         return { anchored: true, is_drifted: true, drift_reason: 'file_missing', provenance: driftedProv };
     }
@@ -316,7 +375,10 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
             if (db && row.id) {
                 try {
                     db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(healedProv), row.id);
-                } catch {}
+                } catch (err) {
+                    console.error('[memory-engine] Failed to update provenance:', err);
+                    throw err;
+                }
             }
             return { anchored: true, is_drifted: false, healed: true, current_hash: currentHash, provenance: healedProv };
         } else {
@@ -330,7 +392,10 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
             if (db && row.id && !prov.is_drifted) {
                 try {
                     db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
-                } catch {}
+                } catch (err) {
+                    console.error('[memory-engine] Failed to update provenance:', err);
+                    throw err;
+                }
             }
             return { anchored: true, is_drifted: true, drift_reason: reason, current_hash: currentHash, provenance: driftedProv };
         }
@@ -347,7 +412,10 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
         if (db && row.id && !prov.is_drifted) {
             try {
                 db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
-            } catch {}
+            } catch (err) {
+                console.error('Failed to update memory provenance:', err);
+                throw err;
+            }
         }
         return { anchored: true, is_drifted: true, drift_reason: 'file_hash_mutated', current_hash: currentHash, provenance: driftedProv };
     }
@@ -362,7 +430,10 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
         if (db && row.id) {
             try {
                 db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(healedProv), row.id);
-            } catch {}
+            } catch (err) {
+                console.error('Failed to update memory provenance:', err);
+                throw err;
+            }
         }
         return { anchored: true, is_drifted: false, healed: true, current_hash: currentHash, provenance: healedProv };
     }
@@ -660,7 +731,7 @@ export async function searchMemory({
     if (conditions.length > 0) {
         sql += ` WHERE ` + conditions.join(' AND ');
     }
-    sql += ` ORDER BY created_at DESC`;
+    sql += ` ORDER BY created_at DESC LIMIT 250`;
 
     const rows = db.prepare(sql).all(...params);
     const embeddingArray = _embedding || await getEmbedding(query);
@@ -740,6 +811,7 @@ export async function compileProjectState({ project, active_project } = {}) {
             SELECT id, category, content, status, invalidated_reason, provenance, created_at
             FROM ide_agent_memory
             ORDER BY created_at DESC, id DESC
+            LIMIT 250
         `).all();
         const seenContents = new Set();
 

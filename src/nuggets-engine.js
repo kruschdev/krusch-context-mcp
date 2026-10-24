@@ -271,22 +271,26 @@ export async function nuggetList({ kinds, active_project, project }) {
 
     // 2. Fetch from Local SQLite
     if (targetProject && (!kinds || kinds.includes('project'))) {
-        const localDb = await getProjectDb(targetProject);
-        if (localDb) {
-            let sql = `SELECT key, value, kind, created_at, updated_at, 'sqlite:' || ? as source FROM ide_agent_nuggets`;
-            let params = [targetProject];
-            
-            if (kinds && kinds.length > 0) {
-                const placeholders = kinds.map(() => '?').join(',');
-                sql += ` WHERE kind IN (${placeholders})`;
-                params.push(...kinds);
+        try {
+            const localDb = await getProjectDb(targetProject);
+            if (localDb) {
+                let sql = `SELECT key, value, kind, created_at, updated_at, 'sqlite:' || ? as source FROM ide_agent_nuggets`;
+                let params = [targetProject];
+                
+                if (kinds && kinds.length > 0) {
+                    const placeholders = kinds.map(() => '?').join(',');
+                    sql += ` WHERE kind IN (${placeholders})`;
+                    params.push(...kinds);
+                }
+                
+                sql += ` ORDER BY updated_at DESC`;
+                
+                const stmt = localDb.prepare(sql);
+                const localRows = stmt.all(...params);
+                combinedResults.push(...localRows);
             }
-            
-            sql += ` ORDER BY updated_at DESC`;
-            
-            const stmt = localDb.prepare(sql);
-            const localRows = stmt.all(...params);
-            combinedResults.push(...localRows);
+        } catch (e) {
+            console.error(`[krusch-context-mcp] Local SQLite nuggetList warning (${targetProject}):`, e.message);
         }
     }
 
