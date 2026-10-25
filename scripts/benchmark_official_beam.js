@@ -51,7 +51,14 @@ if (!process.env.GEMINI_API_KEY) {
 
 const DATASET_CACHE_PATH = process.env.BEAM_DATASET_CACHE_PATH || '/tmp/beam_100k_official.json';
 const CLEAN_EMBED_CACHE_PATH = process.env.BEAM_EMBED_CACHE_PATH || '/tmp/beam_100k_clean_embeddings.json';
-const RESULTS_JSON_PATH = process.env.BEAM_RESULTS_JSON_PATH || '/tmp/beam_official_results.json';
+const resultsOutCliArg = process.argv.find(a => a.startsWith('--results-out='));
+const RESULTS_JSON_PATH = (resultsOutCliArg ? resultsOutCliArg.slice('--results-out='.length).trim() : '')
+    || process.env.BEAM_RESULTS_JSON_PATH
+    || '/tmp/beam_official_results.json';
+const auditLogCliArg = process.argv.find(a => a.startsWith('--audit-log-out='));
+const AUDIT_LOG_OUT_PATH = (auditLogCliArg ? auditLogCliArg.slice('--audit-log-out='.length).trim() : '')
+    || process.env.BEAM_AUDIT_LOG_PATH
+    || '';
 const TOKEN_BUDGET = 8000;
 const APPROX_CHARS_PER_BPE_TOKEN = 3.55;
 
@@ -69,7 +76,14 @@ const IS_GEMINI_READER = (process.env.READER_PROVIDER || '').toLowerCase() === '
     || /^gemini-/i.test(READER_MODEL);
 const GEMINI_BASE_URL = process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
 const JUDGE_ENDPOINT = process.env.OLLAMA_JUDGE_URL || 'http://127.0.0.1:11434/api/chat';
-const JUDGE_MODEL = process.env.OLLAMA_JUDGE_MODEL || 'hermes3:latest';
+const judgeModelCliArg = process.argv.find(a => a.startsWith('--judge-model='));
+const JUDGE_MODEL = (judgeModelCliArg ? judgeModelCliArg.slice('--judge-model='.length).trim() : '')
+    || process.env.OLLAMA_JUDGE_MODEL
+    || 'hermes3:latest';
+const secondaryJudgeCliArg = process.argv.find(a => a.startsWith('--secondary-judge-model='));
+const SECONDARY_JUDGE_MODEL = (secondaryJudgeCliArg ? secondaryJudgeCliArg.slice('--secondary-judge-model='.length).trim() : '')
+    || process.env.OLLAMA_SECONDARY_JUDGE_MODEL
+    || '';
 
 // Published past.dev BEAM End-to-End QA scores by ability category (%)
 const PAST_DEV_SCORES = {
@@ -190,6 +204,73 @@ async function embedTextsBatch(texts, chunkSize = 64) {
 }
 
 /**
+ * Parses either standard JSON or HuggingFace datasets-server Python literal strings (`{'k': [...]}`).
+ */
+function parseJsonOrPythonLiteral(raw) {
+    if (typeof raw !== 'string') return raw;
+    try {
+        return JSON.parse(raw);
+    } catch {
+        // Convert Python literal syntax (single-quoted strings, True/False/None) to strict JSON
+        let out = '';
+        let i = 0;
+        const n = raw.length;
+        while (i < n) {
+            const ch = raw[i];
+            if (ch === "'" || ch === '"') {
+                const quote = ch;
+                i += 1;
+                out += '"';
+                while (i < n && raw[i] !== quote) {
+                    if (raw[i] === '\\' && i + 1 < n) {
+                        const nxt = raw[i + 1];
+                        if (nxt === "'") {
+                            out += "'";
+                            i += 2;
+                        } else if (nxt === 'x' && i + 3 < n && /^[0-9a-fA-F]{2}$/.test(raw.slice(i + 2, i + 4))) {
+                            out += '\\u00' + raw.slice(i + 2, i + 4);
+                            i += 4;
+                        } else {
+                            out += '\\' + nxt;
+                            i += 2;
+                        }
+                    } else if (raw[i] === '"') {
+                        out += '\\"';
+                        i += 1;
+                    } else if (raw.charCodeAt(i) < 0x20) {
+                        const code = raw.charCodeAt(i);
+                        out += code === 10 ? '\\n' : code === 13 ? '\\r' : code === 9 ? '\\t' : `\\u${code.toString(16).padStart(4, '0')}`;
+                        i += 1;
+                    } else {
+                        out += raw[i];
+                        i += 1;
+                    }
+                }
+                i += 1;
+                out += '"';
+            } else if (raw.startsWith('True', i) && !/[A-Za-z0-9_]/.test(raw[i + 4] || '')) {
+                out += 'true';
+                i += 4;
+            } else if (raw.startsWith('False', i) && !/[A-Za-z0-9_]/.test(raw[i + 5] || '')) {
+                out += 'false';
+                i += 5;
+            } else if (raw.startsWith('None', i) && !/[A-Za-z0-9_]/.test(raw[i + 4] || '')) {
+                out += 'null';
+                i += 4;
+            } else if (ch === '(' || ch === ')') {
+                out += ch === '(' ? '[' : ']';
+                i += 1;
+            } else {
+                out += ch;
+                i += 1;
+            }
+        }
+        out = out.replace(/,\s*([\]}])/g, '$1');
+        return JSON.parse(out);
+    }
+}
+
+/**
  * Ensures the official Mohammadta/BEAM 100K dataset is cached locally.
  */
 async function ensureOfficialBeamDataset() {
@@ -210,12 +291,13 @@ async function ensureOfficialBeamDataset() {
         const data = await res.json();
         for (const r of data.rows || []) {
             const row = r.row;
-            row.chat = typeof row.chat === 'string' ? JSON.parse(row.chat) : row.chat;
-            row.user_profile = typeof row.user_profile === 'string' ? JSON.parse(row.user_profile) : row.user_profile;
-            row.conversation_seed = typeof row.conversation_seed === 'string' ? JSON.parse(row.conversation_seed) : row.conversation_seed;
-            row.probing_questions_parsed = typeof row.probing_questions === 'string'
-                ? JSON.parse(row.probing_questions)
-                : row.probing_questions;
+            row.chat = parseJsonOrPythonLiteral(row.chat);
+            row.user_profile = parseJsonOrPythonLiteral(row.user_profile);
+            row.conversation_seed = parseJsonOrPythonLiteral(row.conversation_seed);
+            row.user_questions = parseJsonOrPythonLiteral(row.user_questions);
+            const rawProbing = row.probing_questions;
+            delete row.probing_questions;
+            row.probing_questions_parsed = parseJsonOrPythonLiteral(rawProbing);
             rows.push(row);
         }
     }
@@ -442,25 +524,48 @@ function buildBlindTurnsFromChat(c, allTextsToEmbed) {
  */
 async function callReaderModel({ systemPrompt, userMessage }) {
     if (!IS_GEMINI_READER) {
-        const readerRes = await fetch(READER_ENDPOINT, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: READER_MODEL,
-                stream: false,
-                options: { temperature: 0.0, num_ctx: 16384, num_predict: 550 },
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userMessage }
-                ]
-            }),
-            signal: AbortSignal.timeout(90000)
-        });
-        if (!readerRes.ok) {
-            throw new Error(`Reader HTTP ${readerRes.status}`);
+        const isGptOss = /^gpt-oss/i.test(READER_MODEL);
+        const baseNumPredict = Number(process.env.OLLAMA_READER_NUM_PREDICT) || (isGptOss ? 2560 : 800);
+        const numCtx = Number(process.env.OLLAMA_READER_NUM_CTX) || 16384;
+        const readerThink = process.env.OLLAMA_READER_THINK || (isGptOss ? 'low' : undefined);
+
+        let lastErr = null;
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+            const numPredict = attempt > 1 ? Math.max(baseNumPredict * 2, 4096) : baseNumPredict;
+            try {
+                const payload = {
+                    model: READER_MODEL,
+                    stream: false,
+                    ...(readerThink !== undefined ? { think: readerThink } : {}),
+                    options: { temperature: 0.0, num_ctx: numCtx, num_predict: numPredict },
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userMessage }
+                    ]
+                };
+                const readerRes = await fetch(READER_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    signal: AbortSignal.timeout(240000)
+                });
+                if (!readerRes.ok) {
+                    throw new Error(`Reader HTTP ${readerRes.status}`);
+                }
+                const readerData = await readerRes.json();
+                const content = (readerData.message?.content || '').trim();
+                if (!content && attempt < 3) {
+                    continue;
+                }
+                return content;
+            } catch (err) {
+                lastErr = err;
+                if (attempt < 3) {
+                    await new Promise(r => setTimeout(r, 1200 * attempt));
+                }
+            }
         }
-        const readerData = await readerRes.json();
-        return (readerData.message?.content || '').trim();
+        throw lastErr || new Error('Ollama Reader failed after 3 attempts');
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -539,8 +644,68 @@ async function callReaderModel({ systemPrompt, userMessage }) {
 }
 
 /**
+ * Grades a generated answer with an Ollama JSON Referee Judge (`judgeModel`) with retry safety.
+ */
+async function gradeSingleOllamaJudge(judgeModel, judgePrompt, rubricItems) {
+    const judgeNumPredict = Number(process.env.OLLAMA_JUDGE_NUM_PREDICT) || 480;
+    const judgeNumCtx = Number(process.env.OLLAMA_JUDGE_NUM_CTX) || 8192;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+            const judgeRes = await fetch(JUDGE_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: judgeModel,
+                    stream: false,
+                    format: 'json',
+                    options: { temperature: 0.0, num_ctx: judgeNumCtx, num_predict: judgeNumPredict },
+                    messages: [{ role: 'user', content: judgePrompt }]
+                }),
+                signal: AbortSignal.timeout(120000)
+            });
+            if (!judgeRes.ok) {
+                throw new Error(`Judge (${judgeModel}) HTTP ${judgeRes.status}`);
+            }
+            const judgeData = await judgeRes.json();
+            const rawJudge = (judgeData.message?.content || '').trim();
+            const jsonMatch = rawJudge.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                const parsed = JSON.parse(jsonMatch[0]);
+                if (Array.isArray(parsed.scores) && parsed.scores.length > 0) {
+                    const boundedScores = rubricItems.length > 0
+                        ? parsed.scores.slice(0, rubricItems.length)
+                        : parsed.scores;
+                    const avg = boundedScores.reduce((s, v) => s + Number(v || 0), 0) / boundedScores.length;
+                    return {
+                        score: Math.min(1.0, Math.max(0.0, avg)),
+                        judge_reason: typeof parsed.reason === 'string' ? parsed.reason.slice(0, 240) : null
+                    };
+                }
+                if (typeof parsed.overall === 'number') {
+                    return {
+                        score: Math.min(1.0, Math.max(0.0, parsed.overall)),
+                        judge_reason: typeof parsed.reason === 'string' ? parsed.reason.slice(0, 240) : null
+                    };
+                }
+            }
+            if (attempt === 2) {
+                console.warn(`[benchmark_official_beam] Judge (${judgeModel}) non-JSON/malformed output: "${rawJudge.slice(0, 120)}"`);
+            }
+        } catch (err) {
+            if (attempt === 2) {
+                console.warn(`[benchmark_official_beam] Judge (${judgeModel}) error: ${err.message}`);
+            } else {
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+    }
+    return { score: 0.0, judge_reason: 'JUDGE_PARSE_FALLBACK_ZERO' };
+}
+
+/**
  * Calls the Reader LLM (`READER_MODEL`) with a 100% dataset-blind system prompt
- * and evaluates the generated response with the strict reference-grounded Referee Judge (`JUDGE_MODEL`).
+ * and evaluates the generated response with the strict reference-grounded Referee Judge (`JUDGE_MODEL`,
+ * plus optional `SECONDARY_JUDGE_MODEL` on the identical answer).
  */
 async function evaluateWithOfficialBeamJudge({ question, rubric, ideal_response, category, retrievedContext }) {
     const systemPrompt = [
@@ -576,52 +741,18 @@ async function evaluateWithOfficialBeamJudge({ question, rubric, ideal_response,
         `{"reason": "First state what the Official Reference Answer requires, then state what the Candidate AI Response actually claimed, then state whether they match.", "scores": [<0.0, 0.5, or 1.0 per rubric item>], "overall": <mean_score>}`
     ].join('\n\n');
 
-    const judgeRes = await fetch(JUDGE_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: JUDGE_MODEL,
-            stream: false,
-            format: 'json',
-            options: { temperature: 0.0, num_ctx: 16384, num_predict: 360 },
-            messages: [{ role: 'user', content: judgePrompt }]
-        }),
-        signal: AbortSignal.timeout(60000)
-    });
-    if (!judgeRes.ok) {
-        throw new Error(`Judge HTTP ${judgeRes.status}`);
-    }
-    const judgeData = await judgeRes.json();
-    const rawJudge = (judgeData.message?.content || '').trim();
-    const jsonMatch = rawJudge.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-        try {
-            const parsed = JSON.parse(jsonMatch[0]);
-            if (Array.isArray(parsed.scores) && parsed.scores.length > 0) {
-                const boundedScores = rubricItems.length > 0
-                    ? parsed.scores.slice(0, rubricItems.length)
-                    : parsed.scores;
-                const avg = boundedScores.reduce((s, v) => s + Number(v || 0), 0) / boundedScores.length;
-                return {
-                    score: Math.min(1.0, Math.max(0.0, avg)),
-                    answer: generatedAnswer,
-                    judge_reason: typeof parsed.reason === 'string' ? parsed.reason.slice(0, 240) : null
-                };
-            }
-            if (typeof parsed.overall === 'number') {
-                return {
-                    score: Math.min(1.0, Math.max(0.0, parsed.overall)),
-                    answer: generatedAnswer,
-                    judge_reason: typeof parsed.reason === 'string' ? parsed.reason.slice(0, 240) : null
-                };
-            }
-        } catch (parseErr) {
-            console.warn(`[benchmark_official_beam] Judge JSON parse warning: ${parseErr.message} | raw="${rawJudge.slice(0, 120)}"`);
-        }
-    } else {
-        console.warn(`[benchmark_official_beam] Judge returned non-JSON output: "${rawJudge.slice(0, 120)}"`);
-    }
-    return { score: 0.0, answer: generatedAnswer, judge_reason: 'JUDGE_PARSE_FALLBACK_ZERO' };
+    const [primaryOut, secondaryOut] = await Promise.all([
+        gradeSingleOllamaJudge(JUDGE_MODEL, judgePrompt, rubricItems),
+        SECONDARY_JUDGE_MODEL ? gradeSingleOllamaJudge(SECONDARY_JUDGE_MODEL, judgePrompt, rubricItems) : Promise.resolve(null)
+    ]);
+
+    return {
+        score: primaryOut.score,
+        answer: generatedAnswer,
+        judge_reason: primaryOut.judge_reason,
+        secondary_score: secondaryOut ? secondaryOut.score : null,
+        secondary_judge_reason: secondaryOut ? secondaryOut.judge_reason : null
+    };
 }
 
 async function runOfficialBeamBenchmark() {
@@ -774,6 +905,8 @@ async function runOfficialBeamBenchmark() {
                 convTotalTurnsSum: 0,
                 llmJudgeScoreSum: 0,
                 llmJudgeCount: 0,
+                secondaryJudgeScoreSum: 0,
+                secondaryJudgeCount: 0,
                 total: 0
             };
         }
@@ -892,6 +1025,7 @@ async function runOfficialBeamBenchmark() {
                     strict_primary_turn_recall: strictPrimaryRecall !== null ? Number(strictPrimaryRecall.toFixed(4)) : null,
                     llm_judge_score: null,
                     judge_reason: null,
+                    ...(SECONDARY_JUDGE_MODEL ? { secondary_judge_score: null, secondary_judge_reason: null } : {}),
                     reader_answer_excerpt: null
                 };
                 auditLogEntries.push(auditEntry);
@@ -915,15 +1049,37 @@ async function runOfficialBeamBenchmark() {
                 1,
                 Number(process.env.BEAM_JUDGE_CONCURRENCY) || (IS_GEMINI_READER ? 4 : 1)
             );
-            console.log(`3️⃣ Running End-to-End Multi-Family LLM Reader (${READER_MODEL}) + Strict Reference-Grounded Judge (${JUDGE_MODEL}) on ${llmSampleQueue.length} sampled questions (concurrency=${judgeConcurrency})...`);
+            const judgeDesc = SECONDARY_JUDGE_MODEL
+                ? `${JUDGE_MODEL} + secondary ${SECONDARY_JUDGE_MODEL}`
+                : JUDGE_MODEL;
+            console.log(`3️⃣ Running End-to-End Multi-Family LLM Reader (${READER_MODEL}) + Strict Reference-Grounded Judge (${judgeDesc}) on ${llmSampleQueue.length} questions (concurrency=${judgeConcurrency})...`);
+            const evalStart = Date.now();
             let qCursor = 0;
+            let completedCount = 0;
+            let runningPrimarySum = 0;
+            let runningSecondarySum = 0;
+            const progressStep = llmSampleQueue.length <= 20 ? 5 : 20;
             const resultsByIdx = new Array(llmSampleQueue.length).fill(null);
             async function evalWorker() {
                 while (qCursor < llmSampleQueue.length) {
                     const idx = qCursor++;
                     const item = llmSampleQueue[idx];
                     try {
-                        resultsByIdx[idx] = await evaluateWithOfficialBeamJudge(item);
+                        const out = await evaluateWithOfficialBeamJudge(item);
+                        resultsByIdx[idx] = out;
+                        completedCount += 1;
+                        runningPrimarySum += out.score;
+                        if (out.secondary_score !== null && out.secondary_score !== undefined) {
+                            runningSecondarySum += out.secondary_score;
+                        }
+                        if (completedCount % progressStep === 0 || completedCount === llmSampleQueue.length) {
+                            const dt = ((Date.now() - evalStart) / 1000).toFixed(1);
+                            const pMean = ((runningPrimarySum / completedCount) * 100).toFixed(2);
+                            const secPart = SECONDARY_JUDGE_MODEL
+                                ? ` | ${SECONDARY_JUDGE_MODEL}: ${((runningSecondarySum / completedCount) * 100).toFixed(2)}%`
+                                : '';
+                            console.log(`   [E2E Progress] ${completedCount}/${llmSampleQueue.length} (${((completedCount / llmSampleQueue.length) * 100).toFixed(1)}%) | ${dt}s | ${JUDGE_MODEL}: ${pMean}%${secPart}`);
+                        }
                     } catch (err) {
                         console.warn(`[benchmark_official_beam] LLM Judge warning on Q#${item.auditEntry?.question_global_id}: ${err.message}`);
                     }
@@ -938,9 +1094,17 @@ async function runOfficialBeamBenchmark() {
                 if (!res) continue;
                 categoryStats[item.category].llmJudgeScoreSum += res.score;
                 categoryStats[item.category].llmJudgeCount += 1;
+                if (res.secondary_score !== null && res.secondary_score !== undefined) {
+                    categoryStats[item.category].secondaryJudgeScoreSum += res.secondary_score;
+                    categoryStats[item.category].secondaryJudgeCount += 1;
+                }
                 if (item.auditEntry) {
                     item.auditEntry.llm_judge_score = Number(res.score.toFixed(4));
                     item.auditEntry.judge_reason = res.judge_reason || null;
+                    if (SECONDARY_JUDGE_MODEL && res.secondary_score !== null && res.secondary_score !== undefined) {
+                        item.auditEntry.secondary_judge_score = Number(res.secondary_score.toFixed(4));
+                        item.auditEntry.secondary_judge_reason = res.secondary_judge_reason || null;
+                    }
                     item.auditEntry.reader_answer_excerpt = (res.answer || '').slice(0, 320);
                 }
             }
@@ -963,6 +1127,8 @@ async function runOfficialBeamBenchmark() {
         let totalConvTurnsAll = 0;
         let sumJudge = 0;
         let judgeCatCount = 0;
+        let sumSecondaryJudge = 0;
+        let secondaryJudgeCatCount = 0;
         let totalJudgeEvaluatedQuestions = 0;
         let sumPast100K = 0;
         let sumPast500K = 0;
@@ -986,6 +1152,9 @@ async function runOfficialBeamBenchmark() {
             const judgePct = st.llmJudgeCount > 0
                 ? (st.llmJudgeScoreSum / st.llmJudgeCount) * 100
                 : null;
+            const secJudgePct = st.secondaryJudgeCount > 0
+                ? (st.secondaryJudgeScoreSum / st.secondaryJudgeCount) * 100
+                : null;
             const p = PAST_DEV_SCORES[cat];
 
             if (hasRecall) {
@@ -1007,6 +1176,10 @@ async function runOfficialBeamBenchmark() {
                 judgeCatCount += 1;
                 totalJudgeEvaluatedQuestions += st.llmJudgeCount;
             }
+            if (secJudgePct !== null) {
+                sumSecondaryJudge += secJudgePct;
+                secondaryJudgeCatCount += 1;
+            }
             sumPast100K += p['100K'];
             sumPast500K += p['500K'];
             sumPast1M += p['1M'];
@@ -1026,6 +1199,7 @@ async function runOfficialBeamBenchmark() {
                 recall_at_50_pct: r50Pct !== null ? Number(r50Pct.toFixed(2)) : null,
                 strict_primary_turn_recall_pct: primaryPct !== null ? Number(primaryPct.toFixed(2)) : null,
                 llm_judge_pct: judgePct !== null ? Number(judgePct.toFixed(2)) : null,
+                ...(SECONDARY_JUDGE_MODEL ? { secondary_llm_judge_pct: secJudgePct !== null ? Number(secJudgePct.toFixed(2)) : null } : {}),
                 past_dev_100k: p['100K'],
                 past_dev_1m: p['1M'],
                 past_dev_10m: p['10M']
@@ -1048,6 +1222,7 @@ async function runOfficialBeamBenchmark() {
         const avgConvTurns = totalConvTurnsAll / Math.max(1, totalQuestions);
         const avgTurnCoveragePct = (avgPackedTurnsOverall / Math.max(1, avgConvTurns)) * 100;
         const avgJudge = judgeCatCount > 0 ? sumJudge / judgeCatCount : null;
+        const avgSecondaryJudge = secondaryJudgeCatCount > 0 ? sumSecondaryJudge / secondaryJudgeCatCount : null;
         const avgPast100K = sumPast100K / nCats;
         const avgPast500K = sumPast500K / nCats;
         const avgPast1M = sumPast1M / nCats;
@@ -1076,40 +1251,79 @@ async function runOfficialBeamBenchmark() {
         console.log('====================================================================================================================');
         console.log('⚖️  TABLE B: 10-CATEGORY END-TO-END CONVERSATIONAL QA (Reader + Strict Reference-Grounded Judge vs Published SOTA)');
         console.log('====================================================================================================================');
-        console.log(
-            `${'BEAM Memory Category'.padEnd(31)} | ${'Eval Qs'.padStart(9)} | ${'Krusch E2E QA (Strict)'.padStart(22)} | ${'past.dev 100K (E2E)'.padStart(19)} | ${'past.dev 1M (E2E)'.padStart(17)}`
-        );
-        console.log('-'.repeat(110));
-        for (const cat of CATEGORY_ORDER) {
-            const row = summaryRows[cat];
-            const evalStr = `${row.llm_judge_evaluated_questions}/${row.questions}`;
-            const judgeStr = row.llm_judge_pct !== null ? `${row.llm_judge_pct.toFixed(2)}%` : 'SKIPPED';
+        if (SECONDARY_JUDGE_MODEL) {
             console.log(
-                `${CATEGORY_LABELS[cat].padEnd(31)} | ${evalStr.padStart(9)} | ${judgeStr.padStart(22)} | ${(row.past_dev_100k.toFixed(2) + '%').padStart(19)} | ${(row.past_dev_1m.toFixed(2) + '%').padStart(17)}`
+                `${'BEAM Memory Category'.padEnd(31)} | ${'Eval Qs'.padStart(9)} | ${JUDGE_MODEL.slice(0, 18).padStart(18)} | ${SECONDARY_JUDGE_MODEL.slice(0, 18).padStart(18)} | ${'past.dev 100K'.padStart(15)} | ${'past.dev 1M'.padStart(13)}`
+            );
+            console.log('-'.repeat(120));
+            for (const cat of CATEGORY_ORDER) {
+                const row = summaryRows[cat];
+                const evalStr = `${row.llm_judge_evaluated_questions}/${row.questions}`;
+                const judgeStr = row.llm_judge_pct !== null ? `${row.llm_judge_pct.toFixed(2)}%` : 'SKIPPED';
+                const secStr = row.secondary_llm_judge_pct !== null && row.secondary_llm_judge_pct !== undefined
+                    ? `${row.secondary_llm_judge_pct.toFixed(2)}%`
+                    : 'SKIPPED';
+                console.log(
+                    `${CATEGORY_LABELS[cat].padEnd(31)} | ${evalStr.padStart(9)} | ${judgeStr.padStart(18)} | ${secStr.padStart(18)} | ${(row.past_dev_100k.toFixed(2) + '%').padStart(15)} | ${(row.past_dev_1m.toFixed(2) + '%').padStart(13)}`
+                );
+            }
+            const avgJudgeStr = avgJudge !== null ? `${avgJudge.toFixed(2)}%` : 'SKIPPED';
+            const avgSecStr = avgSecondaryJudge !== null ? `${avgSecondaryJudge.toFixed(2)}%` : 'SKIPPED';
+            console.log('-'.repeat(120));
+            console.log(
+                `${'10-CAT END-TO-END QA MEAN'.padEnd(31)} | ${(`${totalJudgeEvaluatedQuestions}/${totalQuestions}`).padStart(9)} | ${avgJudgeStr.padStart(18)} | ${avgSecStr.padStart(18)} | ${(avgPast100K.toFixed(2) + '%').padStart(15)} | ${(avgPast1M.toFixed(2) + '%').padStart(13)}`
+            );
+        } else {
+            console.log(
+                `${'BEAM Memory Category'.padEnd(31)} | ${'Eval Qs'.padStart(9)} | ${'Krusch E2E QA (Strict)'.padStart(22)} | ${'past.dev 100K (E2E)'.padStart(19)} | ${'past.dev 1M (E2E)'.padStart(17)}`
+            );
+            console.log('-'.repeat(110));
+            for (const cat of CATEGORY_ORDER) {
+                const row = summaryRows[cat];
+                const evalStr = `${row.llm_judge_evaluated_questions}/${row.questions}`;
+                const judgeStr = row.llm_judge_pct !== null ? `${row.llm_judge_pct.toFixed(2)}%` : 'SKIPPED';
+                console.log(
+                    `${CATEGORY_LABELS[cat].padEnd(31)} | ${evalStr.padStart(9)} | ${judgeStr.padStart(22)} | ${(row.past_dev_100k.toFixed(2) + '%').padStart(19)} | ${(row.past_dev_1m.toFixed(2) + '%').padStart(17)}`
+                );
+            }
+            const avgJudgeStr = avgJudge !== null ? `${avgJudge.toFixed(2)}%` : 'SKIPPED';
+            console.log('-'.repeat(110));
+            console.log(
+                `${'10-CAT END-TO-END QA MEAN'.padEnd(31)} | ${(`${totalJudgeEvaluatedQuestions}/${totalQuestions}`).padStart(9)} | ${avgJudgeStr.padStart(22)} | ${(avgPast100K.toFixed(2) + '%').padStart(19)} | ${(avgPast1M.toFixed(2) + '%').padStart(17)}`
             );
         }
-        const avgJudgeStr = avgJudge !== null ? `${avgJudge.toFixed(2)}%` : 'SKIPPED';
-        console.log('-'.repeat(110));
-        console.log(
-            `${'10-CAT END-TO-END QA MEAN'.padEnd(31)} | ${(`${totalJudgeEvaluatedQuestions}/${totalQuestions}`).padStart(9)} | ${avgJudgeStr.padStart(22)} | ${(avgPast100K.toFixed(2) + '%').padStart(19)} | ${(avgPast1M.toFixed(2) + '%').padStart(17)}`
-        );
         console.log('====================================================================================================================\n');
 
         const canaryEntry = auditLogEntries.find(
             e => e.conversation_id === 14 && e.category === 'knowledge_update' && e.question_index === 1
         );
 
+        const isFullSplitJudge = totalJudgeEvaluatedQuestions === totalQuestions;
+        const coverageDesc = skipLlmJudge
+            ? 'SKIPPED via --fast'
+            : (isFullSplitJudge
+                ? `Full 100K Split n=${totalJudgeEvaluatedQuestions}/${totalQuestions}, ideal_response + rubric verified`
+                : `Stratified n=${totalJudgeEvaluatedQuestions}/${totalQuestions}, ideal_response + rubric verified`);
+
         const elapsedSec = ((Date.now() - t0) / 1000).toFixed(2);
         console.log(`📦 Substantive Packing Accounting: Avg ${avgPackedTurnsOverall.toFixed(1)}/${avgConvTurns.toFixed(1)} turns (${avgTurnCoveragePct.toFixed(1)}% of conv) | Dense BGE Baseline: ${avgDenseTurnsOverall.toFixed(1)} turns`);
         console.log(`📏 Token Budget Accounting: Avg ${avgPayloadChars.toLocaleString()} chars = ~${avgEstTokens4Char.toLocaleString()} est. tokens (@4.0 chars/tok) ≈ ~${avgApproxBpeTokens.toLocaleString()} BPE tokens (@${APPROX_CHARS_PER_BPE_TOKEN} chars/tok)`);
-        console.log(`⚖️  Strict Reference-Grounded Judge Coverage: ${totalJudgeEvaluatedQuestions}/${totalQuestions} questions (${skipLlmJudge ? 'SKIPPED via --fast' : `Stratified n=${totalJudgeEvaluatedQuestions}, ideal_response + rubric verified`})`);
+        console.log(`⚖️  Strict Reference-Grounded Judge Coverage: ${totalJudgeEvaluatedQuestions}/${totalQuestions} questions (${coverageDesc})`);
         console.log(`🐤 Canary Trap (Conv 14 KU Q1 — cupcakes query vs Netflix source_chat_ids [132, 156]): Recall = ${canaryEntry ? canaryEntry.strict_primary_turn_recall : 'N/A'} (0 = UN-GAMED)`);
         console.log(`⏱️  Completed un-gamified 400-question official BEAM evaluation over 3.06M tokens in ${elapsedSec}s.`);
+
+        let closedSystemProvenance = null;
+        if (process.env.BEAM_CLOSED_SYSTEM_META) {
+            try {
+                closedSystemProvenance = JSON.parse(process.env.BEAM_CLOSED_SYSTEM_META);
+            } catch {}
+        }
 
         const fullReportPayload = {
             dataset: 'Mohammadta/BEAM (ICLR 2026 Official 100K Split)',
             protocol: 'Un-Gamified 100% Blind Uniform Ingestion, Fair Multi-Baseline Ablation & Strict Reference-Grounded Judge',
             timestamp_utc: new Date().toISOString(),
+            ...(closedSystemProvenance ? { closed_system_provenance: closedSystemProvenance } : {}),
             provenance_sha256: {
                 dataset_beam_100k_json: datasetSha256,
                 unified_retrieval_js: retrievalEngineSha256,
@@ -1127,10 +1341,13 @@ async function runOfficialBeamBenchmark() {
                 canary_trap_conv14_ku_q1_recall: canaryEntry ? canaryEntry.strict_primary_turn_recall : null,
                 reader_model: READER_MODEL,
                 judge_model: JUDGE_MODEL,
+                ...(SECONDARY_JUDGE_MODEL ? { secondary_judge_model: SECONDARY_JUDGE_MODEL } : {}),
                 reader_llm_input_contract: 'Pure unifiedRetrieve MCP text output (upg.content[0].text) with dataset-blind system prompt',
                 llm_judge_sampling_contract: skipLlmJudge
                     ? 'SKIPPED (--fast); llm_judge_pct reported as null (zero recall fallback substitution)'
-                    : `Stratified Sample (n=${totalJudgeEvaluatedQuestions}/${totalQuestions} questions across ${judgeMaxConvs} conversations; strict ideal_response + rubric grading; zero recall fallback substitution)`
+                    : (isFullSplitJudge
+                        ? `Full Official Split Evaluation (n=${totalJudgeEvaluatedQuestions}/${totalQuestions} questions across all ${judgeMaxConvs} conversations; strict ideal_response + rubric grading; zero recall fallback substitution)`
+                        : `Stratified Sample (n=${totalJudgeEvaluatedQuestions}/${totalQuestions} questions across ${judgeMaxConvs} conversations; strict ideal_response + rubric grading; zero recall fallback substitution)`)
             },
             conversations: conversations.length,
             messages: totalMessages,
@@ -1141,6 +1358,7 @@ async function runOfficialBeamBenchmark() {
             overall: {
                 reader_model: READER_MODEL,
                 judge_model: JUDGE_MODEL,
+                ...(SECONDARY_JUDGE_MODEL ? { secondary_judge_model: SECONDARY_JUDGE_MODEL } : {}),
                 avg_packed_turns_8k_budget: Number(avgPackedTurnsOverall.toFixed(1)),
                 avg_dense_baseline_turns_8k_budget: Number(avgDenseTurnsOverall.toFixed(1)),
                 avg_conversation_turns: Number(avgConvTurns.toFixed(1)),
@@ -1157,6 +1375,7 @@ async function runOfficialBeamBenchmark() {
                 strict_primary_turn_recall_9cat_pct: Number(avgPrimary9.toFixed(2)),
                 llm_judge_evaluated_questions: totalJudgeEvaluatedQuestions,
                 llm_judge_10cat_pct: avgJudge !== null ? Number(avgJudge.toFixed(2)) : null,
+                ...(SECONDARY_JUDGE_MODEL ? { secondary_llm_judge_10cat_pct: avgSecondaryJudge !== null ? Number(avgSecondaryJudge.toFixed(2)) : null } : {}),
                 past_dev_100k_pct: Number(avgPast100K.toFixed(2)),
                 past_dev_500k_pct: Number(avgPast500K.toFixed(2)),
                 past_dev_1m_pct: Number(avgPast1M.toFixed(2)),
@@ -1168,8 +1387,12 @@ async function runOfficialBeamBenchmark() {
         fs.writeFileSync(RESULTS_JSON_PATH, JSON.stringify(fullReportPayload, null, 2), 'utf8');
         const benchDir = path.resolve('benchmarks');
         fs.mkdirSync(benchDir, { recursive: true });
+        const targetAuditLogPath = AUDIT_LOG_OUT_PATH
+            ? path.resolve(AUDIT_LOG_OUT_PATH)
+            : path.join(benchDir, 'beam_100k_audit_log.json');
+        fs.mkdirSync(path.dirname(targetAuditLogPath), { recursive: true });
         fs.writeFileSync(
-            path.join(benchDir, 'beam_100k_audit_log.json'),
+            targetAuditLogPath,
             JSON.stringify({ ...fullReportPayload, audit_log: auditLogEntries }, null, 2),
             'utf8'
         );

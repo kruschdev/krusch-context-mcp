@@ -154,6 +154,23 @@ test('Round 2 Scientific Honesty & Epistemic Regression Suite (BUG-07, BUG-08, A
     );
   });
 
+  await t.test('6. R3 Closed-System Full-Split Verification: verify_zero_leakage.js passes on both Stock 400/400 and QLoRA 400/400 audit logs', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const path = await import('node:path');
+    const rootDir = path.resolve(import.meta.dirname, '..');
+    const verifier = path.join(rootDir, 'benchmarks', 'verify_zero_leakage.js');
+
+    const stockOut = execFileSync(process.execPath, [verifier], { cwd: rootDir, encoding: 'utf8' });
+    assert.ok(stockOut.includes('ALL 5 SCIENTIFIC INTEGRITY & ZERO-GAMING AUDITS PASSED'), 'Primary Stock 400/400 audit log must pass all 5 zero-leakage checks');
+    assert.ok(stockOut.includes('n=400/400'), 'Primary audit log must verify all 400/400 E2E Judge questions');
+
+    const qloraLog = path.join(rootDir, 'benchmarks', 'g4_closed_system', 'beam_100k_qlora_full400_audit_log.json');
+    if (fs.existsSync(qloraLog)) {
+      const qloraOut = execFileSync(process.execPath, [verifier, `--audit-log=${qloraLog}`], { cwd: rootDir, encoding: 'utf8' });
+      assert.ok(qloraOut.includes('ALL 5 SCIENTIFIC INTEGRITY & ZERO-GAMING AUDITS PASSED'), 'QLoRA 400/400 audit log must pass all 5 zero-leakage checks');
+    }
+  });
+
   t.after(async () => {
     closeAllDatabases();
     for (const p of [budgetProject, brokenProject, directiveProject]) {

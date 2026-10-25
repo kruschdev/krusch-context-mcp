@@ -190,6 +190,7 @@ claude mcp add krusch-context -- npx -y krusch-context-mcp
 * **[Migration Guide](docs/MIGRATION.md)**: Step-by-step v1.5 → v1.6 → v1.7 → v1.8.0 mapping.
 * **[Episodic Memory Guide](docs/EPISODIC_MEMORY.md)**: Deep dive into the closed taxonomy and lifecycle.
 * **[Changelog](CHANGELOG.md)**: Version release notes.
+* **[Official ICLR 2026 BEAM Empirical Report](benchmarks/BEAM_EMPIRICAL_REPORT.md)**: Closed-system `n = 400/400` 100K-split retrieval (`91.99%`) & open-weights E2E QA (`69.19%` / `63.92%`) audit and zero-leakage verification.
 * **[Evaluation Baseline Notes](evals/README.md)**: Preliminary benchmark fixtures and token-budget metrics.
 
 ---

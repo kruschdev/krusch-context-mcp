@@ -30,7 +30,10 @@ import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const AUDIT_LOG_PATH = path.join(ROOT, 'benchmarks', 'beam_100k_audit_log.json');
+const auditLogArg = process.argv.find(a => a.startsWith('--audit-log='));
+const AUDIT_LOG_PATH = (auditLogArg ? path.resolve(auditLogArg.slice('--audit-log='.length).trim()) : '')
+    || (process.env.BEAM_AUDIT_LOG_PATH ? path.resolve(process.env.BEAM_AUDIT_LOG_PATH) : '')
+    || path.join(ROOT, 'benchmarks', 'beam_100k_audit_log.json');
 const DATASET_PATH = process.env.BEAM_DATASET_CACHE_PATH || '/tmp/beam_100k_official.json';
 
 function sha256File(fp) {
@@ -265,7 +268,9 @@ function runIntegrityAudit() {
                 denseSum: 0,
                 legacySum: 0,
                 judgeCount: 0,
-                judgeSum: 0
+                judgeSum: 0,
+                secJudgeCount: 0,
+                secJudgeSum: 0
             };
         }
         byCat[e.category].count += 1;
@@ -282,6 +287,10 @@ function runIntegrityAudit() {
         if (e.llm_judge_score !== null && e.llm_judge_score !== undefined) {
             byCat[e.category].judgeCount += 1;
             byCat[e.category].judgeSum += e.llm_judge_score;
+        }
+        if (e.secondary_judge_score !== null && e.secondary_judge_score !== undefined) {
+            byCat[e.category].secJudgeCount += 1;
+            byCat[e.category].secJudgeSum += e.secondary_judge_score;
         }
     }
 
@@ -303,6 +312,8 @@ function runIntegrityAudit() {
     let recallCats = 0;
     let totalJudgePct10 = 0;
     let judgeCats = 0;
+    let totalSecJudgePct10 = 0;
+    let secJudgeCats = 0;
     let totalJudgeEvaluated = 0;
     for (const [cat, stats] of Object.entries(byCat)) {
         assert.equal(stats.count, 40, `[FAIL] Category ${cat} has ${stats.count} questions instead of 40`);
@@ -343,6 +354,15 @@ function runIntegrityAudit() {
         } else {
             assert.equal(report.categories[cat].llm_judge_pct, null, `[FAIL] Expected null llm_judge_pct when judgeCount=0 for ${cat}`);
         }
+
+        if (report.overall.secondary_judge_model) {
+            if (stats.secJudgeCount > 0) {
+                const secPct = Number(((stats.secJudgeSum / stats.secJudgeCount) * 100).toFixed(2));
+                assert.ok(Math.abs(secPct - report.categories[cat].secondary_llm_judge_pct) <= 0.02, `[FAIL] Category ${cat} secondary_llm_judge_pct mismatch: ${secPct} vs ${report.categories[cat].secondary_llm_judge_pct}`);
+                totalSecJudgePct10 += (stats.secJudgeSum / stats.secJudgeCount) * 100;
+                secJudgeCats += 1;
+            }
+        }
     }
 
     assert.equal(recallCats, 9, `[FAIL] Expected 9 categories with source_chat_ids ground truth, found ${recallCats}`);
@@ -354,6 +374,7 @@ function runIntegrityAudit() {
     const overallDense9 = Number((totalDensePct9 / recallCats).toFixed(2));
     const overallLegacy9 = Number((totalLegacyPct9 / recallCats).toFixed(2));
     const overallJudge10 = judgeCats > 0 ? Number((totalJudgePct10 / judgeCats).toFixed(2)) : null;
+    const overallSecJudge10 = secJudgeCats > 0 ? Number((totalSecJudgePct10 / secJudgeCats).toFixed(2)) : null;
     assertPctMatch(overallR10, report.overall.recall_at_10_9cat_pct, '[FAIL] Overall 9-category R@10 mismatch');
     assertPctMatch(overallR20, report.overall.recall_at_20_9cat_pct, '[FAIL] Overall 9-category R@20 mismatch');
     assertPctMatch(overallR30, report.overall.recall_at_30_9cat_pct, '[FAIL] Overall 9-category R@30 mismatch');
@@ -367,6 +388,9 @@ function runIntegrityAudit() {
     } else {
         assert.ok(Math.abs(overallJudge10 - report.overall.llm_judge_10cat_pct) <= 0.02, `[FAIL] Overall 10-category LLM Judge score mismatch: ${overallJudge10} vs ${report.overall.llm_judge_10cat_pct}`);
     }
+    if (report.overall.secondary_judge_model && overallSecJudge10 !== null) {
+        assert.ok(Math.abs(overallSecJudge10 - report.overall.secondary_llm_judge_10cat_pct) <= 0.02, `[FAIL] Overall 10-category Secondary Judge score mismatch: ${overallSecJudge10} vs ${report.overall.secondary_llm_judge_10cat_pct}`);
+    }
 
     console.log(`✅ [Check 4/5] Per-Question Turn-ID Re-Computation & 400-Question Re-Tally PASSED:`);
     if (recomputedQuestionsVerified > 0) {
@@ -375,7 +399,10 @@ function runIntegrityAudit() {
     console.log(`   • Re-tallied Un-Condensed Lex 8K / Dense BGE-Large 8K    : ${overallLegacy9.toFixed(2)}% / ${overallDense9.toFixed(2)}%`);
     console.log(`   • Re-tallied Hybrid Fixed-Rank R@10 / @20 / @30 / @50    : ${overallR10.toFixed(2)}% / ${overallR20.toFixed(2)}% / ${overallR30.toFixed(2)}% / ${overallR50.toFixed(2)}%`);
     console.log(`   • Re-tallied Hybrid Substantive 8K Packed Recall (9-Cat) : ${overallStrict9.toFixed(2)}%`);
-    console.log(`   • Re-tallied Strict Reference-Grounded Judge (n=${totalJudgeEvaluated}/400) : ${overallJudge10 !== null ? overallJudge10.toFixed(2) + '%' : 'N/A'}`);
+    console.log(`   • Re-tallied Primary Judge (${report.overall.judge_model}, n=${totalJudgeEvaluated}/400) : ${overallJudge10 !== null ? overallJudge10.toFixed(2) + '%' : 'N/A'}`);
+    if (report.overall.secondary_judge_model && overallSecJudge10 !== null) {
+        console.log(`   • Re-tallied Continuity Judge (${report.overall.secondary_judge_model}, n=${totalJudgeEvaluated}/400) : ${overallSecJudge10.toFixed(2)}%`);
+    }
 
     // 5. Anti-Stubbing & Upstream Canary Trap Verification
     const pruneCode = fs.readFileSync(path.join(ROOT, 'src', 'prune-helper.js'), 'utf8');
