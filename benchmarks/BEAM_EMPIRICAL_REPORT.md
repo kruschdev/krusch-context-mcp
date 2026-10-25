@@ -1,49 +1,55 @@
-# Official ICLR 2026 BEAM Benchmark — Closed-System Full-Split Empirical Report (`krusch-context-mcp v1.8.1`)
+# Official ICLR 2026 BEAM Benchmark — Closed-System Full-Split Empirical Report (`krusch-context-mcp v1.9.0`)
 
-> **Audit & Execution Date**: 2026-10-24  
+> **Audit & Execution Date**: 2026-10-25  
 > **Dataset**: Official `Mohammadta/BEAM` (`100K` Split — 20 Multi-Session Conversations, 5,732 Messages / 2,866 Turns, 12,232,071 Characters / ~3.06M Tokens, **All `400/400` Probing Questions** across 10 Memory Categories)  
-> **Execution Topology**: Hermetic Single-Box Closed System on **NVIDIA RTX PRO 6000 Blackwell (`97,887 MiB` VRAM, Driver `580.82.07`)** — `127.0.0.1:11434` loopback only, `GEMINI_API_KEY=""`, zero LAN calls, fresh Hugging Face dataset fetch, fresh `bge-large` embeddings from scratch, and 4 open-weights models co-located simultaneously at `100% GPU`  
+> **Execution Topology**: Hermetic Single-Box Closed System on **NVIDIA RTX PRO 6000 Blackwell (`97,887 MiB` VRAM, Driver `580.82.07`)** — `127.0.0.1:11434` loopback only, `GEMINI_API_KEY=""`, zero LAN calls, fresh Hugging Face dataset fetch, fresh `bge-large` embeddings from scratch (`52.85s`), and 4 open-weights models co-located simultaneously at `100% GPU`  
 > **Verification Command**: `npm run bench:beam:verify` ([`benchmarks/verify_zero_leakage.js`](./verify_zero_leakage.js))  
 > **Raw Audit Logs**:
-> - Primary Unmodified Stock `gpt-oss:120b` (`n = 400/400`): [`benchmarks/beam_100k_audit_log.json`](./beam_100k_audit_log.json) (mirrored at [`benchmarks/g4_closed_system/beam_100k_audit_log.json`](./g4_closed_system/beam_100k_audit_log.json))
-> - Controlled `krush420/gpt-oss-120b-sre-lora` Full Split (`n = 400/400`): [`benchmarks/g4_closed_system/beam_100k_qlora_full400_audit_log.json`](./g4_closed_system/beam_100k_qlora_full400_audit_log.json)
-> - Controlled `krush420/gpt-oss-120b-sre-lora` Gate Slice (`n = 20/400`): [`benchmarks/g4_closed_system/beam_100k_qlora_n20_audit_log.json`](./g4_closed_system/beam_100k_qlora_n20_audit_log.json)
+> - Primary Unmodified Stock `gpt-oss:120b` (`n = 400/400`, `v1.9.0`): [`benchmarks/beam_100k_audit_log.json`](./beam_100k_audit_log.json) (mirrored at [`benchmarks/g4_closed_system/beam_100k_audit_log.json`](./g4_closed_system/beam_100k_audit_log.json))
+> - Controlled `krush420/gpt-oss-120b-sre-lora` Full Split (`n = 400/400`, `v1.9.0`): [`benchmarks/g4_closed_system/beam_100k_qlora_full400_audit_log.json`](./g4_closed_system/beam_100k_qlora_full400_audit_log.json)
+> - Historical `v1.8.1` QLoRA Gate Slice (`n = 20/400`): [`benchmarks/g4_closed_system/beam_100k_qlora_n20_audit_log.json`](./g4_closed_system/beam_100k_qlora_n20_audit_log.json)
 
 ---
 
 ## 1. Executive Summary
 
-Following two rounds of adversarial anti-gaming audits (`19/19` findings fixed across Round 1 and Round 2) and an external peer critique of our preliminary `n = 20/400` End-to-End QA sample, we executed a **hermetic, single-box, 100% open-weights `n = 400/400` full-split evaluation** on an isolated **NVIDIA RTX PRO 6000 Blackwell (`96 GB`)** instance via [`scripts/run_beam_closed_g4.sh`](../scripts/run_beam_closed_g4.sh).
+Following three rounds of adversarial anti-gaming audits (`19/19` findings fixed across Rounds 1–2 plus full-split `n = 400/400` closed-system enforcement in Round 3), we upgraded `krusch-context-mcp` to **`v1.9.0`** and executed a **complete hermetic, single-box, 100% open-weights `n = 400/400` full-split evaluation** (both unmodified Stock `gpt-oss:120b` and controlled in-place `krush420/gpt-oss-120b-sre-lora` QLoRA) on an isolated **NVIDIA RTX PRO 6000 Blackwell (`96 GB`)** instance via [`scripts/run_beam_closed_g4.sh`](../scripts/run_beam_closed_g4.sh).
 
-### Headline Empirical Findings (`n = 400/400` Official `100K` Split)
+### Headline Empirical Findings (`v1.9.0`, `n = 400/400` Official `100K` Split)
 
 1. **Retrieval Recall (`Table A`, `n = 360/360` Ground-Truth Questions across 9 Categories, Fresh Cold-Room Embeddings)**:
-   - **`krusch-context-mcp` Hybrid `unifiedRetrieve` (`~61.7` condensed turns packed in `~8K` est. tokens)**: **`91.99%`** primary-turn recall (`100.00%` on Temporal Reasoning & Contradiction Resolution, `97.50%` on Knowledge Update, `96.58%` on Preference Following, `96.25%` on Instruction Following, `95.00%` on Information Extraction, `90.09%` on Multi-Session Reasoning).
-   - **Fair Condensed `Dense BGE-Large 8K` Baseline (`~75.7` condensed turns, identical condensation + budget)**: **`91.48%`** — `unifiedRetrieve` edges pure `bge-large` dense cosine retrieval (`+0.51 pp` overall, `+5.22 pp` on Event Ordering, `+4.25 pp` on Contradiction Resolution) while packing **14.0 fewer turns per query** (`61.7` vs `75.7`) to reserve token budget for structured chronological timelines and contradiction alerts.
+   - **`krusch-context-mcp v1.9.0` Hybrid `unifiedRetrieve` (`~67.9` condensed turns packed in `~7,939` est. tokens)**: **`92.97%`** primary-turn recall (**`+0.98 pp`** over `v1.8.1`'s `91.99%`; **`100.00%`** on Temporal Reasoning, Contradiction Resolution, and Instruction Following; **`97.50%`** on Knowledge Update; **`96.58%`** on Preference Following; **`95.00%`** on Information Extraction; **`90.59%`** on Multi-Session Reasoning; **`80.08%`** on Event Ordering).
+   - **Fair Condensed `Dense BGE-Large 8K` Baseline (`~75.7` condensed turns, identical condensation + budget)**: **`91.48%`** — `unifiedRetrieve` outperforms pure `bge-large` dense cosine retrieval by **`+1.49 pp` overall** (`+7.80 pp` on Event Ordering, `+4.25 pp` on Contradiction Resolution, `+2.50 pp` on Instruction Following) while packing **7.8 fewer turns per query** (`67.9` vs `75.7`) to reserve token headroom for structured chronological timelines, passive state-evolution traces, and contradiction alerts.
    - **Un-Condensed Lexical 8K Baseline (`~7.5` raw turns)**: **`30.74%`**.
-   - **Fixed-Rank Recall Curve**: `R@10 = 52.43%`, `R@20 = 69.06%`, `R@30 = 77.18%`, `R@50 = 88.18%`, `Packed 8K = 91.99%`.
+   - **Fixed-Rank Recall Curve**: `R@10 = 54.20%` (`+1.77 pp` vs `v1.8.1`), `R@20 = 68.11%`, `R@30 = 76.67%`, `R@50 = 88.87%` (`+0.69 pp`), `Packed 8K = 92.97%` (`+0.98 pp`).
 
 2. **Full-Benchmark End-to-End Conversational QA (`Table B`, All `n = 400/400` Questions, Zero Self-Grading Bias)**:
-   - All `400` answers generated by **unmodified open-weights `gpt-oss:120b`** (`think: "low"`, `16,384` ctx) inside the isolated G4 box were graded simultaneously by **two independent cross-family Referee Judges**:
-     - **Primary 32B Dense Referee (`qwen2.5:32b`, Alibaba Qwen family)**: **`63.92%`** (`n = 400/400`)
-     - **Continuity 8B Referee (`hermes3:latest`, Nous/Meta Llama-3.1 family)**: **`69.19%`** (`n = 400/400`)
-     - **Cross-Family Inter-Rater Agreement (`n = 400`)**: **`87.00%` (`348/400`) binary pass/fail agreement**, **`80.25%` (`321/400`) within `±0.25`**, and **`69.25%` (`277/400`) exact rubric score match**. `qwen2.5:32b` grades `5.27 pp` stricter than `hermes3:latest`, primarily on exact item-count `Event Ordering` (`5.64%` vs `32.67%`) and strict zero-context `Abstention` (`60.00%` vs `72.50%`).
+   - All `400` answers generated by **unmodified open-weights `gpt-oss:120b`** (`think: "low"`, `16,384` ctx, `2,629.4s` total wall time) inside the isolated G4 box were graded simultaneously by **two independent cross-family Referee Judges**:
+     - **Primary 32B Dense Referee (`qwen2.5:32b`, Alibaba Qwen family)**: **`67.19%`** (`n = 400/400`, up **`+3.27 pp`** from `v1.8.1`'s `63.92%`)
+     - **Continuity 8B Referee (`hermes3:latest`, Nous/Meta Llama-3.1 family)**: **`73.53%`** (`n = 400/400`, up **`+4.34 pp`** from `v1.8.1`'s `69.19%`)
+     - **Cross-Family Inter-Rater Agreement (`n = 400`)**: **`85.50%` (`342/400`) binary pass/fail agreement**, **`80.25%` (`321/400`) within `±0.25`**, and **`69.25%` (`277/400`) exact rubric score match** (and `86.75%` binary / `81.00%` within `±0.25` / `72.50%` exact on the `400/400` QLoRA run).
+   - **Largest `v1.8.1` $\rightarrow$ `v1.9.0` End-to-End QA Gains (Identical Model Digests & Harness SHA-256)**:
+     - **Abstention (`ABS`, `40/40`)**: `60.00%` $\rightarrow$ **`73.75%` (`+13.75 pp`)** on `qwen2.5:32b` and `72.50%` $\rightarrow$ **`85.00%` (`+12.50 pp`)** on `hermes3:latest` (driven by `computeCorpusUnattestedTerms` `Lexical Grounding Note`).
+     - **Knowledge Update (`KU`, `40/40`)**: `36.25%` $\rightarrow$ **`47.50%` (`+11.25 pp`)** on `qwen2.5:32b` and `41.25%` $\rightarrow$ **`61.25%` (`+20.00 pp`)** on `hermes3:latest` (driven by passive `detectTemporalUpdates` `Chronological State Evolution` + state-transition scoring).
+     - **Multi-Session Reasoning (`MSR`, `40/40`)**: `57.15%` $\rightarrow$ **`64.17%` (`+7.02 pp`)** on `qwen2.5:32b` and `56.38%` $\rightarrow$ **`64.81%` (`+8.43 pp`)** on `hermes3:latest` (within `4.14–4.78 pp` of proprietary cloud `past.dev` `68.95%`).
+     - **Information Extraction (`IE`, `40/40`)**: `71.41%` $\rightarrow$ **`77.08%` (`+5.67 pp`)** on `qwen2.5:32b` and `72.81%` $\rightarrow$ **`80.21%` (`+7.40 pp`)** on `hermes3:latest`.
+     - **Event Ordering (`EO`, `40/40`)**: `5.64%` $\rightarrow$ **`8.51%` (`+2.87 pp`)** on `qwen2.5:32b` and `32.67%` $\rightarrow$ **`36.25%` (`+3.58 pp`)** on `hermes3:latest`.
    - **Published `Mohammadta/BEAM` (`100K`, `n = 400`) Leaderboard Context**:
      - `past.dev` (`92.08%` — proprietary cloud `openai/gpt-5.6-luna` answering and self-judging)
      - `Hindsight` (`86.20%`)
      - `Exabase M-1` (`76.90%`)
-     - **`krusch-context-mcp v1.8.1 + stock gpt-oss:120b`** (**`69.19%`** `hermes3` / **`63.92%`** `qwen2.5:32b` — 100% open-weights, single-box closed system, strict `8K` packed context, cross-family judging)
+     - **`krusch-context-mcp v1.9.0 + stock gpt-oss:120b`** (**`73.53%`** `hermes3` / **`67.19%`** `qwen2.5:32b` — 100% open-weights, single-box closed system, strict `8K` packed context, cross-family judging)
      - `Honcho` (`63.00%`)
      - `MEMIR` (`48.26%`, Jin et al. 2026)
 
 3. **Controlled `400/400` Stock `gpt-oss:120b` vs. `krush420/gpt-oss-120b-sre-lora` (QLoRA) Ablation (`Table C`)**:
-   - Fusing our 144-pair (`288` matrix) `BF16` rank-16 attention adapter (`krush420/gpt-oss-120b-sre-lora`) into `gpt-oss:120b` in-place (`1.71s`) beat stock `gpt-oss:120b` by **`+5.33 pp`** (`76.33%` vs `71.00%` on `qwen2.5:32b`) and **`+6.50 pp`** (`76.50%` vs `70.00%` on `hermes3:latest`) on the `n = 20` software-engineering gate (`Conv 1–2`: Python/Flask & JS/OpenWeather), triggering automatic promotion to a second full `400/400` run.
-   - Across **all `400/400` mixed-domain questions** (which span 17 non-coding conversations such as fiction, sneakers, cover letters, free will, and estate planning), unmodified Stock `gpt-oss:120b` edged the SRE QLoRA overall (**`63.92%` vs `63.21%`** on `qwen2.5:32b`; **`69.19%` vs `66.32%`** on `hermes3:latest`), while the SRE QLoRA **outperformed Stock across all `40/40` questions in structured epistemic categories**:
-     - **Contradiction Resolution (`CR`, `n = 40`)**: **`85.31%`** (`qwen2.5:32b`) / **`93.75%`** (`hermes3:latest`) vs Stock `80.94%` / `85.63%` — **both decisively surpassing `past.dev` (`78.13%`) across the full 40-question split**.
-     - **Information Extraction (`IE`, `n = 40`)**: **`74.79%`** vs `71.41%` (`+3.38 pp` on `qwen2.5:32b`) and **`81.88%`** vs `72.81%` (`+9.07 pp` on `hermes3:latest`).
-     - **Knowledge Update (`KU`, `n = 40`)**: **`38.75%`** vs `36.25%` (`+2.50 pp` on `qwen2.5:32b`) and **`53.75%`** vs `41.25%` (`+12.50 pp` on `hermes3:latest`).
-     - **Instruction Following (`IF`, `n = 40`)**: **`77.50%`** vs `76.25%` (`+1.25 pp` on `qwen2.5:32b`).
-     - Conversely, SRE fine-tuning traded off multi-paragraph narrative prose length on **Summarization (`SUM`)** (`74.02%` vs `80.94%`) and non-coding **Temporal Reasoning (`TR`)** (`68.13%` vs `76.88%`), demonstrating why full `400/400` evaluation is essential over `n = 20` sub-samples.
+   - Fusing our 144-pair (`288` matrix) `BF16` rank-16 attention adapter (`krush420/gpt-oss-120b-sre-lora`) into `gpt-oss:120b` in-place (`1.69s`) also improved in `v1.9.0` (`63.21%` $\rightarrow$ **`64.07%`** on `qwen2.5:32b`; `66.32%` $\rightarrow$ **`69.57%`** on `hermes3:latest`).
+   - Across **all `400/400` mixed-domain questions**, unmodified Stock `gpt-oss:120b` leads overall (`67.19%` vs `64.07%` on `qwen2.5:32b`; `73.53%` vs `69.57%` on `hermes3:latest`), while the SRE QLoRA **beats Stock across 5 structured epistemic categories on the primary 32B `qwen2.5:32b` referee**:
+     - **Contradiction Resolution (`CR`, `n = 40`)**: **`85.31%`** (`qwen2.5:32b`) / **`97.50%`** (`hermes3:latest`) vs Stock `79.69%` / `85.00%` — **both decisively surpassing `past.dev` (`78.13%`) across all 40 questions**.
+     - **Instruction Following (`IF`, `n = 40`)**: **`73.75%`** vs `71.25%` (`+2.50 pp` on `qwen2.5:32b`).
+     - **Knowledge Update (`KU`, `n = 40`)**: **`48.75%`** vs `47.50%` (`+1.25 pp` on `qwen2.5:32b`, up `+10.00 pp` from QLoRA `v1.8.1`).
+     - **Preference Following (`PF`, `n = 40`)**: **`92.50%`** vs `91.25%` (`+1.25 pp` on `qwen2.5:32b`).
+     - **Information Extraction (`IE`, `n = 40`)**: **`78.23%`** vs `77.08%` (`+1.15 pp` on `qwen2.5:32b`).
 
 4. **Built-In Anti-Gaming Canary Trap (`Conv 14 KU Q1`)**: **`0.00` (`UN-GAMED`)** across every run (`verify_zero_leakage.js` Check 5).
 
@@ -55,7 +61,7 @@ To eliminate every external dependency questioned in peer review (multi-node LAN
 
 - **Network & API Isolation**: `OLLAMA_HOST=127.0.0.1:11434`, `GEMINI_API_KEY=""`, zero `.env` files, zero `.agent/context.db` state, and fresh HTTPS download of `Mohammadta/BEAM` (`100K` split) directly from Hugging Face (`datasets-server.huggingface.co`), parsed via zero-dependency [`parseJsonOrPythonLiteral`](../scripts/benchmark_official_beam.js).
 - **Simultaneous 4-Model `100% GPU` Co-Location (`90.5 GB / 97.9 GB` VRAM)**:
-  - **Embedder**: `bge-large:latest` (`0.7 GB`, BAAI BERT 1024-dim — embedded all `3,266` raw dialogue turns + un-prefixed queries from scratch in `53.04s`)
+  - **Embedder**: `bge-large:latest` (`0.7 GB`, BAAI BERT 1024-dim — embedded all `3,266` raw dialogue turns + un-prefixed queries from scratch in `52.85s`)
   - **Reader**: `gpt-oss:120b` (`64 GB`, OpenAI 117B MXFP4 MoE, `16,384` ctx, `think: "low"`, `num_predict: 2560`)
   - **Primary Judge (32B Dense)**: `qwen2.5:32b` (`21 GB`, Alibaba Qwen 2.5 32B, `4,096` ctx, `temperature: 0`)
   - **Continuity Judge (8B Dense)**: `hermes3:latest` (`5.5 GB`, Nous Hermes 3 Llama-3.1 8B, `4,096` ctx, `temperature: 0`)
@@ -65,11 +71,13 @@ To eliminate every external dependency questioned in peer review (multi-node LAN
 | Artifact / Open-Weights Model | Path / Tag | Verified SHA-256 Digest |
 | :---------------------------- | :--------- | :---------------------- |
 | **Official BEAM 100K Dataset** | `/tmp/beam_100k_official.json` | `d542da9ed3b8525cca2f7c4452d54d8c71aa9e8e49d35532b2658da630e6eb43` |
-| **Unified Retrieval Orchestrator** | [`src/unified-retrieval.js`](../src/unified-retrieval.js) | `fee6facc1f8bb04fdb0756d49fb15bc5c699d10ece4b01a6b17df01f9ca2fec4` |
-| **Lexical & Stemming Module** | [`src/retrieval-lexical.js`](../src/retrieval-lexical.js) | `6263bf53868e4351c6d29166f64db39548ec9296bd7afa0186471bfd04cda42a` |
-| **Epistemic & Conflict Module** | [`src/retrieval-epistemic.js`](../src/retrieval-epistemic.js) | `2f4081a040b9638c1bf22f8ae88df32802094f8ff017642ab598a4275ed43e85` |
+| **Unified Retrieval Orchestrator (`v1.9.0`)** | [`src/unified-retrieval.js`](../src/unified-retrieval.js) | `b19dd9f35a05a8c08e968a491be8b8045a7e919e3246b3fa8de51a9163548860` |
+| **Lexical & Stemming Module (`v1.9.0`)** | [`src/retrieval-lexical.js`](../src/retrieval-lexical.js) | `1830010d07e1ac97111a1016fe52cbe5759c93faf6f559fe83cf9672507d7ddf` |
+| **Epistemic & Conflict Module (`v1.9.0`)** | [`src/retrieval-epistemic.js`](../src/retrieval-epistemic.js) | `19e87ecb8f704a2d41f97d70f187402db4df5ab77438bd3f70044dd96dfcbc07` |
 | **Stage-Aware Prune Helper** | [`src/prune-helper.js`](../src/prune-helper.js) | `7d62689937de065cc0da3a779fb50b1599dd46cb9a5cf749a376e87c4bbafb12` |
 | **Un-Gamified Benchmark Harness** | [`scripts/benchmark_official_beam.js`](../scripts/benchmark_official_beam.js) | `91d6268dd129fcc64d7dea8e42179b1134fd8049ed329ae6d4448010502f3979` |
+| **Primary Stock `400/400` Audit Log (`v1.9.0`)** | [`benchmarks/beam_100k_audit_log.json`](./beam_100k_audit_log.json) | `f80557bc1369224d79e0390f2d5c12d904f8e46e655f05a29cfd3d84ed7a0c1a` |
+| **Controlled QLoRA `400/400` Audit Log (`v1.9.0`)** | [`benchmarks/g4_closed_system/beam_100k_qlora_full400_audit_log.json`](./g4_closed_system/beam_100k_qlora_full400_audit_log.json) | `a7c720ba7a75ebd8241b283a00007ac38d838f29cb64921f62ffe006253e2464` |
 | **Reader Model (`gpt-oss:120b`)** | `ollama://gpt-oss:120b` | `714d86958b6e870a9320e78126ac1ce3477727a1cd9bf7194b8ace0d84c62fd8` |
 | **Primary Judge (`qwen2.5:32b`)** | `ollama://qwen2.5:32b` | `9f13ba1299afea09d9a956fc6a85becc99115a6d596fae201a5487a03bdc4368` |
 | **Continuity Judge (`hermes3:latest`)** | `ollama://hermes3:latest` | `4f6b83f30b62bc3d0cf9be09266db222805ee815c8fd7d8b38f863f655be78b7` |
@@ -81,11 +89,11 @@ To eliminate every external dependency questioned in peer review (multi-node LAN
 
 | # | Audit ID | Flaw / Limitation Identified | Remediation Applied & Enforced by `verify_zero_leakage.js` |
 | :- | :------- | :--------------------------- | :--------------------------------------------------------- |
-| **1** | **Tier-3 Stub Stuffing (R1)** | Compressing turns 23+ to 92-char user-only stubs (`~25` tok) packed all 140–196 turns into 8K tokens (`Recall@All = 100%`). | Removed `maxBodyChars = 92` and user-only slicing. Every packed turn preserves `USER:` + `\| ASSISTANT:` (`680 / 440 / 320` chars; `61.7` turns/query). Enforced by Check 5. |
+| **1** | **Tier-3 Stub Stuffing (R1)** | Compressing turns 23+ to 92-char user-only stubs (`~25` tok) packed all 140–196 turns into 8K tokens (`Recall@All = 100%`). | Removed `maxBodyChars = 92` and user-only slicing. Every packed turn preserves `USER:` + `\| ASSISTANT:` (`680 / 440 / 320` chars; `67.9` turns/query `<= 70.0`). Enforced by Check 5. |
 | **2** | **Judge False Positives (`BUG-06`, R2)** | Putting `"scores": [1.0]` before `"reason"` caused 8B `hermes3` to award `1.0` to wrong Reader answers (`March 31` vs `March 29`, `3 columns` vs `2`). | Switched Judge to `format: "json"` with `"reason"` **before** `"scores"`, removed concrete `1.0` schema anchors, and grounded grading against reference answers + rubrics. |
-| **3** | **Handicapped Legacy Baseline (`ARCH-04`, R2)** | `legacyRetrieveSimulation` packed `~7.5` un-condensed raw turns, making `"Fair Legacy 8K"` an unfair comparison against `~61.7` condensed turns. | Fixed punctuation tokenization in `Un-Condensed Lex 8K` (`30.74%`) and added **`Dense BGE-Large 8K` (`91.48%`)** using `bge-large` cosine similarity + identical `680 / 440 / 320` condensation. |
+| **3** | **Handicapped Legacy Baseline (`ARCH-04`, R2)** | `legacyRetrieveSimulation` packed `~7.5` un-condensed raw turns, making `"Fair Legacy 8K"` an unfair comparison against condensed turns. | Fixed punctuation tokenization in `Un-Condensed Lex 8K` (`30.74%`) and added **`Dense BGE-Large 8K` (`91.48%`)** using `bge-large` cosine similarity + identical `680 / 440 / 320` condensation. |
 | **4** | **Ingestion Regex Preprocessing (`ARCH-05`, R2)** | `buildBlindTurnsFromChat` ran `isInstruction` / `isPreference` regexes during ingestion to set `category = 'invariant'` and dual-write `ide_agent_nuggets`. | Deleted `isInstruction`, `isPreference`, and `insertNugget` from [`scripts/benchmark_official_beam.js`](../scripts/benchmark_official_beam.js) (banned in Check 2). Every turn is ingested uniformly as `category = 'decision'`. |
-| **5** | **Metric Conflation & Token Ratio (`ARCH-06`, R2)** | Placing 9-category Retrieval Recall next to 10-category End-to-End QA conflated retrieval with QA, and BPE ratios were undisclosed. | Separated **Table A (Retrieval Recall)** from **Table B (End-to-End QA)** and disclosed `30,780` chars = `~7,695` est. tokens (`@4.0`) $\approx$ `~8,670` BPE tokens (`@3.55`). |
+| **5** | **Metric Conflation & Token Ratio (`ARCH-06`, R2)** | Placing 9-category Retrieval Recall next to 10-category End-to-End QA conflated retrieval with QA, and BPE ratios were undisclosed. | Separated **Table A (Retrieval Recall)** from **Table B (End-to-End QA)** and disclosed `31,756` chars = `~7,939` est. tokens (`@4.0`) $\approx$ `~8,945` BPE tokens (`@3.55`). |
 | **6** | **Sample-Size & Single-Judge Variance (R3 External Critique)** | Preliminary Table B only evaluated `n = 20/400` (`5%` sample) with a single 8B Judge and relied on multi-host / cloud API endpoints; cold-room Hugging Face downloads failed on Python `repr()` strings. | Executed full **`n = 400/400`** closed-system runs on a single isolated G4 box (`127.0.0.1:11434`), added **Dual Cross-Family Judges (`qwen2.5:32b` + `hermes3:latest`)** verified in Check 4, and added zero-dependency [`parseJsonOrPythonLiteral`](../scripts/benchmark_official_beam.js) for standalone cold-room fetches. |
 
 ---
@@ -94,40 +102,40 @@ To eliminate every external dependency questioned in peer review (multi-node LAN
 
 ### Table A: 9-Category Ground-Truth Primary Turn Retrieval Recall (`n = 360` Questions with `source_chat_ids`)
 
-> *Measures pure retrieval accuracy of `krusch-context-mcp` (`unifiedRetrieve`) against upstream `source_chat_ids` using fresh cold-room `bge-large:latest` embeddings (Abstention has no ground-truth turn IDs by definition). Both `Dense BGE-Large 8K` (`~75.7` turns) and `Hybrid Packed 8K` (`~61.7` turns + timeline/epistemic headers) use identical `680 / 440 / 320` char `prunePreSynthesis` condensation within an `8,000`-estimated-token (`@ 4.0 chars/tok`, `30,780` chars $\approx$ `~8,670` BPE tokens) budget.*
+> *Measures pure retrieval accuracy of `krusch-context-mcp v1.9.0` (`unifiedRetrieve`) against upstream `source_chat_ids` using fresh cold-room `bge-large:latest` embeddings (Abstention has no ground-truth turn IDs by definition). Both `Dense BGE-Large 8K` (`~75.7` turns) and `Hybrid Packed 8K` (`~67.9` turns + timeline/state-evolution/epistemic headers) use identical `680 / 440 / 320` char `prunePreSynthesis` condensation within an `8,000`-estimated-token (`@ 4.0 chars/tok`, `31,756` chars $\approx$ `~8,945` BPE tokens) budget.*
 
-| BEAM Memory Category (40 Qs each) | Un-Condensed Lex 8K (`~7.5t`) | Condensed Dense `bge-large` 8K (`~75.7t`) | Hybrid `Recall@10` | Hybrid `Recall@20` | Hybrid `Recall@30` | Hybrid `Recall@50` | **Hybrid Packed 8K (`~61.7t`)** |
+| BEAM Memory Category (40 Qs each) | Un-Condensed Lex 8K (`~7.5t`) | Condensed Dense `bge-large` 8K (`~75.7t`) | Hybrid `Recall@10` | Hybrid `Recall@20` | Hybrid `Recall@30` | Hybrid `Recall@50` | **Hybrid Packed 8K (`~67.9t`)** |
 | :-------------------------------- | :---------------------------: | :---------------------------------------: | :----------------: | :----------------: | :----------------: | :----------------: | :-----------------------------: |
-| **Information Extraction (IE)** | `28.33%` | `95.00%` | `62.92%` | `71.25%` | `76.25%` | `90.00%` | **`95.00%`** |
-| **Knowledge Update (KU)** *(incl. Conv 14 Q1 Canary = 0)* | `58.54%` | `95.83%` | `82.50%` | `88.54%` | `92.08%` | `96.25%` | **`97.50%`** |
+| **Information Extraction (IE)** | `28.33%` | `95.00%` | `60.42%` | `67.92%` | `75.42%` | `90.00%` | **`95.00%`** |
+| **Knowledge Update (KU)** *(incl. Conv 14 Q1 Canary = 0)* | `58.54%` | `95.83%` | `85.00%` | `89.79%` | `92.08%` | `96.25%` | **`97.50%`** |
 | **Temporal Reasoning (TR)** | `53.75%` | `100.00%` | `88.75%` | `92.50%` | `97.50%` | `100.00%` | **`100.00%`** |
-| **Event Ordering (EO)** | `6.93%` | `72.28%` | `17.42%` | `31.23%` | `52.65%` | `67.78%` | **`77.50%`** |
-| **Contradiction Resolution (CR)** | `50.37%` | `95.75%` | `78.33%` | `86.25%` | `92.88%` | `98.75%` | **`100.00%`** |
-| **Multi-Session Reasoning (MSR)** | `26.48%` | `91.88%` | `55.63%` | `62.28%` | `74.05%` | `89.25%` | **`90.09%`** |
-| **Instruction Following (IF)** | `11.25%` | `97.50%` | `31.46%` | `77.29%` | `79.17%` | `93.75%` | **`96.25%`** |
-| **Preference Following (PF)** | `32.48%` | `99.15%` | `35.04%` | `78.21%` | `81.62%` | `91.45%` | **`96.58%`** |
-| **Summarization (SUM)** | `8.56%` | `75.91%` | `19.78%` | `33.95%` | `48.39%` | `66.38%` | **`75.01%`** |
-| **9-CATEGORY RETRIEVAL RECALL MEAN** | **`30.74%`** | **`91.48%`** | **`52.43%`** | **`69.06%`** | **`77.18%`** | **`88.18%`** | **`91.99%`** |
+| **Event Ordering (EO)** | `6.93%` | `72.28%` | `17.42%` | `30.81%` | `48.62%` | `68.96%` | **`80.08%`** |
+| **Contradiction Resolution (CR)** | `50.37%` | `95.75%` | `79.17%` | `85.00%` | `92.88%` | `98.75%` | **`100.00%`** |
+| **Multi-Session Reasoning (MSR)** | `26.48%` | `91.88%` | `55.63%` | `61.22%` | `72.38%` | `89.25%` | **`90.59%`** |
+| **Instruction Following (IF)** | `11.25%` | `97.50%` | `43.96%` | `77.29%` | `82.92%` | `96.25%` | **`100.00%`** |
+| **Preference Following (PF)** | `32.48%` | `99.15%` | `37.61%` | `75.64%` | `84.19%` | `94.02%` | **`96.58%`** |
+| **Summarization (SUM)** | `8.56%` | `75.91%` | `19.89%` | `32.80%` | `44.02%` | `66.38%` | **`76.96%`** |
+| **9-CATEGORY RETRIEVAL RECALL MEAN** | **`30.74%`** | **`91.48%`** | **`54.20%`** | **`68.11%`** | **`76.67%`** | **`88.87%`** | **`92.97%`** |
 
 ---
 
-### Table B: Full `400/400` 10-Category End-to-End Conversational QA — Closed-System Open-Weights `gpt-oss:120b` vs. Published `100K` Leaderboard
+### Table B: Full `400/400` 10-Category End-to-End Conversational QA — Closed-System Open-Weights `gpt-oss:120b` (`v1.9.0`) vs. Published `100K` Leaderboard
 
-> *Measures full-benchmark (`n = 400/400`) downstream answer generation inside the isolated G4 box (`2,598.2s` wall time). Every answer from unmodified open-weights `gpt-oss:120b` is graded independently by **both** `qwen2.5:32b` (32B dense primary referee) and `hermes3:latest` (8B continuity referee) against official `ideal_response` + `rubric` ground truth. Note: `past.dev` (`92.08%`) explicitly discloses single-model proprietary self-judging (`openai/gpt-5.6-luna` both answers and judges).*
+> *Measures full-benchmark (`n = 400/400`) downstream answer generation inside the isolated G4 box (`2,629.4s` wall time). Every answer from unmodified open-weights `gpt-oss:120b` is graded independently by **both** `qwen2.5:32b` (32B dense primary referee) and `hermes3:latest` (8B continuity referee) against official `ideal_response` + `rubric` ground truth. Note: `past.dev` (`92.08%`) explicitly discloses single-model proprietary self-judging (`openai/gpt-5.6-luna` both answers and judges).*
 
 | BEAM Memory Category | Eval Qs | **Stock `gpt-oss:120b` (`qwen2.5:32b` 32B Judge)** | **Stock `gpt-oss:120b` (`hermes3:latest` 8B Judge)** | `past.dev` (`100K`, `n=400`) | `past.dev` (`1M`) |
 | :------------------- | :-----: | :------------------------------------------------: | :--------------------------------------------------: | :--------------------------: | :---------------: |
-| **Information Extraction (IE)** | `40/40` | `71.41%` | `72.81%` | `95.00%` | `83.98%` |
-| **Knowledge Update (KU)** | `40/40` | `36.25%` | `41.25%` | `89.38%` | `85.71%` |
-| **Temporal Reasoning (TR)** | `40/40` | `76.88%` | `78.13%` | `95.00%` | `96.79%` |
-| **Event Ordering (EO)** | `40/40` | `5.64%` | `32.67%` | `100.00%` | `99.81%` |
-| **Contradiction Resolution (CR)** | `40/40` | **`80.94%`** | **`85.63%`** | `78.13%` | `75.36%` |
-| **Abstention (ABS)** | `40/40` | `60.00%` | `72.50%` | `98.75%` | `97.14%` |
-| **Multi-Session Reasoning (MSR)** | `40/40` | `57.15%` | `56.38%` | `68.95%` | `72.82%` |
-| **Instruction Following (IF)** | `40/40` | `76.25%` | `83.75%` | `96.25%` | `96.43%` |
-| **Preference Following (PF)** | `40/40` | `93.75%` | `83.75%` | `100.00%` | `98.87%` |
-| **Summarization (SUM)** | `40/40` | `80.94%` | `85.08%` | `99.38%` | `99.60%` |
-| **FULL 10-CAT E2E QA MEAN (`400/400`)** | **`400/400`** | **`63.92%`** | **`69.19%`** | **`92.08%`** | **`90.65%`** |
+| **Information Extraction (IE)** | `40/40` | `77.08%` | `80.21%` | `95.00%` | `83.98%` |
+| **Knowledge Update (KU)** | `40/40` | `47.50%` | `61.25%` | `89.38%` | `85.71%` |
+| **Temporal Reasoning (TR)** | `40/40` | `78.75%` | `80.00%` | `95.00%` | `96.79%` |
+| **Event Ordering (EO)** | `40/40` | `8.51%` | `36.25%` | `100.00%` | `99.81%` |
+| **Contradiction Resolution (CR)** | `40/40` | **`79.69%`** | **`85.00%`** | `78.13%` | `75.36%` |
+| **Abstention (ABS)** | `40/40` | `73.75%` | `85.00%` | `98.75%` | `97.14%` |
+| **Multi-Session Reasoning (MSR)** | `40/40` | `64.17%` | `64.81%` | `68.95%` | `72.82%` |
+| **Instruction Following (IF)** | `40/40` | `71.25%` | `76.88%` | `96.25%` | `96.43%` |
+| **Preference Following (PF)** | `40/40` | `91.25%` | `87.71%` | `100.00%` | `98.87%` |
+| **Summarization (SUM)** | `40/40` | `79.94%` | `78.19%` | `99.38%` | `99.60%` |
+| **FULL 10-CAT E2E QA MEAN (`400/400`)** | **`400/400`** | **`67.19%`** | **`73.53%`** | **`92.08%`** | **`90.65%`** |
 
 #### Published `Mohammadta/BEAM` (`100K`, `n = 400`) Overall Leaderboard Context
 
@@ -136,47 +144,45 @@ To eliminate every external dependency questioned in peer review (multi-node LAN
 | **`past.dev`** | Proprietary Cloud (`openai/gpt-5.6-luna`) | Self-judged (`gpt-5.6-luna`) | `92.08%` |
 | **`Hindsight`** | Cloud Memory Service | BEAM Judge | `86.20%` |
 | **`Exabase M-1`** | Cloud Memory Service | BEAM Judge | `76.90%` |
-| **`krusch-context-mcp v1.8.1`** *(Hermes-3 Judge)* | **Single-Box Closed System (`gpt-oss:120b` Open-Weights, `8K` budget)** | **Cross-Family (`hermes3:latest`)** | **`69.19%`** |
-| **`krusch-context-mcp v1.8.1`** *(Qwen-32B Judge)* | **Single-Box Closed System (`gpt-oss:120b` Open-Weights, `8K` budget)** | **Cross-Family (`qwen2.5:32b`)** | **`63.92%`** |
+| **`krusch-context-mcp v1.9.0`** *(Hermes-3 Judge)* | **Single-Box Closed System (`gpt-oss:120b` Open-Weights, `8K` budget)** | **Cross-Family (`hermes3:latest`)** | **`73.53%`** |
+| **`krusch-context-mcp v1.8.1`** *(Hermes-3 Judge)* | Single-Box Closed System (`gpt-oss:120b` Open-Weights, `8K` budget) | Cross-Family (`hermes3:latest`) | `69.19%` |
+| **`krusch-context-mcp v1.9.0`** *(Qwen-32B Judge)* | **Single-Box Closed System (`gpt-oss:120b` Open-Weights, `8K` budget)** | **Cross-Family (`qwen2.5:32b`)** | **`67.19%`** |
+| **`krusch-context-mcp v1.8.1`** *(Qwen-32B Judge)* | Single-Box Closed System (`gpt-oss:120b` Open-Weights, `8K` budget) | Cross-Family (`qwen2.5:32b`) | `63.92%` |
 | **`Honcho`** | Cloud Conversational Memory | BEAM Judge | `63.00%` |
 | **`MEMIR`** *(Jin et al., 2026)* | Academic Baseline | BEAM Judge | `48.26%` |
 
 ---
 
-### Table C: Controlled `400/400` Ablation — Stock `gpt-oss:120b` vs. `krush420/gpt-oss-120b-sre-lora` (QLoRA)
+### Table C: Controlled `400/400` Ablation (`v1.9.0`) — Stock `gpt-oss:120b` vs. `krush420/gpt-oss-120b-sre-lora` (QLoRA)
 
-> *Evaluates the exact same `unifiedRetrieve` contexts and blind Reader/Judge prompts after fusing our 144-pair (`r=16, alpha=32`) `BF16` SRE attention adapter ([`krush420/gpt-oss-120b-sre-lora`](https://huggingface.co/krush420/gpt-oss-120b-sre-lora)) directly into `gpt-oss:120b` in `1.71s` (`3,151.3s` full `400/400` wall time).*
+> *Evaluates the exact same `v1.9.0` `unifiedRetrieve` contexts and blind Reader/Judge prompts after fusing our 144-pair (`r=16, alpha=32`) `BF16` SRE attention adapter ([`krush420/gpt-oss-120b-sre-lora`](https://huggingface.co/krush420/gpt-oss-120b-sre-lora)) directly into `gpt-oss:120b` in `1.69s` (`3,307.0s` full `400/400` wall time).*
 
 | BEAM Memory Category (`n = 40` each) | Stock `120B` (`qwen2.5:32b`) | **QLoRA `120B-SRE` (`qwen2.5:32b`)** | $\Delta$ (`qwen2.5:32b`) | Stock `120B` (`hermes3`) | **QLoRA `120B-SRE` (`hermes3`)** | $\Delta$ (`hermes3`) |
 | :----------------------------------- | :--------------------------: | :----------------------------------: | :----------------------: | :----------------------: | :------------------------------: | :------------------: |
-| **Information Extraction (IE)** | `71.41%` | **`74.79%`** | **`+3.38 pp`** | `72.81%` | **`81.88%`** | **`+9.07 pp`** |
-| **Knowledge Update (KU)** | `36.25%` | **`38.75%`** | **`+2.50 pp`** | `41.25%` | **`53.75%`** | **`+12.50 pp`** |
-| **Temporal Reasoning (TR)** | **`76.88%`** | `68.13%` | `-8.75 pp` | **`78.13%`** | `70.00%` | `-8.13 pp` |
-| **Event Ordering (EO)** | **`5.64%`** | `5.25%` | `-0.39 pp` | **`32.67%`** | `21.07%` | `-11.60 pp` |
-| **Contradiction Resolution (CR)** | `80.94%` | **`85.31%`** | **`+4.37 pp`** | `85.63%` | **`93.75%`** | **`+8.12 pp`** |
-| **Abstention (ABS)** | **`60.00%`** | `58.75%` | `-1.25 pp` | **`72.50%`** | `63.75%` | `-8.75 pp` |
-| **Multi-Session Reasoning (MSR)** | **`57.15%`** | `55.83%` | `-1.32 pp` | **`56.38%`** | `53.13%` | `-3.25 pp` |
-| **Instruction Following (IF)** | `76.25%` | **`77.50%`** | **`+1.25 pp`** | **`83.75%`** | `78.75%` | `-5.00 pp` |
-| **Preference Following (PF)** | **`93.75%`** | **`93.75%`** | `0.00 pp` | `83.75%` | **`84.38%`** | **`+0.63 pp`** |
-| **Summarization (SUM)** | **`80.94%`** | `74.02%` | `-6.92 pp` | **`85.08%`** | `62.77%` | `-22.31 pp` |
-| **`n = 20` Software Gate (`Conv 1–2`)** | `71.00%` | **`76.33%`** | **`+5.33 pp`** | `70.00%` | **`76.50%`** | **`+6.50 pp`** |
-| **FULL 10-CAT MEAN (`n = 400/400`)** | **`63.92%`** | `63.21%` | `-0.71 pp` | **`69.19%`** | `66.32%` | `-2.87 pp` |
+| **Information Extraction (IE)** | `77.08%` | **`78.23%`** | **`+1.15 pp`** | **`80.21%`** | `79.48%` | `-0.73 pp` |
+| **Knowledge Update (KU)** | `47.50%` | **`48.75%`** | **`+1.25 pp`** | **`61.25%`** | `52.50%` | `-8.75 pp` |
+| **Temporal Reasoning (TR)** | **`78.75%`** | `76.25%` | `-2.50 pp` | **`80.00%`** | `75.00%` | `-5.00 pp` |
+| **Event Ordering (EO)** | **`8.51%`** | `2.81%` | `-5.70 pp` | **`36.25%`** | `25.86%` | `-10.39 pp` |
+| **Contradiction Resolution (CR)** | `79.69%` | **`85.31%`** | **`+5.62 pp`** | `85.00%` | **`97.50%`** | **`+12.50 pp`** |
+| **Abstention (ABS)** | **`73.75%`** | `52.50%` | `-21.25 pp` | **`85.00%`** | `70.00%` | `-15.00 pp` |
+| **Multi-Session Reasoning (MSR)** | **`64.17%`** | `61.63%` | `-2.54 pp` | **`64.81%`** | `55.63%` | `-9.18 pp` |
+| **Instruction Following (IF)** | `71.25%` | **`73.75%`** | **`+2.50 pp`** | **`76.88%`** | `73.75%` | `-3.13 pp` |
+| **Preference Following (PF)** | `91.25%` | **`92.50%`** | **`+1.25 pp`** | **`87.71%`** | `84.38%` | `-3.33 pp` |
+| **Summarization (SUM)** | **`79.94%`** | `69.00%` | `-10.94 pp` | `78.19%` | **`81.56%`** | **`+3.37 pp`** |
+| **FULL 10-CAT MEAN (`n = 400/400`)** | **`67.19%`** | `64.07%` | `-3.12 pp` | **`73.53%`** | `69.57%` | `-3.96 pp` |
 
 ---
 
-## 5. Architectural Diagnosis: Why `91.99%` Retrieval Recall Yields `63.92%–69.19%` End-to-End QA
+## 5. Architectural Diagnosis: Residual Gaps & Open-Weights Tradeoffs (`v1.9.0`)
 
-Evaluating all `400/400` questions exposes two genuine, non-gamified architectural bottlenecks that were previously masked on the `n = 20` stratified sample (excluding `EO` and `KU`, Stock `gpt-oss:120b` averages **`74.66%`** on `qwen2.5:32b` and **`77.25%`** on `hermes3:latest` across the other `320/400` questions):
+Excluding `Event Ordering` and `Knowledge Update`, unmodified Stock `gpt-oss:120b` averages **`76.99%`** on `qwen2.5:32b` and **`79.72%`** on `hermes3:latest` across the remaining `320/400` questions (up from `74.66%` / `77.25%` in `v1.8.1`). Three domain-honest structural boundaries account for the remaining gap to cloud `gpt-5.6-luna`:
 
-1. **Score-Ordered Packing vs. Strict N-Item Chronological `Event Ordering (EO)` (`77.50%` Recall $\rightarrow$ `5.64%` `qwen2.5:32b` / `32.67%` `hermes3`)**:
-   - BEAM `Event Ordering` prompts require listing *"ONLY and ONLY three [or five] items"* in the exact global sequence discussed across 140+ dialogue turns.
-   - Because `unifiedRetrieve` orders `[MEMORY]` blocks by **hybrid relevance score** rather than monotonically by `Turn #`, and condenses turns beyond rank 20 to `320` chars, the Reader frequently picks a sub-step from an adjacent turn or enumerates 4 items instead of 3—which the 32B `qwen2.5:32b` Judge strictly scores `0.0`.
-2. **Blind Passive Ingestion vs. Explicit `supersede` Lineage on `Knowledge Update (KU)` (`97.50%` Recall $\rightarrow$ `36.25%` Stock / `38.75%` QLoRA on `qwen2.5:32b`, `53.75%` QLoRA on `hermes3`)**:
-   - In production IDE usage, coding agents call `krusch_context_revise(action: "supersede", target_id)` to retire stale facts (`status = 'SUPERSEDED'`).
-   - Under our strict anti-gaming protocol (`ARCH-05`), all `2,866` dialogue turns are ingested **100% passively and uniformly** (`category = 'decision'`, `status = 'ACTIVE'`, `supersedes_id = NULL`). Consequently, `unifiedRetrieve` retrieves *both* the original turn and the updated turn (`97.50%` recall), forcing the Reader to resolve state mutations purely from `[Session S | Turn #X/Y]` timestamps across 61 relevance-sorted blocks. Notably, `krush420/gpt-oss-120b-sre-lora` improves `KU` by **`+2.50 pp` (`qwen2.5:32b`) / `+12.50 pp` (`hermes3`)** and `CR` by **`+4.37 pp` (`qwen2.5:32b`) / `+8.12 pp` (`hermes3`)** because SRE trajectory training reinforces timestamp and contradiction inspection.
-3. **Domain Specialization vs. General Conversational Prose (`Table C`)**:
-   - On technical/structured conversations (`Conv 1` Python/Flask `+11.5 pp`, `Conv 4` Geometry `+14.9 pp`, `Conv 17` Time Management `+16.7 pp`, `Conv 20` Patent Filing `+12.5 pp`), the SRE QLoRA strongly outperforms Stock `gpt-oss:120b`, whereas on long-form essay/career prose (`Conv 8` Cover Letter `-10.2 pp`, `Conv 9` Personal Statement `-18.3 pp`, `Summarization` `-6.92 pp`), concise SRE telemetry formatting scores lower against verbose paragraph rubrics.
-4. **Remaining Scope Boundary (`1M` / `10M` Splits)**:
+1. **Strict Exact-Count `Event Ordering (EO)` (`80.08%` Recall $\rightarrow$ `8.51%` `qwen2.5:32b` / `36.25%` `hermes3`)**:
+   - Placing compact 24-milestone `Chronological Event Sequence` headers at the top of the prompt lifted `EO` retrieval recall by `+2.58 pp` (`77.50%` $\rightarrow$ `80.08%`) and E2E QA by `+2.87 pp` / `+3.58 pp`.
+   - However, BEAM `EO` rubrics require listing *"ONLY and ONLY three [or five] macro-events"* across 140+ turns without merging or splitting sub-topics; any count mismatch (`4` items vs `3`) is strictly graded `0.0` by `qwen2.5:32b`.
+2. **Passive Blind Ingestion vs. Explicit `supersede` Lineage on `Knowledge Update (KU)` (`97.50%` Recall $\rightarrow$ `47.50%` Stock / `48.75%` QLoRA on `qwen2.5:32b`, `61.25%` Stock on `hermes3`)**:
+   - Under `ARCH-05` uniform blind ingestion (`category = 'decision'`, `supersedes_id = NULL`), `v1.9.0`'s passive `detectTemporalUpdates` (`### 🔄 Chronological State Evolution`) delivered **`+11.25 pp` (`qwen2.5:32b`) and `+20.00 pp` (`hermes3`)** over `v1.8.1`. Remaining misses occur when conversational updates use implicit pronoun references rather than shared lexical subject tokens, whereas production IDE sessions invoke `krusch_context_revise(action: "supersede")` explicitly.
+3. **Remaining Scope Boundary (`1M` / `10M` Splits)**:
    - Only the official `100K` split (`20` conversations, `~3.06M` corpus tokens, `400` questions) has been evaluated to date; `1M` and `10M` splits remain future work.
 
 ---
@@ -190,7 +196,6 @@ npm test
 # 2. Verify SHA-256 provenance, zero oracle leakage, turn-ID recall math & Dual Judge tallies (all 400 Qs)
 npm run bench:beam:verify
 node benchmarks/verify_zero_leakage.js --audit-log=benchmarks/g4_closed_system/beam_100k_qlora_full400_audit_log.json
-node benchmarks/verify_zero_leakage.js --audit-log=benchmarks/beam_100k_v1_9_0_retrieval_audit.json
 
 # 3. Reproduce the entire hermetic single-box Closed-System 400/400 + QLoRA A/B run on Colab G4 (96GB Blackwell)
 ./scripts/run_beam_closed_g4.sh
@@ -204,30 +209,26 @@ node scripts/benchmark_official_beam.js --full-judge
 
 ---
 
-## 7. Addendum: `v1.9.0` Retrieval, FTS5 & Epistemic Architecture Upgrade (`2026-10-25`)
+## 7. Controlled Version Progression: `v1.8.1` $\rightarrow$ `v1.9.0` Closed-System Colab G4 (`n = 400/400`)
 
-Directly addressing the bottlenecks diagnosed in Section 5 while strictly preserving the 5-verb MCP surface and zero-gaming protocol (`5/5` checks in [`benchmarks/verify_zero_leakage.js`](./verify_zero_leakage.js)), `krusch-context-mcp v1.9.0` introduces five domain-agnostic engine upgrades:
+Both `v1.8.1` (`2026-10-24`) and `v1.9.0` (`2026-10-25`) were executed on identical **96 GB NVIDIA RTX PRO 6000 Blackwell** instances against the exact same dataset SHA-256 (`d542da9e...`), unmodified benchmark harness SHA-256 (`91d6268d...`), and identical Ollama model digests (`gpt-oss:120b` `714d8695...`, `qwen2.5:32b` `9f13ba12...`, `hermes3:latest` `4f6b83f3...`, `bge-large:latest` `b3d71c92...`), isolating the impact of the five `v1.9.0` engine upgrades:
 
-1. **Compact Binary `Float32Array` Vector Blobs (`embedding_blob`)**: Stores `1024`-dim embeddings in `4,096`-byte little-endian `BLOB` columns (`~4.5x` smaller than JSON text) with lazy startup backfill and unaligned buffer-slice safety (`src/sqlite-engine.js`).
-2. **External-Content Porter-Stemmed SQLite `FTS5` (`ide_agent_memory_fts`)**: Replaces `O(N)` `LIKE` full-table scans beyond `KRUSCH_MAX_ACTIVE_SCAN` with BM25-ranked `FTS5` deep lexical retrieval (`searchMemoryFts`) synchronized via `INSERT`/`UPDATE`/`DELETE` triggers.
-3. **Passive `Chronological State Evolution` & `Lexical Grounding Note` (`src/retrieval-epistemic.js`)**: Surfaces `### 🔄 Chronological State Evolution (Earlier → Latest)` when passive conversational turns mutate a shared subject without `supersede` calls, and emits a non-suppressing `> ℹ️ **Lexical Grounding Note**` when distinctive query terms have zero corpus occurrences.
-4. **Top-Placed Compact `Chronological Event Sequence` (`src/unified-retrieval.js`)**: Places compact 24-milestone `(Session S · Date)` sequence summaries above `[MEMORY]` blocks on explicit sequence-ordering queries (`isSequenceOrderQuery`), freeing token headroom (`67.9` vs `61.7` substantive turns packed within `<= 70.0` turns).
-5. **Speech-Act Directive Stratification & Continuous Relevance Tie-Breaking (`src/retrieval-lexical.js`, `src/unified-retrieval.js`)**: Routes standing directives into Top-10/Top-20 slots on generative/advisory requests (`isGenerativeOrAdvisoryQuery`) while preserving continuous `_unclampedScore` tie-breaking across hybrid boosts and RM3 pseudo-relevance feedback.
+1. **Compact Binary `Float32Array` Vector Blobs (`embedding_blob`)**: `4,096`-byte little-endian `BLOB` storage (`~4.5x` smaller than JSON text) with unaligned buffer-slice safety (`src/sqlite-engine.js`).
+2. **External-Content Porter-Stemmed SQLite `FTS5` (`ide_agent_memory_fts`)**: BM25-ranked `searchMemoryFts` synchronized via `INSERT`/`UPDATE`/`DELETE` triggers.
+3. **Passive `Chronological State Evolution` & `Lexical Grounding Note` (`src/retrieval-epistemic.js`)**: `detectTemporalUpdates` surfaces passive subject mutations (`KU +11.25 pp / +20.00 pp`), while `computeCorpusUnattestedTerms` flags unattested query entities (`ABS +13.75 pp / +12.50 pp`).
+4. **Top-Placed Compact `Chronological Event Sequence` (`src/unified-retrieval.js`)**: Compact 24-milestone sequence headers above `[MEMORY]` blocks on sequence-ordering queries (`EO` Recall `+2.58 pp`, E2E `+2.87 pp / +3.58 pp`; `67.9` vs `61.7` packed turns `<= 70.0`).
+5. **Speech-Act Directive Stratification & Continuous `_unclampedScore` Tie-Breaking (`src/retrieval-lexical.js`, `src/unified-retrieval.js`)**: Lifts `IF` Recall to `100.00%` (`R@10 +12.50 pp`) and overall `R@10` from `52.43%` to `54.20%` (`+1.77 pp`).
 
-### `v1.8.1` vs. `v1.9.0` Ground-Truth Primary Turn Retrieval Recall (`n = 360` Questions across 9 Categories)
-
-> **Audit Log**: [`benchmarks/beam_100k_v1_9_0_retrieval_audit.json`](./beam_100k_v1_9_0_retrieval_audit.json) (`src/unified-retrieval.js` SHA-256: `b19dd9f35a05a8c08e968a491be8b8045a7e919e3246b3fa8de51a9163548860`, `src/retrieval-lexical.js` SHA-256: `1830010d07e1ac97111a1016fe52cbe5759c93faf6f559fe83cf9672507d7ddf`, `src/retrieval-epistemic.js` SHA-256: `19e87ecb8f704a2d41f97d70f187402db4df5ab77438bd3f70044dd96dfcbc07`; `Conv 14 KU Q1` Canary = `0.00`).
-
-| BEAM Memory Category (`n = 40` each) | `v1.8.1` `R@10` | **`v1.9.0` `R@10`** | `v1.8.1` `R@50` | **`v1.9.0` `R@50`** | `v1.8.1` Packed `8K` (`61.7t`) | **`v1.9.0` Packed `8K` (`67.9t`)** | $\Delta$ Packed `8K` |
-| :----------------------------------- | :-------------: | :-----------------: | :-------------: | :-----------------: | :----------------------------: | :--------------------------------: | :------------------: |
-| **Information Extraction (IE)** | `62.92%` | `60.42%` | `90.00%` | `90.00%` | `95.00%` | **`95.00%`** | `0.00 pp` |
-| **Knowledge Update (KU)** *(Canary = 0)* | `82.50%` | **`85.00%`** | `96.25%` | `96.25%` | `97.50%` | **`97.50%`** | `0.00 pp` |
-| **Temporal Reasoning (TR)** | `88.75%` | **`88.75%`** | `100.00%` | **`100.00%`** | `100.00%` | **`100.00%`** | `0.00 pp` |
-| **Event Ordering (EO)** | `17.42%` | **`17.42%`** | `67.78%` | **`68.96%`** | `77.50%` | **`80.50%`** | **`+3.00 pp`** |
-| **Contradiction Resolution (CR)** | `78.33%` | **`79.17%`** | `98.75%` | **`98.75%`** | `100.00%` | **`100.00%`** | `0.00 pp` |
-| **Multi-Session Reasoning (MSR)** | `55.63%` | **`55.63%`** | `89.25%` | **`89.25%`** | `90.09%` | **`90.59%`** | **`+0.50 pp`** |
-| **Instruction Following (IF)** | `31.46%` | **`43.96%`** | `93.75%` | **`96.25%`** | `96.25%` | **`100.00%`** | **`+3.75 pp`** |
-| **Preference Following (PF)** | `35.04%` | **`37.61%`** | `91.45%` | **`94.02%`** | `96.58%` | **`96.58%`** | `0.00 pp` |
-| **Summarization (SUM)** | `19.78%` | **`19.89%`** | `66.38%` | **`66.38%`** | `75.01%` | **`76.96%`** | **`+1.95 pp`** |
-| **9-CATEGORY RETRIEVAL RECALL MEAN** | `52.43%` | **`54.20%`** | `88.18%` | **`88.87%`** | `91.99%` | **`93.01%`** | **`+1.02 pp`** |
-
+| BEAM Memory Category (`40/40` Qs each) | `v1.8.1` Recall `8K` | **`v1.9.0` Recall `8K`** | `v1.8.1` Stock E2E (`32B` / `8B`) | **`v1.9.0` Stock E2E (`32B` / `8B`)** | $\Delta$ E2E (`qwen2.5:32b` / `hermes3`) |
+| :------------------------------------- | :------------------: | :----------------------: | :-------------------------------: | :-----------------------------------: | :--------------------------------------: |
+| **Information Extraction (IE)** | `95.00%` | **`95.00%`** | `71.41%` / `72.81%` | **`77.08%` / `80.21%`** | **`+5.67 pp` / `+7.40 pp`** |
+| **Knowledge Update (KU)** *(Canary = 0)* | `97.50%` | **`97.50%`** | `36.25%` / `41.25%` | **`47.50%` / `61.25%`** | **`+11.25 pp` / `+20.00 pp`** |
+| **Temporal Reasoning (TR)** | `100.00%` | **`100.00%`** | `76.88%` / `78.13%` | **`78.75%` / `80.00%`** | **`+1.87 pp` / `+1.87 pp`** |
+| **Event Ordering (EO)** | `77.50%` | **`80.08%`** | `5.64%` / `32.67%` | **`8.51%` / `36.25%`** | **`+2.87 pp` / `+3.58 pp`** |
+| **Contradiction Resolution (CR)** | `100.00%` | **`100.00%`** | `80.94%` / `85.63%` | **`79.69%` / `85.00%`** | `-1.25 pp` / `-0.63 pp` |
+| **Abstention (ABS)** | `—` | `—` | `60.00%` / `72.50%` | **`73.75%` / `85.00%`** | **`+13.75 pp` / `+12.50 pp`** |
+| **Multi-Session Reasoning (MSR)** | `90.09%` | **`90.59%`** | `57.15%` / `56.38%` | **`64.17%` / `64.81%`** | **`+7.02 pp` / `+8.43 pp`** |
+| **Instruction Following (IF)** | `96.25%` | **`100.00%`** | `76.25%` / `83.75%` | `71.25%` / `76.88%` | `-5.00 pp` / `-6.87 pp` |
+| **Preference Following (PF)** | `96.58%` | **`96.58%`** | `93.75%` / `83.75%` | **`91.25%` / `87.71%`** | `-2.50 pp` / **`+3.96 pp`** |
+| **Summarization (SUM)** | `75.01%` | **`76.96%`** | `80.94%` / `85.08%` | `79.94%` / `78.19%` | `-1.00 pp` / `-6.89 pp` |
+| **OVERALL MEAN (`360` Recall / `400` E2E)** | `91.99%` | **`92.97%`** | `63.92%` / `69.19%` | **`67.19%` / `73.53%`** | **`+3.27 pp` / `+4.34 pp`** |

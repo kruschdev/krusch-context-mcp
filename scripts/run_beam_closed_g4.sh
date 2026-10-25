@@ -105,7 +105,7 @@ if [ "$UPLOAD_OK" -ne 1 ]; then
   exit 1
 fi
 
-echo "[beam-g4] Executing closed-system full 400/400 BEAM benchmark + QLoRA A/B inside G4..."
+echo "[beam-g4] Phase A: Provisioning clean-room + running Full 400/400 Stock gpt-oss:120b inside G4..."
 "$COLAB_BIN" exec -s "$SESSION" --timeout 7200 << 'PYEOF'
 import json, os, select, shutil, subprocess, sys, time, urllib.request
 
@@ -140,7 +140,7 @@ def run_stream(cmd_args, cwd=None, env=None, shell=False):
         raise RuntimeError(f"Command {cmd_args} exited with code {rc}")
 
 print("=== [Stage 1/4] Provisioning Clean-Room Environment (Node 22 + Ollama Loopback) ===", flush=True)
-run_stream("rm -rf /root/beam-cleanroom /tmp/beam_100k_official.json /tmp/beam_100k_clean_embeddings.json && mkdir -p /root/beam-cleanroom && tar -xzf /content/beam-closed-bundle.tar.gz -C /root/beam-cleanroom", shell=True)
+run_stream("rm -rf /root/beam-cleanroom /tmp/beam_100k_official.json /tmp/beam_100k_clean_embeddings.json /content/beam_100k_*.json && mkdir -p /root/beam-cleanroom && tar -xzf /content/beam-closed-bundle.tar.gz -C /root/beam-cleanroom", shell=True)
 
 # Ensure Node.js >= 22 is installed
 need_node22 = True
@@ -223,6 +223,8 @@ closed_meta = {
     "gemini_api_key_present": False,
     "ollama_model_sha256_digests": model_digests,
 }
+with open("/tmp/beam_closed_meta.json", "w", encoding="utf-8") as mfh:
+    json.dump(closed_meta, mfh)
 
 bench_env = os.environ.copy()
 bench_env.pop("GEMINI_API_KEY", None)
@@ -254,11 +256,68 @@ shutil.copy2(
     "/root/beam-cleanroom/krusch-context-mcp/benchmarks/beam_100k_audit_log.json",
     "/content/beam_100k_audit_log.json",
 )
+print("=== PHASE A (STOCK 400/400) COMPLETE ===", flush=True)
+PYEOF
+
+echo "[beam-g4] Checkpointing Phase A Stock 400/400 audit log onto local disk..."
+mkdir -p "$MCP_ROOT/benchmarks/g4_closed_system"
+rm -f /tmp/phase_a_stock_audit_log.json /tmp/beam_g4_results.tar.gz
+PHASE_A_OK=0
+for attempt in 1 2 3 4 5; do
+  if "$COLAB_BIN" download -s "$SESSION" /content/beam_100k_audit_log.json /tmp/phase_a_stock_audit_log.json; then
+    PHASE_A_OK=1
+    cp /tmp/phase_a_stock_audit_log.json "$MCP_ROOT/benchmarks/g4_closed_system/beam_100k_audit_log.json"
+    cp /tmp/phase_a_stock_audit_log.json "$MCP_ROOT/benchmarks/beam_100k_audit_log.json"
+    break
+  fi
+  sleep 4
+done
+if [ "$PHASE_A_OK" -ne 1 ]; then
+  echo "[beam-g4] ERROR: Phase A did not produce /content/beam_100k_audit_log.json; aborting before Phase B."
+  exit 1
+fi
+
+echo "[beam-g4] Phase B: Fusing krush420/gpt-oss-120b-sre-lora In-Place & Running Controlled 400/400 QLoRA Ablation..."
+"$COLAB_BIN" exec -s "$SESSION" --timeout 7200 << 'PYEOF'
+import json, os, select, subprocess, sys, time, urllib.request
+
+os.environ["PATH"] = "/usr/local/node22/bin:/usr/local/bin:" + os.environ.get("PATH", "")
+
+def run_stream(cmd_args, cwd=None, env=None, shell=False):
+    proc = subprocess.Popen(
+        cmd_args,
+        cwd=cwd,
+        env=env,
+        shell=shell,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    fd = proc.stdout.fileno()
+    t0 = time.monotonic()
+    while True:
+        rlist, _, _ = select.select([fd], [], [], 20.0)
+        if rlist:
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                break
+            text = chunk.decode("utf-8", errors="replace").replace("\r", "\n")
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        else:
+            if proc.poll() is not None:
+                break
+            elapsed = int(time.monotonic() - t0)
+            sys.stdout.write(f"[beam-g4] heartbeat ({elapsed}s elapsed)...\n")
+            sys.stdout.flush()
+    rc = proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"Command {cmd_args} exited with code {rc}")
 
 with open("/content/beam_100k_audit_log.json", "r", encoding="utf-8") as fh:
     stock_report = json.load(fh)
+with open("/tmp/beam_closed_meta.json", "r", encoding="utf-8") as mfh:
+    closed_meta = json.load(mfh)
 
-# Compute exact n=20 stratified slice (conv <= 2 && question_index == 0) from stock 400/400 run for A/B gate
 stock_n20_entries = [
     e for e in stock_report["audit_log"]
     if e["conversation_id"] <= 2 and e["question_index"] == 0 and e.get("llm_judge_score") is not None
@@ -273,9 +332,8 @@ print(
 )
 
 if os.path.exists("/root/beam-cleanroom/lora/adapter.gguf"):
-    print("=== [Stage 4/4] Fusing krush420/gpt-oss-120b-sre-lora In-Place for Controlled A/B Ablation ===", flush=True)
+    print("=== [Stage 4/4] Fusing krush420/gpt-oss-120b-sre-lora In-Place for Controlled 400/400 A/B Ablation ===", flush=True)
     try:
-        # Evict stock gpt-oss:120b from VRAM so GGUF file can be modified cleanly in-place
         evict_req = urllib.request.Request(
             "http://127.0.0.1:11434/api/generate",
             data=json.dumps({"model": "gpt-oss:120b", "keep_alive": 0}).encode("utf-8"),
@@ -302,7 +360,6 @@ if os.path.exists("/root/beam-cleanroom/lora/adapter.gguf"):
         ])
         run_stream(["ollama", "cp", "gpt-oss:120b", "gpt-oss-120b-sre-qlora:latest"])
 
-        # Warm fused model into VRAM
         warm_req = urllib.request.Request(
             "http://127.0.0.1:11434/api/generate",
             data=json.dumps({"model": "gpt-oss-120b-sre-qlora:latest", "prompt": "ok", "stream": False, "keep_alive": -1, "options": {"num_ctx": 16384, "num_predict": 1}}).encode("utf-8"),
@@ -310,58 +367,39 @@ if os.path.exists("/root/beam-cleanroom/lora/adapter.gguf"):
         )
         urllib.request.urlopen(warm_req, timeout=180).read()
 
-        qlora_env = bench_env.copy()
+        qlora_env = os.environ.copy()
+        qlora_env.pop("GEMINI_API_KEY", None)
+        qlora_env["GEMINI_API_KEY"] = ""
+        qlora_env["OLLAMA_EMBED_URL"] = "http://127.0.0.1:11434/api/embed"
+        qlora_env["OLLAMA_READER_URL"] = "http://127.0.0.1:11434/api/chat"
+        qlora_env["OLLAMA_JUDGE_URL"] = "http://127.0.0.1:11434/api/chat"
         qlora_env["READER_MODEL"] = "gpt-oss-120b-sre-qlora:latest"
+        qlora_env["OLLAMA_READER_THINK"] = "low"
+        qlora_env["OLLAMA_READER_NUM_PREDICT"] = "2560"
+        qlora_env["OLLAMA_JUDGE_MODEL"] = "qwen2.5:32b"
+        qlora_env["OLLAMA_SECONDARY_JUDGE_MODEL"] = "hermes3:latest"
+        qlora_env["OLLAMA_JUDGE_NUM_CTX"] = "4096"
+        qlora_env["BEAM_JUDGE_CONCURRENCY"] = "3"
         qlora_meta = dict(closed_meta)
         qlora_meta["qlora_adapter"] = "krush420/gpt-oss-120b-sre-lora (r=16, alpha=32, 288 q/k/v/o attention matrices fused in-place)"
         qlora_env["BEAM_CLOSED_SYSTEM_META"] = json.dumps(qlora_meta)
 
+        print("[beam-g4] Running Full 400/400 QLoRA Controlled Ablation...", flush=True)
         run_stream(
             [
                 "node", "scripts/benchmark_official_beam.js",
-                "--judge-convs=2",
-                "--results-out=/tmp/beam_qlora_n20_results.json",
-                "--audit-log-out=/content/beam_100k_qlora_n20_audit_log.json",
+                "--full-judge",
+                "--results-out=/tmp/beam_qlora_full400_results.json",
+                "--audit-log-out=/content/beam_100k_qlora_full400_audit_log.json",
             ],
             cwd="/root/beam-cleanroom/krusch-context-mcp",
             env=qlora_env,
         )
         run_stream(
-            ["node", "benchmarks/verify_zero_leakage.js", "--audit-log=/content/beam_100k_qlora_n20_audit_log.json"],
+            ["node", "benchmarks/verify_zero_leakage.js", "--audit-log=/content/beam_100k_qlora_full400_audit_log.json"],
             cwd="/root/beam-cleanroom/krusch-context-mcp",
             env=qlora_env,
         )
-
-        with open("/content/beam_100k_qlora_n20_audit_log.json", "r", encoding="utf-8") as fh:
-            qlora_n20_report = json.load(fh)
-        qlora_n20_primary = qlora_n20_report["overall"]["llm_judge_10cat_pct"]
-        qlora_n20_sec = qlora_n20_report["overall"].get("secondary_llm_judge_10cat_pct")
-        print(
-            f"\n[beam-g4] A/B Gate Comparison (n=20/400):\n"
-            f"   • Stock gpt-oss:120b        : qwen2.5:32b={stock_n20_primary}% | hermes3:latest={stock_n20_sec}%\n"
-            f"   • QLoRA gpt-oss-120b-sre    : qwen2.5:32b={qlora_n20_primary}% | hermes3:latest={qlora_n20_sec}%\n",
-            flush=True,
-        )
-
-        if qlora_n20_primary is not None and qlora_n20_primary > stock_n20_primary:
-            print("[beam-g4] 🚀 QLoRA BEAT stock on n=20 gate! Auto-promoting to Full 400/400 evaluation...", flush=True)
-            run_stream(
-                [
-                    "node", "scripts/benchmark_official_beam.js",
-                    "--full-judge",
-                    "--results-out=/tmp/beam_qlora_full400_results.json",
-                    "--audit-log-out=/content/beam_100k_qlora_full400_audit_log.json",
-                ],
-                cwd="/root/beam-cleanroom/krusch-context-mcp",
-                env=qlora_env,
-            )
-            run_stream(
-                ["node", "benchmarks/verify_zero_leakage.js", "--audit-log=/content/beam_100k_qlora_full400_audit_log.json"],
-                cwd="/root/beam-cleanroom/krusch-context-mcp",
-                env=qlora_env,
-            )
-        else:
-            print("[beam-g4] Stock unmodified gpt-oss:120b matched or outperformed SRE QLoRA on conversational QA gate; conserving Compute Units.", flush=True)
     except Exception as ab_err:
         print(f"[beam-g4] WARNING: QLoRA A/B stage encountered non-fatal error (stock 400/400 audit log is safely preserved): {ab_err}", flush=True)
 
@@ -370,9 +408,10 @@ print("=== ALL G4 BENCHMARK STAGES COMPLETE! ARTIFACTS PACKAGED AT /content/beam
 PYEOF
 
 echo "[beam-g4] Downloading verified results bundle from G4..."
-mkdir -p "$MCP_ROOT/benchmarks/g4_closed_system"
+BUNDLE_OK=0
 for attempt in 1 2 3 4 5; do
   if "$COLAB_BIN" download -s "$SESSION" /content/beam_g4_results.tar.gz /tmp/beam_g4_results.tar.gz; then
+    BUNDLE_OK=1
     break
   fi
   sleep 4
@@ -381,10 +420,15 @@ done
 if [ ! -f /tmp/beam_100k_official.json ]; then
   "$COLAB_BIN" download -s "$SESSION" /tmp/beam_100k_official.json /tmp/beam_100k_official.json || true
 fi
-tar -xzf /tmp/beam_g4_results.tar.gz -C "$MCP_ROOT/benchmarks/g4_closed_system/"
-cp "$MCP_ROOT/benchmarks/g4_closed_system/beam_100k_audit_log.json" "$MCP_ROOT/benchmarks/beam_100k_audit_log.json"
+if [ "$BUNDLE_OK" -eq 1 ]; then
+  tar -xzf /tmp/beam_g4_results.tar.gz -C "$MCP_ROOT/benchmarks/g4_closed_system/"
+  cp "$MCP_ROOT/benchmarks/g4_closed_system/beam_100k_audit_log.json" "$MCP_ROOT/benchmarks/beam_100k_audit_log.json"
+fi
 
 echo "[beam-g4] Running local cryptographic & mathematical verification (npm run bench:beam:verify)..."
 (cd "$MCP_ROOT" && npm run bench:beam:verify)
+if [ -f "$MCP_ROOT/benchmarks/g4_closed_system/beam_100k_qlora_full400_audit_log.json" ]; then
+  (cd "$MCP_ROOT" && node benchmarks/verify_zero_leakage.js --audit-log=benchmarks/g4_closed_system/beam_100k_qlora_full400_audit_log.json)
+fi
 
 echo "[beam-g4] Closed-system G4 benchmark completed and verified! Teardown will now run via EXIT trap."
