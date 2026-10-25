@@ -203,7 +203,22 @@ In v1.8.0, **Codebase RAG was decoupled into [krusch-git](https://github.com/kru
 
 ---
 
-## 5. Quickstart
+## 5. Empirical Validation: Official ICLR 2026 BEAM (`100K` Split, `n = 400/400` Closed-System G4)
+
+To verify retrieval and reasoning performance without self-grading bias, cloud APIs, or benchmark gaming, `krusch-context-mcp` (`v1.8.1`) was evaluated across **all `400/400` probing questions** (`20` multi-session conversations, `~3.06M` corpus tokens) of the official ICLR 2026 **`Mohammadta/BEAM`** (`100K`) benchmark inside a hermetic single-box **96 GB NVIDIA RTX PRO 6000 Blackwell** environment (`127.0.0.1:11434` loopback only, fresh embeddings, zero oracle leakage enforced by [`benchmarks/verify_zero_leakage.js`](../benchmarks/verify_zero_leakage.js)):
+
+| Metric / Evaluation Track | Baseline / Reference | `krusch-context-mcp v1.8.1` |
+| :--- | :---: | :---: |
+| **9-Category Primary-Turn Retrieval Recall (`n = 360`, `~8K` budget)** | `30.74%` Un-Condensed Lex (`~7.5` turns)<br>`91.48%` Condensed Dense `bge-large` (`~75.7` turns) | **`91.99%`** Hybrid `unifiedRetrieve` (`~61.7` turns; `100%` on Temporal Reasoning & Contradiction Resolution) |
+| **Full `400/400` Closed-System E2E QA (Stock `gpt-oss:120b` Reader)** | `Honcho` (`63.00%`) · `MEMIR` (`48.26%`)<br>`Exabase M-1` (`76.90%`) · `past.dev` (`92.08%`, cloud self-judged) | **`69.19%`** (`hermes3:latest` 8B Judge)<br>**`63.92%`** (`qwen2.5:32b` 32B Judge, `87.00%` binary inter-judge agreement) |
+| **Full `40/40` Contradiction Resolution E2E QA** | `past.dev` (`78.13%`) | **`80.94%` / `85.63%`** (Stock `120B`)<br>**`85.31%` / `93.75%`** ([`gpt-oss-120b-sre-lora`](https://huggingface.co/krush420/gpt-oss-120b-sre-lora)) |
+| **Upstream Canary Trap (`Conv 14 KU Q1`)** | `0.00` = Blind / Un-Gamed | **`0.00` (`5/5` integrity checks passed)** |
+
+See the full methodology, SHA-256 digests, Dual Cross-Family Judge breakdown, and Stock vs. QLoRA `120B` ablation in [`benchmarks/BEAM_EMPIRICAL_REPORT.md`](../benchmarks/BEAM_EMPIRICAL_REPORT.md).
+
+---
+
+## 6. Quickstart
 
 Get persistent, self-governing memory in any repository:
 
