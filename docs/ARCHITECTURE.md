@@ -13,7 +13,7 @@ A lean, durable, and domain-agnostic **Universal Memory and Steering Engine** fo
                                │ MCP Protocol (5 Verbs)
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  krusch-context-mcp (v1.8.1)                │
+│                  krusch-context-mcp (v1.9.0)                │
 │                                                             │
 │   retrieve        remember        revise     nudge   health │
 │   (budget)     (dup-detection)  (lineage)   (audit)  (TTL)  │
@@ -32,8 +32,8 @@ A lean, durable, and domain-agnostic **Universal Memory and Steering Engine** fo
 
 ## 2. Storage Schemas & Data Model
 
-### `ide_agent_memory` (Episodic Knowledge)
-Stores historical learnings, decisions, and constraints with temporal lineage and provenance.
+### `ide_agent_memory` (Episodic Knowledge) + `ide_agent_memory_fts` (Porter FTS5)
+Stores historical learnings, decisions, and constraints with temporal lineage, compact binary `Float32Array` embeddings, and trigger-synchronized external-content Porter-stemmed `FTS5` full-text search (`ide_agent_memory_fts`).
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
@@ -42,7 +42,8 @@ Stores historical learnings, decisions, and constraints with temporal lineage an
 | `category` | `TEXT NOT NULL` | Closed set: `decision`, `bug`, `invariant`, `lesson`, `blocker`. |
 | `content` | `TEXT NOT NULL` | Factual content or constraint. |
 | `tags` | `TEXT` | JSON string array of searchable tags. |
-| `embedding` | `TEXT` / `VECTOR(1024)` | 1024-dimensional dense representation. |
+| `embedding` | `TEXT` / `VECTOR(1024)` | 1024-dimensional dense representation (JSON / `pgvector`). |
+| `embedding_blob` | `BLOB` | Compact little-endian `Float32Array` (`4,096` bytes/row in SQLite) for zero-`JSON.parse` decoding. |
 | `status` | `TEXT DEFAULT 'ACTIVE'` | Knowledge lifecycle: `ACTIVE`, `SUPERSEDED`, `INVALIDATED`. |
 | `supersedes_id`| `INTEGER` | ID of predecessor memory record this replaces. |
 | `superseded_by`| `INTEGER` | ID of successor memory record that superseded this record. |
@@ -51,20 +52,22 @@ Stores historical learnings, decisions, and constraints with temporal lineage an
 | `created_at` | `DATETIME` | Timestamp of creation. |
 
 ### `ide_agent_nuggets` (Steering Rules)
-Lightweight persistent key-value constraints that steer agent behavior without consuming full episodic context tokens.
+Lightweight persistent key-value constraints scoped per `(key, project)` that steer agent behavior without consuming full episodic context tokens.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `key` | `TEXT PRIMARY KEY` | Canonical rule key (e.g. `architecture.db_mode`). |
+| `key` | `TEXT NOT NULL` | Canonical rule key (composite primary key with `project`). |
+| `project` | `TEXT NOT NULL` | Project scope (defaults to `global` when unspecified). |
 | `value` | `TEXT NOT NULL` | Concrete steering directive. |
 | `kind` | `TEXT NOT NULL` | Scope: `project`, `agent`, or `user`. |
 | `embedding` | `TEXT` / `VECTOR(1024)` | Dense representation for similarity search. |
 
 ### `auditor_feedback` (Alignment Weighting)
-Tracks developer feedback on proactive auditor findings to dynamically tune rule sensitivity.
+Tracks project-scoped developer feedback on proactive auditor findings to dynamically tune rule sensitivity.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
+| `project` | `TEXT` | Project scope for rule weight calibration. |
 | `rule_id` | `TEXT NOT NULL` | Memory or nugget ID evaluated. |
 | `feedback` | `TEXT NOT NULL` | `helpful`, `unhelpful`, `false_positive`. |
 | `weight` | `REAL DEFAULT 1.0` | Sensitivity weight; decays on false positives to silence nagware. |

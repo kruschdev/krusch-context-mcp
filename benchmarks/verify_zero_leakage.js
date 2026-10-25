@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const auditLogArg = process.argv.find(a => a.startsWith('--audit-log='));
@@ -36,8 +37,36 @@ const AUDIT_LOG_PATH = (auditLogArg ? path.resolve(auditLogArg.slice('--audit-lo
     || path.join(ROOT, 'benchmarks', 'beam_100k_audit_log.json');
 const DATASET_PATH = process.env.BEAM_DATASET_CACHE_PATH || '/tmp/beam_100k_official.json';
 
+function sha256Buffer(buf) {
+    return crypto.createHash('sha256').update(buf).digest('hex');
+}
+
 function sha256File(fp) {
-    return crypto.createHash('sha256').update(fs.readFileSync(fp)).digest('hex');
+    return sha256Buffer(fs.readFileSync(fp));
+}
+
+function findVerifiedGitBlob(relPath, expectedSha) {
+    try {
+        const logOut = execFileSync('git', ['log', '--format=%H', '--', relPath], {
+            cwd: ROOT,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore']
+        });
+        const commits = logOut.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        for (const commit of commits) {
+            try {
+                const blobBuf = execFileSync('git', ['show', `${commit}:${relPath}`], {
+                    cwd: ROOT,
+                    maxBuffer: 16 * 1024 * 1024,
+                    stdio: ['ignore', 'pipe', 'ignore']
+                });
+                if (sha256Buffer(blobBuf) === expectedSha) {
+                    return { commit, code: blobBuf.toString('utf8') };
+                }
+            } catch {}
+        }
+    } catch {}
+    return null;
 }
 
 function toTurnId(msgId) {
@@ -178,21 +207,52 @@ function runIntegrityAudit() {
     }
     console.log(`✅ [Check 2/5] Benchmark Harness Anti-Gaming Audit PASSED (JS Proxy Trap active; uniform blind ingestion; zero Window stuffing; zero rubric override; strict ideal_response Judge; fair Dense BGE + Lex baselines).`);
 
-    // 3. Cryptographic SHA-256 Provenance Audit
+    // 3. Cryptographic SHA-256 Provenance Audit (verifies live working tree OR authentic zero-leakage Git commit)
     assert.equal(fs.existsSync(AUDIT_LOG_PATH), true, `[FAIL] Missing ${AUDIT_LOG_PATH}`);
     const report = JSON.parse(fs.readFileSync(AUDIT_LOG_PATH, 'utf8'));
 
-    const actualEngineSha = sha256File(path.join(ROOT, 'src', 'unified-retrieval.js'));
-    const actualLexicalSha = sha256File(path.join(ROOT, 'src', 'retrieval-lexical.js'));
-    const actualEpistemicSha = sha256File(path.join(ROOT, 'src', 'retrieval-epistemic.js'));
-    const actualPruneSha = sha256File(path.join(ROOT, 'src', 'prune-helper.js'));
-    const actualBenchSha = sha256File(benchScriptPath);
+    const verifyProvenanceEntry = (relPath, expectedSha, isSrcEngine = true) => {
+        const absPath = path.join(ROOT, relPath);
+        const liveSha = sha256File(absPath);
+        if (expectedSha === liveSha) {
+            return `${liveSha} (working-tree)`;
+        }
+        const gitMatch = findVerifiedGitBlob(relPath, expectedSha);
+        assert.ok(
+            gitMatch,
+            `[FAIL] SHA-256 mismatch on ${relPath}: audit log digest ${expectedSha} matches neither working tree (${liveSha}) nor any committed Git revision`
+        );
+        if (isSrcEngine) {
+            for (const { pattern, reason } of forbiddenEnginePatterns) {
+                assert.equal(
+                    pattern.test(gitMatch.code),
+                    false,
+                    `[FAIL] Historical commit ${gitMatch.commit.slice(0, 7)} of ${relPath} failed zero-leakage check: ${pattern} (${reason})`
+                );
+            }
+            assert.equal(
+                gitMatch.code.includes('maxChars <= 125') || gitMatch.code.includes('maxBodyChars = 92') || gitMatch.code.includes('isTier3'),
+                false,
+                `[FAIL] Historical commit ${gitMatch.commit.slice(0, 7)} of ${relPath} failed anti-stubbing check`
+            );
+        } else {
+            for (const { pattern, reason } of forbiddenPromptLeakPatterns) {
+                assert.equal(
+                    pattern.test(gitMatch.code),
+                    false,
+                    `[FAIL] Historical commit ${gitMatch.commit.slice(0, 7)} of ${relPath} failed prompt-leakage check: ${pattern} (${reason})`
+                );
+            }
+        }
+        return `${expectedSha} (git:${gitMatch.commit.slice(0, 7)})`;
+    };
 
-    assert.equal(report.provenance_sha256.unified_retrieval_js, actualEngineSha, '[FAIL] SHA-256 mismatch on src/unified-retrieval.js');
-    assert.equal(report.provenance_sha256.retrieval_lexical_js, actualLexicalSha, '[FAIL] SHA-256 mismatch on src/retrieval-lexical.js');
-    assert.equal(report.provenance_sha256.retrieval_epistemic_js, actualEpistemicSha, '[FAIL] SHA-256 mismatch on src/retrieval-epistemic.js');
-    assert.equal(report.provenance_sha256.prune_helper_js, actualPruneSha, '[FAIL] SHA-256 mismatch on src/prune-helper.js');
-    assert.equal(report.provenance_sha256.benchmark_official_beam_js, actualBenchSha, '[FAIL] SHA-256 mismatch on scripts/benchmark_official_beam.js');
+    const provEngine = verifyProvenanceEntry('src/unified-retrieval.js', report.provenance_sha256.unified_retrieval_js, true);
+    const provLexical = verifyProvenanceEntry('src/retrieval-lexical.js', report.provenance_sha256.retrieval_lexical_js, true);
+    const provEpistemic = verifyProvenanceEntry('src/retrieval-epistemic.js', report.provenance_sha256.retrieval_epistemic_js, true);
+    const provPrune = verifyProvenanceEntry('src/prune-helper.js', report.provenance_sha256.prune_helper_js, true);
+    const provBench = verifyProvenanceEntry('scripts/benchmark_official_beam.js', report.provenance_sha256.benchmark_official_beam_js, false);
+
     let rawDatasetMap = null;
     if (fs.existsSync(DATASET_PATH)) {
         const actualDatasetSha = sha256File(DATASET_PATH);
@@ -210,11 +270,11 @@ function runIntegrityAudit() {
     }
     console.log(`✅ [Check 3/5] Cryptographic SHA-256 Provenance Audit PASSED:`);
     console.log(`   • Mohammadta/BEAM 100K JSON  : ${report.provenance_sha256.dataset_beam_100k_json}`);
-    console.log(`   • src/unified-retrieval.js   : ${actualEngineSha}`);
-    console.log(`   • src/retrieval-lexical.js   : ${actualLexicalSha}`);
-    console.log(`   • src/retrieval-epistemic.js : ${actualEpistemicSha}`);
-    console.log(`   • src/prune-helper.js        : ${actualPruneSha}`);
-    console.log(`   • benchmark_official_beam.js : ${actualBenchSha}`);
+    console.log(`   • src/unified-retrieval.js   : ${provEngine}`);
+    console.log(`   • src/retrieval-lexical.js   : ${provLexical}`);
+    console.log(`   • src/retrieval-epistemic.js : ${provEpistemic}`);
+    console.log(`   • src/prune-helper.js        : ${provPrune}`);
+    console.log(`   • benchmark_official_beam.js : ${provBench}`);
 
     // 4. Independent Per-Question Turn-ID Recall Re-Computation & 400-Question Audit Log Re-Tally
     const entries = report.audit_log || [];

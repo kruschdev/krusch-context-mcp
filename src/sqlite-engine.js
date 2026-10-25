@@ -31,12 +31,79 @@ const parsedVectorCache = new Map();
 const MAX_PARSED_VECTOR_CACHE = 2048;
 
 /**
- * Parses and caches a row's embedding into a Float64Array to avoid repeated JSON.parse overhead.
+ * Encodes a numeric vector (or JSON vector string) into a compact IEEE-754 Float32Array byte buffer (4 bytes/dim)
+ * suitable for SQLite BLOB persistence without JSON serialization overhead.
+ * @param {Array<number>|Float32Array|Float64Array|string|null} vec
+ * @returns {Uint8Array|null}
  */
-export function getParsedEmbedding(embeddingField) {
+export function encodeEmbeddingBlob(vec) {
+    if (!vec) return null;
+    let source = vec;
+    if (typeof source === 'string') {
+        try {
+            source = JSON.parse(source);
+        } catch {
+            return null;
+        }
+    }
+    if (Array.isArray(source)) {
+        if (source.length === 0) return null;
+        const f32 = Float32Array.from(source);
+        return new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
+    }
+    if (source instanceof Float32Array) {
+        if (source.length === 0) return null;
+        return new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
+    }
+    if (source instanceof Float64Array) {
+        if (source.length === 0) return null;
+        const f32 = Float32Array.from(source);
+        return new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
+    }
+    return null;
+}
+
+/**
+ * Decodes a SQLite BLOB (Uint8Array / Buffer / ArrayBuffer) back into a Float32Array in O(1) time,
+ * copying only when the underlying Buffer slice is not 4-byte aligned.
+ * @param {Uint8Array|ArrayBuffer|Float32Array|Float64Array|null} blob
+ * @returns {Float32Array|Float64Array|null}
+ */
+export function decodeEmbeddingBlob(blob) {
+    if (!blob) return null;
+    if (blob instanceof Float32Array || blob instanceof Float64Array) {
+        return blob.length > 0 ? blob : null;
+    }
+    if (ArrayBuffer.isView(blob)) {
+        if (blob.byteLength === 0 || blob.byteLength % 4 !== 0) return null;
+        if (blob.byteOffset % 4 === 0) {
+            return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+        }
+        const alignedCopy = Uint8Array.from(blob);
+        return new Float32Array(alignedCopy.buffer, alignedCopy.byteOffset, alignedCopy.byteLength / 4);
+    }
+    if (blob instanceof ArrayBuffer) {
+        if (blob.byteLength === 0 || blob.byteLength % 4 !== 0) return null;
+        return new Float32Array(blob);
+    }
+    return null;
+}
+
+/**
+ * Parses and caches a row's embedding into a typed float array, preferring zero-parse binary `embedding_blob`
+ * when present and falling back to memoized JSON parsing for legacy `embedding` text columns.
+ */
+export function getParsedEmbedding(embeddingField, embeddingBlob = null) {
+    if (embeddingBlob) {
+        const decoded = decodeEmbeddingBlob(embeddingBlob);
+        if (decoded && decoded.length > 0) return decoded;
+    }
     if (!embeddingField) return null;
-    if (Array.isArray(embeddingField) || ArrayBuffer.isView(embeddingField)) {
-        return embeddingField;
+    if (Array.isArray(embeddingField) || embeddingField instanceof Float32Array || embeddingField instanceof Float64Array) {
+        return embeddingField.length > 0 ? embeddingField : null;
+    }
+    if (ArrayBuffer.isView(embeddingField) || embeddingField instanceof ArrayBuffer) {
+        return decodeEmbeddingBlob(embeddingField);
     }
     if (typeof embeddingField !== 'string') return null;
 
@@ -238,6 +305,7 @@ async function _initProjectDb(projectName) {
             content TEXT NOT NULL,
             tags TEXT,
             embedding TEXT,
+            embedding_blob BLOB,
             status TEXT DEFAULT 'ACTIVE',
             supersedes_id INTEGER,
             superseded_by INTEGER,
@@ -293,6 +361,7 @@ async function _initProjectDb(projectName) {
         `ALTER TABLE ide_agent_memory ADD COLUMN invalidated_reason TEXT;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN provenance TEXT;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN last_accessed_at DATETIME;`,
+        `ALTER TABLE ide_agent_memory ADD COLUMN embedding_blob BLOB;`,
         `ALTER TABLE ide_agent_nuggets ADD COLUMN project TEXT;`,
         `ALTER TABLE ide_agent_nuggets ADD COLUMN pg_synced BOOLEAN DEFAULT 0;`,
         `ALTER TABLE auditor_feedback ADD COLUMN project TEXT;`
@@ -316,6 +385,63 @@ async function _initProjectDb(projectName) {
         CREATE INDEX IF NOT EXISTS idx_feedback_project_rule ON auditor_feedback(project, rule_id);
     `);
 
+    // Full-Text Search (FTS5 Porter + Unicode61 external-content index) for sub-millisecond deep lexical lookup
+    try {
+        const ftsExisted = Boolean(
+            db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ide_agent_memory_fts'`).get()
+        );
+        db.exec(`
+            CREATE VIRTUAL TABLE IF NOT EXISTS ide_agent_memory_fts USING fts5(
+                content,
+                tags,
+                content='ide_agent_memory',
+                content_rowid='id',
+                tokenize='porter unicode61'
+            );
+            CREATE TRIGGER IF NOT EXISTS trg_ide_memory_fts_ai AFTER INSERT ON ide_agent_memory BEGIN
+                INSERT INTO ide_agent_memory_fts(rowid, content, tags)
+                VALUES (new.id, new.content, new.tags);
+            END;
+            CREATE TRIGGER IF NOT EXISTS trg_ide_memory_fts_ad AFTER DELETE ON ide_agent_memory BEGIN
+                INSERT INTO ide_agent_memory_fts(ide_agent_memory_fts, rowid, content, tags)
+                VALUES ('delete', old.id, old.content, old.tags);
+            END;
+            CREATE TRIGGER IF NOT EXISTS trg_ide_memory_fts_au AFTER UPDATE OF content, tags ON ide_agent_memory BEGIN
+                INSERT INTO ide_agent_memory_fts(ide_agent_memory_fts, rowid, content, tags)
+                VALUES ('delete', old.id, old.content, old.tags);
+                INSERT INTO ide_agent_memory_fts(rowid, content, tags)
+                VALUES (new.id, new.content, new.tags);
+            END;
+        `);
+        const memCount = db.prepare(`SELECT count(*) AS c FROM ide_agent_memory`).get()?.c || 0;
+        const docsizeCount = db.prepare(`SELECT count(*) AS c FROM ide_agent_memory_fts_docsize`).get()?.c || 0;
+        if ((!ftsExisted && memCount > 0) || docsizeCount !== memCount) {
+            db.exec(`INSERT INTO ide_agent_memory_fts(ide_agent_memory_fts) VALUES ('rebuild');`);
+        }
+    } catch {
+        // Gracefully degrade to LIKE scan if runtime SQLite lacks FTS5 support
+    }
+
+    // Lazily populate compact binary Float32Array embedding_blob for existing JSON-embedded rows
+    try {
+        const legacyVecRows = db.prepare(`
+            SELECT id, embedding
+            FROM ide_agent_memory
+            WHERE embedding IS NOT NULL AND embedding_blob IS NULL
+            ORDER BY id DESC
+            LIMIT 1000
+        `).all();
+        if (legacyVecRows.length > 0) {
+            const updBlob = db.prepare(`UPDATE ide_agent_memory SET embedding_blob = ? WHERE id = ?`);
+            withTransaction(db, () => {
+                for (const r of legacyVecRows) {
+                    const blob = encodeEmbeddingBlob(r.embedding);
+                    if (blob) updBlob.run(blob, r.id);
+                }
+            });
+        }
+    } catch {}
+
     const st = fs.statSync(dbPath);
     dbMetaCache.set(projectName, { dbPath, ino: st.ino });
     
@@ -327,6 +453,94 @@ async function _initProjectDb(projectName) {
     }
     
     return db;
+}
+
+/**
+ * Builds a safe FTS5 MATCH disjunction expression from raw query tokens/phrases,
+ * quoting every alphanumeric token so FTS5 operators (AND, OR, NOT, NEAR) never cause syntax errors.
+ * @param {string[]} searchTerms
+ * @returns {string}
+ */
+export function buildFtsMatchQuery(searchTerms = []) {
+    if (!Array.isArray(searchTerms) || searchTerms.length === 0) return '';
+    const clauses = [];
+    const seen = new Set();
+    for (const raw of searchTerms.slice(0, 14)) {
+        const parts = String(raw || '')
+            .toLowerCase()
+            .split(/[^a-z0-9]+/)
+            .filter(p => p.length >= 2);
+        if (parts.length === 0) continue;
+        const expr = parts.length === 1
+            ? `"${parts[0]}"`
+            : `"${parts.join(' ')}"`;
+        if (!seen.has(expr)) {
+            seen.add(expr);
+            clauses.push(expr);
+        }
+    }
+    return clauses.join(' OR ');
+}
+
+/**
+ * Queries `ide_agent_memory_fts` using BM25 ranking (`porter unicode61` index).
+ * Returns `Array<object>` when FTS5 succeeds, or `null` if FTS5 is unavailable so callers can fall back to `LIKE`.
+ */
+export function searchMemoryFts(
+    db,
+    searchTerms = [],
+    {
+        includeSuperseded = true,
+        includeActiveBeforeId = null,
+        includeAllActive = false,
+        category = null,
+        selectCols = 'id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at',
+        limit = 300
+    } = {}
+) {
+    if (!db) return null;
+    const matchExpr = buildFtsMatchQuery(searchTerms);
+    if (!matchExpr) return [];
+
+    const qualifiedCols = selectCols
+        .split(',')
+        .map(c => c.trim())
+        .filter(Boolean)
+        .map(c => (c.includes('.') || c.includes(' ')) ? c : `m.${c}`)
+        .join(', ');
+
+    const statusBranches = [];
+    const params = [matchExpr];
+    if (includeSuperseded) {
+        statusBranches.push(`m.status = 'SUPERSEDED'`);
+    }
+    if (includeAllActive) {
+        statusBranches.push(`m.status = 'ACTIVE'`);
+    } else if (Number.isFinite(includeActiveBeforeId)) {
+        statusBranches.push(`(m.status = 'ACTIVE' AND m.id < ?)`);
+        params.push(Number(includeActiveBeforeId));
+    }
+    if (statusBranches.length === 0) return [];
+
+    let sql = `
+        SELECT ${qualifiedCols}, (-bm25(ide_agent_memory_fts, 1.0, 0.5)) AS _fts_score
+        FROM ide_agent_memory_fts
+        JOIN ide_agent_memory m ON m.id = ide_agent_memory_fts.rowid
+        WHERE ide_agent_memory_fts MATCH ?
+          AND (${statusBranches.join(' OR ')})
+    `;
+    if (category) {
+        sql += ` AND m.category = ?`;
+        params.push(category);
+    }
+    sql += ` ORDER BY _fts_score DESC, m.id DESC LIMIT ?`;
+    params.push(Math.max(1, Number(limit) || 300));
+
+    try {
+        return db.prepare(sql).all(...params);
+    } catch {
+        return null;
+    }
 }
 
 let _pgSchemaInfo = null;
@@ -438,10 +652,10 @@ export async function pullProjectMemory(projectName, db, _pool = pool) {
         `);
         const insertMem = db.prepare(`
             INSERT INTO ide_agent_memory (
-                pg_id, category, content, tags, embedding, status,
+                pg_id, category, content, tags, embedding, embedding_blob, status,
                 supersedes_id, superseded_by, invalidated_reason, provenance, pg_synced
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         `);
         const updateSyncedMem = db.prepare(`
             UPDATE ide_agent_memory
@@ -508,6 +722,7 @@ export async function pullProjectMemory(projectName, db, _pool = pool) {
                         String(row.content ?? ''),
                         row.tags ?? null,
                         row.embedding ?? null,
+                        encodeEmbeddingBlob(row.embedding),
                         normStatus,
                         initSupersedes,
                         initSupersededBy,

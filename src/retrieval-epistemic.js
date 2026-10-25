@@ -9,6 +9,7 @@ import {
     TEMPORAL_CUE_WORDS,
     GENERIC_INFRA_WORDS,
     META_QUERY_WORDS,
+    STATE_TRANSITION_REGEX,
     stemToken
 } from './retrieval-lexical.js';
 
@@ -19,18 +20,18 @@ function getLineageStatements(db) {
     if (!stmts) {
         stmts = {
             byId: db.prepare(`
-                SELECT id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at, embedding
+                SELECT id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at, embedding, embedding_blob
                 FROM ide_agent_memory
                 WHERE id = ?
             `),
             childBySupersedes: db.prepare(`
-                SELECT id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at, embedding
+                SELECT id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at, embedding, embedding_blob
                 FROM ide_agent_memory
                 WHERE supersedes_id = ?
                 ORDER BY id DESC LIMIT 1
             `),
             parentBySupersededBy: db.prepare(`
-                SELECT id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at, embedding
+                SELECT id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at, embedding, embedding_blob
                 FROM ide_agent_memory
                 WHERE superseded_by = ?
                 ORDER BY id ASC LIMIT 1
@@ -355,3 +356,198 @@ export function computeUnattestedQueryTerms(distinctiveTerms = [], packedItems =
     if (allUserStems.size === 0) return [];
     return distinctiveTerms.filter(t => t.length >= 3 && !allUserStems.has(stemToken(t)));
 }
+
+/**
+ * Computes which informative distinctive query terms (`length >= 4`, non-numeric) have zero exact or stemmed
+ * occurrences across the ENTIRE candidate store (both USER and ASSISTANT segments plus steering nuggets),
+ * without using any hardcoded word lists or suppressing retrieved results.
+ * @param {string[]} distinctiveTerms
+ * @param {Array<object>} allCandidateRows
+ * @param {Array<object>} [nuggetItems=[]]
+ * @returns {string[]}
+ */
+export function computeCorpusUnattestedTerms(distinctiveTerms = [], allCandidateRows = [], nuggetItems = []) {
+    if (!Array.isArray(distinctiveTerms) || distinctiveTerms.length === 0 || allCandidateRows.length === 0) {
+        return [];
+    }
+    const corpusStems = new Set();
+    for (const r of allCandidateRows) {
+        if (r._stems) {
+            for (const s of r._stems) corpusStems.add(s);
+        }
+    }
+    for (const n of nuggetItems) {
+        const text = `${n.key || ''} ${n.content || n.value || ''}`.toLowerCase();
+        for (const tok of text.split(/[^a-z0-9_]+/)) {
+            if (tok.length >= 2) corpusStems.add(stemToken(tok));
+        }
+    }
+    if (corpusStems.size === 0) return [];
+
+    return distinctiveTerms.filter(t => {
+        if (!t || t.length < 4 || /^\d+$/.test(t)) return false;
+        const st = stemToken(t);
+        if (corpusStems.has(st) || corpusStems.has(t)) return false;
+        for (const r of allCandidateRows) {
+            if (r._combinedText && r._combinedText.includes(t)) return false;
+        }
+        return true;
+    });
+}
+
+/**
+ * Detects passive chronological state updates across retrieved ACTIVE memories (including long conversational
+ * dialogue turns) without mutating unresolved contradiction status (`CONFLICTED`).
+ * Identifies ordered `(older_id -> newer_id)` pairs on the queried subject where the later memory expresses
+ * a state transition or updated contextual quantity in its user statement.
+ * @param {Array<object>} activeItems
+ * @param {string[]} [domainTerms=[]]
+ * @returns {Array<{older_id: number, newer_id: number, shared_subject: string[], older_excerpt: string, newer_excerpt: string}>}
+ */
+export function detectTemporalUpdates(activeItems = [], domainTerms = []) {
+    const memoryItems = activeItems
+        .filter(it => it.type === 'memory' && (it.status || 'ACTIVE') === 'ACTIVE')
+        .slice()
+        .sort((a, b) => Number(a.id) - Number(b.id));
+    if (memoryItems.length < 2) return [];
+
+    const ORDINAL_WORDS = new Set([
+        'turn', 'session', 'sprint', 'week', 'weeks', 'day', 'days', 'phase', 'part',
+        'item', 'step', 'note', 'log', 'milestone', 'batch', 'slot', 'tier', 'id',
+        'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
+        'september', 'october', 'november', 'december', 'line', 'page', 'section',
+        'user', 'asst', 'assistant', 'date', 'conv', 'window'
+    ]);
+    const METRIC_REGEX = /(?:([a-z0-9_]+)\s+)?(?:\$|€|£)?\b(\d+(?:\.\d+)?)(ms|s|m|h|d|gb|mb|kb|tb|%|px|v|usd|eur|hrs|mins|kg|lbs|mph|km)?\b(?:\s+([a-z0-9_]+))?/gi;
+
+    const stripTurnHeader = (raw) =>
+        String(raw || '').replace(/\[[^\]]*\b(?:session|turn)\b[^\]]*\]\s*/gi, '').trim();
+
+    const extractUserClause = (content) => {
+        const str = String(content || '');
+        const userMatch = str.match(/\buser:\s*([\s\S]*?)(?:\|\s*assistant:|$)/i);
+        return stripTurnHeader(userMatch ? userMatch[1] : str);
+    };
+
+    const extractStems = (text) => new Set(
+        String(text || '')
+            .toLowerCase()
+            .split(/[^a-z0-9_]+/)
+            .filter(w => w.length >= 3 && !STOP_WORDS.has(w) && !TEMPORAL_CUE_WORDS.has(w) && !GENERIC_INFRA_WORDS.has(w) && !META_QUERY_WORDS.has(w) && !ORDINAL_WORDS.has(w) && !/^\d+$/.test(w))
+            .map(stemToken)
+    );
+
+    const extractUserMetrics = (userText) => {
+        const hasCurrency = /[$€£]\s*\d/.test(userText);
+        const cleaned = String(userText || '')
+            .toLowerCase()
+            .replace(/\b(?:v|version|note|log|step|milestone|batch|slot|tier|turn|session|sprint|week|day|phase|part|id)\s*#?\d+(?:\/\d+)?\b/g, ' ')
+            .replace(/\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+(?:,\s*\d{4})?\b/g, ' ')
+            .replace(/\b(?:19|20)\d{2}\b/g, ' ')
+            .replace(/\s+/g, ' ');
+        const out = [];
+        for (const m of cleaned.matchAll(METRIC_REGEX)) {
+            const prevWord = m[1] || '';
+            const numVal = m[2];
+            const unit = m[3] || (hasCurrency && /\$\s*\d/.test(m[0]) ? 'usd' : '');
+            const nextWord = m[4] || '';
+            if (!unit && (ORDINAL_WORDS.has(prevWord) || ORDINAL_WORDS.has(nextWord))) continue;
+            const ctx = new Set(
+                [prevWord, nextWord]
+                    .filter(w => w.length >= 3 && !STOP_WORDS.has(w) && !GENERIC_INFRA_WORDS.has(w) && !ORDINAL_WORDS.has(w))
+                    .map(stemToken)
+            );
+            if (!unit && ctx.size === 0) continue;
+            out.push({ raw: `${numVal}${unit}`, unit, ctx });
+        }
+        return out;
+    };
+
+    const nonGenericDomain = domainTerms.filter(t => !STOP_WORDS.has(t) && !GENERIC_INFRA_WORDS.has(t));
+    const domainStems = [...new Set((nonGenericDomain.length > 0 ? nonGenericDomain : domainTerms).map(stemToken))];
+
+    const prepared = memoryItems.map(it => {
+        const userText = extractUserClause(it.content);
+        return {
+            id: Number(it.id),
+            lineageIds: new Set((it.lineage || []).map(l => Number(l.id))),
+            stems: extractStems(userText),
+            hasTransition: STATE_TRANSITION_REGEX.test(userText),
+            metrics: extractUserMetrics(userText),
+            excerpt: userText.replace(/\s+/g, ' ').trim().slice(0, 120)
+        };
+    });
+
+    const bestByNewerId = new Map();
+    for (let j = 1; j < prepared.length; j++) {
+        const newer = prepared[j];
+        for (let i = 0; i < j; i++) {
+            const older = prepared[i];
+            if (older.lineageIds.has(newer.id) || newer.lineageIds.has(older.id)) continue;
+
+            const sharedSubjects = [];
+            for (const s of older.stems) {
+                if (newer.stems.has(s)) sharedSubjects.push(s);
+            }
+            if (sharedSubjects.length < 2) continue;
+
+            const unionSize = (older.stems.size + newer.stems.size - sharedSubjects.length) || 1;
+            const subjectJaccard = sharedSubjects.length / unionSize;
+
+            if (domainStems.length > 0) {
+                const matchedQueryStems = domainStems.filter(dt =>
+                    sharedSubjects.some(s => s === dt || (dt.length >= 5 && (s.startsWith(dt) || dt.startsWith(s))))
+                );
+                if (matchedQueryStems.length < 1) continue;
+                if (domainStems.length >= 3 && matchedQueryStems.length < 2 && subjectJaccard < 0.22) continue;
+            }
+
+            let comparableMetricShift = false;
+            if (older.metrics.length > 0 && newer.metrics.length > 0) {
+                const rawOlder = new Set(older.metrics.map(x => x.raw));
+                const rawNewer = new Set(newer.metrics.map(x => x.raw));
+                const exactSame = [...rawOlder].some(v => rawNewer.has(v));
+                if (!exactSame) {
+                    comparableMetricShift = older.metrics.some(ma =>
+                        newer.metrics.some(mb =>
+                            ma.unit === mb.unit &&
+                            (
+                                (ma.unit !== '' && [...ma.ctx].some(c => mb.ctx.has(c))) ||
+                                (ma.unit !== '' && subjectJaccard >= 0.28) ||
+                                [...ma.ctx].some(c => mb.ctx.has(c)) && subjectJaccard >= 0.24
+                            )
+                        )
+                    );
+                }
+            }
+
+            if (!newer.hasTransition && !comparableMetricShift) continue;
+
+            const strength =
+                (newer.hasTransition ? 0.5 : 0) +
+                (comparableMetricShift ? 0.45 : 0) +
+                subjectJaccard * 1.6 +
+                sharedSubjects.length * 0.12;
+
+            const prev = bestByNewerId.get(newer.id);
+            if (!prev || strength > prev._strength) {
+                bestByNewerId.set(newer.id, {
+                    _strength: strength,
+                    entry: {
+                        older_id: older.id,
+                        newer_id: newer.id,
+                        shared_subject: sharedSubjects.slice(0, 5),
+                        older_excerpt: older.excerpt,
+                        newer_excerpt: newer.excerpt
+                    }
+                });
+            }
+        }
+    }
+
+    return [...bestByNewerId.values()]
+        .sort((a, b) => (b.entry.newer_id - a.entry.newer_id) || (b._strength - a._strength))
+        .slice(0, 3)
+        .map(x => x.entry);
+}
+

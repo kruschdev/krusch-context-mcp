@@ -184,12 +184,13 @@ Evaluating all `400/400` questions exposes two genuine, non-gamified architectur
 ## 6. Reproducibility Commands
 
 ```bash
-# 1. Run all 65 unit, contract, and honesty regression tests (100% SQLite, zero Docker)
+# 1. Run all 78 unit, contract, and honesty regression tests (100% SQLite, zero Docker)
 npm test
 
 # 2. Verify SHA-256 provenance, zero oracle leakage, turn-ID recall math & Dual Judge tallies (all 400 Qs)
 npm run bench:beam:verify
 node benchmarks/verify_zero_leakage.js --audit-log=benchmarks/g4_closed_system/beam_100k_qlora_full400_audit_log.json
+node benchmarks/verify_zero_leakage.js --audit-log=benchmarks/beam_100k_v1_9_0_retrieval_audit.json
 
 # 3. Reproduce the entire hermetic single-box Closed-System 400/400 + QLoRA A/B run on Colab G4 (96GB Blackwell)
 ./scripts/run_beam_closed_g4.sh
@@ -200,3 +201,33 @@ OLLAMA_JUDGE_MODEL=qwen2.5:32b \
 OLLAMA_SECONDARY_JUDGE_MODEL=hermes3:latest \
 node scripts/benchmark_official_beam.js --full-judge
 ```
+
+---
+
+## 7. Addendum: `v1.9.0` Retrieval, FTS5 & Epistemic Architecture Upgrade (`2026-10-25`)
+
+Directly addressing the bottlenecks diagnosed in Section 5 while strictly preserving the 5-verb MCP surface and zero-gaming protocol (`5/5` checks in [`benchmarks/verify_zero_leakage.js`](./verify_zero_leakage.js)), `krusch-context-mcp v1.9.0` introduces five domain-agnostic engine upgrades:
+
+1. **Compact Binary `Float32Array` Vector Blobs (`embedding_blob`)**: Stores `1024`-dim embeddings in `4,096`-byte little-endian `BLOB` columns (`~4.5x` smaller than JSON text) with lazy startup backfill and unaligned buffer-slice safety (`src/sqlite-engine.js`).
+2. **External-Content Porter-Stemmed SQLite `FTS5` (`ide_agent_memory_fts`)**: Replaces `O(N)` `LIKE` full-table scans beyond `KRUSCH_MAX_ACTIVE_SCAN` with BM25-ranked `FTS5` deep lexical retrieval (`searchMemoryFts`) synchronized via `INSERT`/`UPDATE`/`DELETE` triggers.
+3. **Passive `Chronological State Evolution` & `Lexical Grounding Note` (`src/retrieval-epistemic.js`)**: Surfaces `### 🔄 Chronological State Evolution (Earlier → Latest)` when passive conversational turns mutate a shared subject without `supersede` calls, and emits a non-suppressing `> ℹ️ **Lexical Grounding Note**` when distinctive query terms have zero corpus occurrences.
+4. **Top-Placed Compact `Chronological Event Sequence` (`src/unified-retrieval.js`)**: Places compact 24-milestone `(Session S · Date)` sequence summaries above `[MEMORY]` blocks on explicit sequence-ordering queries (`isSequenceOrderQuery`), freeing token headroom (`67.9` vs `61.7` substantive turns packed within `<= 70.0` turns).
+5. **Speech-Act Directive Stratification & Continuous Relevance Tie-Breaking (`src/retrieval-lexical.js`, `src/unified-retrieval.js`)**: Routes standing directives into Top-10/Top-20 slots on generative/advisory requests (`isGenerativeOrAdvisoryQuery`) while preserving continuous `_unclampedScore` tie-breaking across hybrid boosts and RM3 pseudo-relevance feedback.
+
+### `v1.8.1` vs. `v1.9.0` Ground-Truth Primary Turn Retrieval Recall (`n = 360` Questions across 9 Categories)
+
+> **Audit Log**: [`benchmarks/beam_100k_v1_9_0_retrieval_audit.json`](./beam_100k_v1_9_0_retrieval_audit.json) (`src/unified-retrieval.js` SHA-256: `b19dd9f35a05a8c08e968a491be8b8045a7e919e3246b3fa8de51a9163548860`, `src/retrieval-lexical.js` SHA-256: `1830010d07e1ac97111a1016fe52cbe5759c93faf6f559fe83cf9672507d7ddf`, `src/retrieval-epistemic.js` SHA-256: `19e87ecb8f704a2d41f97d70f187402db4df5ab77438bd3f70044dd96dfcbc07`; `Conv 14 KU Q1` Canary = `0.00`).
+
+| BEAM Memory Category (`n = 40` each) | `v1.8.1` `R@10` | **`v1.9.0` `R@10`** | `v1.8.1` `R@50` | **`v1.9.0` `R@50`** | `v1.8.1` Packed `8K` (`61.7t`) | **`v1.9.0` Packed `8K` (`67.9t`)** | $\Delta$ Packed `8K` |
+| :----------------------------------- | :-------------: | :-----------------: | :-------------: | :-----------------: | :----------------------------: | :--------------------------------: | :------------------: |
+| **Information Extraction (IE)** | `62.92%` | `60.42%` | `90.00%` | `90.00%` | `95.00%` | **`95.00%`** | `0.00 pp` |
+| **Knowledge Update (KU)** *(Canary = 0)* | `82.50%` | **`85.00%`** | `96.25%` | `96.25%` | `97.50%` | **`97.50%`** | `0.00 pp` |
+| **Temporal Reasoning (TR)** | `88.75%` | **`88.75%`** | `100.00%` | **`100.00%`** | `100.00%` | **`100.00%`** | `0.00 pp` |
+| **Event Ordering (EO)** | `17.42%` | **`17.42%`** | `67.78%` | **`68.96%`** | `77.50%` | **`80.50%`** | **`+3.00 pp`** |
+| **Contradiction Resolution (CR)** | `78.33%` | **`79.17%`** | `98.75%` | **`98.75%`** | `100.00%` | **`100.00%`** | `0.00 pp` |
+| **Multi-Session Reasoning (MSR)** | `55.63%` | **`55.63%`** | `89.25%` | **`89.25%`** | `90.09%` | **`90.59%`** | **`+0.50 pp`** |
+| **Instruction Following (IF)** | `31.46%` | **`43.96%`** | `93.75%` | **`96.25%`** | `96.25%` | **`100.00%`** | **`+3.75 pp`** |
+| **Preference Following (PF)** | `35.04%` | **`37.61%`** | `91.45%` | **`94.02%`** | `96.58%` | **`96.58%`** | `0.00 pp` |
+| **Summarization (SUM)** | `19.78%` | **`19.89%`** | `66.38%` | **`66.38%`** | `75.01%` | **`76.96%`** | **`+1.95 pp`** |
+| **9-CATEGORY RETRIEVAL RECALL MEAN** | `52.43%` | **`54.20%`** | `88.18%` | **`88.87%`** | `91.99%` | **`93.01%`** | **`+1.02 pp`** |
+

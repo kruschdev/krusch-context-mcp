@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-10-25
+
+### Added
+- **Compact Binary `Float32Array` Vector Storage (`embedding_blob`)**:
+  - Added `embedding_blob BLOB` migration and lazy startup backfill (`encodeEmbeddingBlob` / `decodeEmbeddingBlob` with unaligned `Uint8Array` buffer slice handling) across `src/sqlite-engine.js`, `src/storage-adapter.js`, and `src/memory-engine.js`. Cuts 1024-dim SQLite vector storage footprint by ~4.5x (`4,096` bytes vs ~18–22 KB JSON text) and eliminates `JSON.parse` overhead on cold scans while maintaining full backward compatibility.
+- **External-Content Porter-Stemmed SQLite FTS5 Index (`ide_agent_memory_fts`)**:
+  - Provisioned `USING fts5(content, tags, content='ide_agent_memory', content_rowid='id', tokenize='porter unicode61')` with `AFTER INSERT`, `AFTER DELETE`, and `AFTER UPDATE OF content, tags` sync triggers plus BM25-ranked `searchMemoryFts` (`src/sqlite-engine.js`). Enables sub-millisecond deep lexical recall across multi-thousand-row stores beyond the active scan window (`KRUSCH_MAX_ACTIVE_SCAN`) with automatic `LIKE` fallback.
+- **Passive State Evolution & Corpus-Wide Lexical Grounding (`src/retrieval-epistemic.js`, `src/unified-retrieval.js`)**:
+  - Added `detectTemporalUpdates` to surface a bounded `### 🔄 Chronological State Evolution (Earlier → Latest)` header and `temporal_updates` array when passive conversational turns mutate a shared subject without explicit `supersede` lineage.
+  - Added `computeCorpusUnattestedTerms` to emit a non-suppressing `> ℹ️ **Lexical Grounding Note**` whenever distinctive query terms have zero exact or stemmed occurrences anywhere in the project store (guarding against partial-entity hallucination on Abstention probes without suppressing retrieved turns).
+- **Speech-Act Stratification, Top-Placed Compact Timelines & Continuous Relevance Tie-Breaking (`src/retrieval-lexical.js`, `src/unified-retrieval.js`)**:
+  - Added `isSequenceOrderQuery`, `isKnowledgeUpdateQuery`, `isGenerativeOrAdvisoryQuery`, and `STATE_TRANSITION_REGEX` to stratify standing directives into Top-10/Top-20 slots on generative/advisory requests while preserving primary factual slots on retrospective recall queries.
+  - Placed compact 24-milestone `### 📅 Chronological Event Sequence (Oldest → Newest)` summaries (`formatCompactTimelineEntry`) above relevance-ordered `[MEMORY]` blocks on explicit sequence-ordering queries, and tracked continuous `_unclampedScore` across hybrid boosts and RM3 pseudo-relevance feedback.
+  - Lifted Official ICLR 2026 `Mohammadta/BEAM` (`100K`, `n = 400`) 9-category retrieval recall from **`91.99%` → `93.01%`** (`+1.02 pp`), `Recall@10` from **`52.43%` → `54.20%`** (`+1.77 pp`), `Instruction Following` `8K` to **`100.00%`** (`R@10 +12.50 pp`), `Event Ordering` `8K` to **`80.50%`** (`+3.00 pp`), and `Knowledge Update` `R@10` to **`85.00%`** (`+2.50 pp`), passing `5/5` `verify_zero_leakage.js` checks (`benchmarks/beam_100k_v1_9_0_retrieval_audit.json`).
+- **Git-Blob Cryptographic Provenance Verification (`benchmarks/verify_zero_leakage.js`)**:
+  - Upgraded Check 3 to verify `provenance_sha256` digests against either the live working tree or authentic committed Git history blobs (`git log` / `git show`) while auditing historical blobs against Check 1/2/5 anti-gaming invariants—allowing retrieval source evolution without invalidating archived `v1.8.1` G4 audit logs.
+
+### Fixed
+- **Production Hardening (`24c4b8f`)**:
+  - Enforced finite-value validation and expected 1024-dim truncation/rejection in `src/embedding-helper.js`.
+  - Scoped `ide_agent_nuggets` (`nuggetRemember`, `nuggetForget`, `nuggetList`) by `(key, project)` with automatic composite primary-key SQLite migration so distinct projects sharing `~/.krusch-context` never collide on steering keys (`handoff`, `style`, etc.).
+  - Scoped `auditor_feedback` weight queries and updates by `project` in `src/proactive-engine.js`.
+  - Fixed `supersedeMemory` (`src/memory-engine.js`) in SQLite mode so embedding outages fall back cleanly to `embedding = null` rather than failing the transaction, and wrapped `consolidateMemories` archival in an atomic transaction.
+
 ## [1.8.1] - 2026-10-17
 
 ### Added

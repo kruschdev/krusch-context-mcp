@@ -17,7 +17,7 @@ import crypto from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { getEmbedding } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { getProjectDb, cosineSimilarity, getParsedEmbedding, pushProjectMemory, resolveProjectPath, withTransaction } from './sqlite-engine.js';
+import { getProjectDb, cosineSimilarity, getParsedEmbedding, encodeEmbeddingBlob, pushProjectMemory, resolveProjectPath, withTransaction } from './sqlite-engine.js';
 import { checkNearDuplicateMemory, getStorageMode } from './storage-adapter.js';
 import { generateTagsFromLLM, extractHeuristicTags } from './llm-tags.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
@@ -555,14 +555,15 @@ export async function addMemory({
     const provPayload = JSON.stringify(anchoredProv);
 
     const embeddingStr = embeddingArray ? `[${embeddingArray.join(',')}]` : null;
+    const embeddingBlob = embeddingArray ? encodeEmbeddingBlob(embeddingArray) : null;
 
     // 5. Insert into SQLite project DB atomically
     if (db) {
         const newId = withTransaction(db, () => {
             const info = db.prepare(`
-                INSERT INTO ide_agent_memory (category, content, tags, embedding, status, supersedes_id, provenance, pg_synced)
-                VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, 0)
-            `).run(normCat, content, finalTags, embeddingStr, supersedes_id || null, provPayload);
+                INSERT INTO ide_agent_memory (category, content, tags, embedding, embedding_blob, status, supersedes_id, provenance, pg_synced)
+                VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, 0)
+            `).run(normCat, content, finalTags, embeddingStr, embeddingBlob, supersedes_id || null, provPayload);
 
             const insertedId = info.lastInsertRowid;
             if (supersedes_id) {
@@ -674,14 +675,14 @@ export async function backfillMissingEmbeddings({ project, active_project, limit
     let backfilledCount = 0;
     const updStmt = db.prepare(`
         UPDATE ide_agent_memory
-        SET embedding = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP
+        SET embedding = ?, embedding_blob = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
     `);
 
     for (const row of nullRows) {
         const vec = await _embedFn(row.content);
         if (Array.isArray(vec) && vec.length > 0) {
-            updStmt.run(`[${vec.join(',')}]`, row.id);
+            updStmt.run(`[${vec.join(',')}]`, encodeEmbeddingBlob(vec), row.id);
             backfilledCount++;
         } else {
             break; // Provider still offline; fail fast
@@ -809,7 +810,7 @@ export async function searchMemory({
     const db = await getProjectDb(targetProject);
     if (!db) return { content: [{ type: "text", text: "No memories found (database unavailable)." }] };
 
-    let sql = `SELECT id, category, content, tags, status, supersedes_id, superseded_by, created_at, embedding FROM ide_agent_memory`;
+    let sql = `SELECT id, category, content, tags, status, supersedes_id, superseded_by, created_at, embedding, embedding_blob FROM ide_agent_memory`;
     const conditions = [];
     const params = [];
 
@@ -831,8 +832,8 @@ export async function searchMemory({
 
     const scored = rows.map(r => {
         let score = 0.5;
-        if (embeddingArray && r.embedding) {
-            const vec = getParsedEmbedding(r.embedding);
+        if (embeddingArray && (r.embedding || r.embedding_blob)) {
+            const vec = getParsedEmbedding(r.embedding, r.embedding_blob);
             if (vec) {
                 score = cosineSimilarity(embeddingArray, vec);
             }
@@ -1417,8 +1418,9 @@ export async function updateMemory({ id, content, tags, project, active_project,
     if (db) {
         const emb = _embedding || await getEmbedding(content);
         const embStr = emb ? `[${emb.join(',')}]` : null;
+        const embBlob = emb ? encodeEmbeddingBlob(emb) : null;
         const tagStr = tags ? JSON.stringify(tags) : null;
-        db.prepare(`UPDATE ide_agent_memory SET content = ?, tags = ?, embedding = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(content, tagStr, embStr, id);
+        db.prepare(`UPDATE ide_agent_memory SET content = ?, tags = ?, embedding = ?, embedding_blob = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(content, tagStr, embStr, embBlob, id);
         pushProjectMemory(targetProject, db).catch(() => {});
         return { content: [{ type: "text", text: `[krusch-context] ✅ Updated memory record #${id}` }] };
     }
@@ -1435,14 +1437,14 @@ export async function consolidateMemories({ category, project, active_project, t
     const db = await getProjectDb(targetProject);
     if (!db) return { content: [{ type: "text", text: "Database unavailable" }] };
 
-    const rows = db.prepare(`SELECT id, content, embedding FROM ide_agent_memory WHERE category = ? AND status = 'ACTIVE'`).all(normCat);
+    const rows = db.prepare(`SELECT id, content, embedding, embedding_blob FROM ide_agent_memory WHERE category = ? AND status = 'ACTIVE'`).all(normCat);
     const pairs = [];
 
     for (let i = 0; i < rows.length; i++) {
-        const vecA = getParsedEmbedding(rows[i].embedding);
+        const vecA = getParsedEmbedding(rows[i].embedding, rows[i].embedding_blob);
         if (!vecA) continue;
         for (let j = i + 1; j < rows.length; j++) {
-            const vecB = getParsedEmbedding(rows[j].embedding);
+            const vecB = getParsedEmbedding(rows[j].embedding, rows[j].embedding_blob);
             if (!vecB) continue;
             const sim = cosineSimilarity(vecA, vecB);
             const dist = 1 - sim;

@@ -110,7 +110,7 @@ To prevent memory hallucination and database pollution:
 
 ## 🐘 When Do You Need PostgreSQL?
 
-* **Use SQLite (Default)**: Perfect for single developers, local IDE sessions, and projects with hundreds to thousands of decisions. Zero Docker, zero setup.
+* **Use SQLite (Default)**: Perfect for single developers, local IDE sessions, and projects with thousands of decisions—featuring compact `Float32Array` binary vector blobs (`4 KB`/row) and an external-content Porter-stemmed `FTS5` lexical index. Zero Docker, zero setup.
 * **Use PostgreSQL (`STORAGE_MODE=postgres`)**: Required only when scaling to multi-agent swarms across different machines needing centralized persistence and server-side pgvector HNSW indexing.
 
 ---
@@ -118,7 +118,7 @@ To prevent memory hallucination and database pollution:
 ## 🔄 Migration from v1.6 / v1.7
 
 * **Tool Aliases**: Legacy tool names (`add_memory`, `search_memory`, `compile_state`, `supersede_memory`, `invalidate_memory`, `proactive_nudge`) are automatically aliased to the 5 verbs with a deprecation notice.
-* **Database Path**: v1.7 used `.agent/memory.db`. v1.8.0 uses `.agent/context.db`. Run `npx krusch-context-mcp init` to migrate.
+* **Database Path**: v1.7 used `.agent/memory.db`. v1.8+ uses `.agent/context.db`. Run `npx krusch-context-mcp init` to migrate.
 * See [docs/MIGRATION.md](docs/MIGRATION.md) for the complete mapping table.
 
 ---
@@ -133,7 +133,7 @@ To prevent memory hallucination and database pollution:
                ┌───────────────┴───────────────┐
                ▼                               ▼
 ┌─────────────────────────────┐ ┌─────────────────────────────┐
-│  krusch-context-mcp (v1.8)  │ │   krusch-git (External)     │
+│  krusch-context-mcp (v1.9)  │ │   krusch-git (External)     │
 │   Project Memory & Steering │ │   Codebase RAG & AST Search │
 │       (5 Canonical Verbs)   │ │      (7 Specialized Tools)  │
 └──────────────┬──────────────┘ └─────────────────────────────┘

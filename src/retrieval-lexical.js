@@ -67,6 +67,8 @@ export const META_QUERY_WORDS = new Set([
 
 export const DIRECTIVE_REGEX = /\b(always|never|make sure to|please remember to|from now on|every time|whenever you|be sure to|don't ever|do not ever|remember that i want you to|i prefer|my preference|i like to|i'd rather|i would rather|i always use|i usually prefer|i'm a fan of|i tend to prefer|keep .* lightweight|minimal dependencies|favor .* over)\b/i;
 
+export const STATE_TRANSITION_REGEX = /\b(switched\s+(?:from|to|my|our|the)|changed\s+(?:from|to|my|our|the)|moved\s+(?:from|to|my|our)|migrated\s+(?:from|to)|updated\s+(?:from|to|my|our|the)|upgraded\s+(?:from|to|my|our)|downgraded\s+(?:from|to)|instead\s+of\s+using|decided\s+to\s+(?:go\s+with|switch|use|change)|ended\s+up\s+(?:going\s+with|choosing|using|picking|switching)|no\s+longer\s+(?:use|using|work|working|live|living|need|want)|actually\s+(?:(?:i|we)\s+)?(?:now|switched|changed|moved|updated|decided)|(?:increased|decreased|raised|lowered|bumped|reduced|cut|doubled)\s+[^.|]{1,45}\s+to\b|now\s+(?:i'm|i\s+am|we're|we\s+are)\s+(?:using|working|living|running|going\s+with))\b/i;
+
 const STEM_CACHE = new Map();
 
 /**
@@ -103,6 +105,42 @@ export function stemToken(word) {
 export function isTemporalOrLineageQuery(query) {
     if (!query || typeof query !== 'string') return false;
     return /\b(before|prior|previous|previously|original|originally|initial|initially|first|history|historical|timeline|chronological|chronologically|order|sequence|evolution|supersede|superseded|used\s+to|formerly|migrated\s+from|changed\s+from|when\s+did|what\s+was|over\s+time|across\s+sessions|across\s+my|throughout\s+our|summary|summarize|progressed|evolved)\b/i.test(query);
+}
+
+/**
+ * Detects whether a query explicitly asks to reconstruct the chronological order or sequence of events.
+ * @param {string} query
+ * @returns {boolean}
+ */
+export function isSequenceOrderQuery(query) {
+    if (!query || typeof query !== 'string') return false;
+    return /\b(chronological|chronologically|in\s+what\s+order|what\s+order|order\s+of|sequence\s+of|from\s+first\s+to\s+last|from\s+earliest\s+to\s+latest|exact\s+order|correct\s+order|order\s+did)\b/i.test(query);
+}
+
+/**
+ * Detects whether a query asks for the current, latest, or updated value of an evolving fact.
+ * @param {string} query
+ * @returns {boolean}
+ */
+export function isKnowledgeUpdateQuery(query) {
+    if (!query || typeof query !== 'string') return false;
+    return /\b(current|currently|latest|most\s+recent|updated|changed\s+to|switched\s+to|ended\s+up|now)\b/i.test(query);
+}
+
+/**
+ * Detects whether a query is a generative, task-execution, or advisory request (where standing user
+ * formatting instructions and preferences apply directly) vs a retrospective past-fact recall question.
+ * @param {string} query
+ * @returns {boolean}
+ */
+export function isGenerativeOrAdvisoryQuery(query) {
+    if (!query || typeof query !== 'string') return false;
+    const trimmed = query.trim();
+    if (isKnowledgeUpdateQuery(trimmed) || isSequenceOrderQuery(trimmed)) return false;
+    if (/\b(tell\s+me|let\s+me\s+know|remind\s+me|recall|remember\s+when|remember\s+what|confirm|verify|check\s+whether|what\s+did\s+(?:i|we)|when\s+did\s+(?:i|we)|where\s+did\s+(?:i|we)|which\s+[a-z0-9_\s]{1,25}\s+did\s+(?:i|we)|have\s+(?:i|we)\s+ever|did\s+(?:i|we)\s+ever|how\s+many|how\s+long|how\s+much|summary\s+of\s+our|summarize\s+our|across\s+(?:all\s+)?(?:our\s+|my\s+)?sessions|throughout\s+our)\b/i.test(trimmed)) {
+        return false;
+    }
+    return /^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:help\s+me\s+)?(?:write|draft|create|generate|build|implement|design|refactor|suggest|recommend|outline|plan|propose|advise|brainstorm|come\s+up\s+with|put\s+together)\b|(?:help\s+me\s+)?(?:write|draft|create|generate|build|implement|design|refactor|suggest|recommend|outline|plan|propose|brainstorm)\b|(?:give|provide)\s+me\s+(?:a|an|some)\b|what\s+(?:should\s+i|would\s+you\s+recommend|are\s+some\s+good|ideas)|how\s+(?:should\s+i|can\s+i)\b)/i.test(trimmed);
 }
 
 /**

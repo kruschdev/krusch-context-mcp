@@ -1,4 +1,4 @@
-# 📖 Krusch Context MCP Tool Reference (v1.8.1)
+# 📖 Krusch Context MCP Tool Reference (v1.9.0)
 
 > Auto-generated from source definitions in `src/index.js`. Run `npm run docs:generate` to synchronize.
 

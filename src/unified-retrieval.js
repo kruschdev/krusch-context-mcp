@@ -12,7 +12,7 @@ import { getEmbedding } from './embedding-helper.js';
 import { prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from './prune-helper.js';
 import { detectCurrentProject } from './project-helper.js';
 import { compileProjectState, normalizeCategory } from './memory-engine.js';
-import { getProjectDb, cosineSimilarity, getParsedEmbedding } from './sqlite-engine.js';
+import { getProjectDb, cosineSimilarity, getParsedEmbedding, searchMemoryFts } from './sqlite-engine.js';
 import {
     CHARS_PER_ESTIMATED_TOKEN,
     fnv1a32,
@@ -21,8 +21,12 @@ import {
     GENERIC_INFRA_WORDS,
     META_QUERY_WORDS,
     DIRECTIVE_REGEX,
+    STATE_TRANSITION_REGEX,
     stemToken,
     isTemporalOrLineageQuery,
+    isSequenceOrderQuery,
+    isKnowledgeUpdateQuery,
+    isGenerativeOrAdvisoryQuery,
     isSyntheticConstantVector,
     extractQueryTokens,
     estimateTokens
@@ -30,22 +34,56 @@ import {
 import {
     buildMemoryLineageChain,
     detectActiveConflicts,
-    computeUnattestedQueryTerms
+    detectTemporalUpdates,
+    computeUnattestedQueryTerms,
+    computeCorpusUnattestedTerms
 } from './retrieval-epistemic.js';
 
 export {
     CHARS_PER_ESTIMATED_TOKEN,
     stemToken,
     isTemporalOrLineageQuery,
+    isSequenceOrderQuery,
     extractQueryTokens,
     estimateTokens,
     buildMemoryLineageChain,
-    detectActiveConflicts
+    detectActiveConflicts,
+    detectTemporalUpdates
 };
 
 const DECAY_RATE = 0.01;
 const MAX_FEAT_CACHE_ENTRIES = 10000;
 const dbRowFeatureCache = new WeakMap();
+
+/**
+ * Formats a compact single-line milestone entry for the Chronological Event Sequence index,
+ * preserving Session/Date metadata and USER/ASSISTANT substance while stripping raw `[... | Turn #X/Y]`
+ * headers so summary blocks never duplicate primary turn-ID citations.
+ * @param {string} rawContent
+ * @param {number} maxChars
+ * @returns {{ metaBadge: string, summary: string }}
+ */
+function formatCompactTimelineEntry(rawContent, maxChars = 190) {
+    const str = String(rawContent || '');
+    const headerMatch = str.match(/^\[([^\]]+)\]\s*/);
+    let metaBadge = '';
+    let body = str;
+    if (headerMatch) {
+        body = str.slice(headerMatch[0].length);
+        const rawHeader = headerMatch[1];
+        const sessMatch = rawHeader.match(/\bSession\s+(\d+)\b/i);
+        const dateMatch = rawHeader.match(/\bDate:\s*([^|]+?)(?:\s*\||$)/i);
+        const parts = [];
+        if (sessMatch) parts.push(`Session ${sessMatch[1]}`);
+        if (dateMatch) parts.push(dateMatch[1].trim());
+        if (parts.length > 0) metaBadge = ` (${parts.join(' · ')})`;
+    }
+    const condensed = prunePreSynthesis(body, { maxChars })
+        .replace(/\[[^\]]*\bTurn\s*#\d+(?:\/\d+)?[^\]]*\]\s*/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return { metaBadge, summary: condensed };
+}
 
 /**
  * Packs ranked context items into a single Markdown payload respecting limit_tokens.
@@ -58,7 +96,13 @@ const dbRowFeatureCache = new WeakMap();
  * @returns {{contextText: string, packedCount: number, totalTokens: number, citations: Array, packedItems: Array, conflicts: Array}}
  */
 export function packTokenBudget(items, limitTokens = 4000, queryTerms = []) {
-    const sorted = [...items].sort((a, b) => b.score - a.score);
+    const sorted = [...items].sort((a, b) => {
+        const sDiff = b.score - a.score;
+        if (Math.abs(sDiff) > 1e-6) return sDiff;
+        const uDiff = (b._unclampedScore ?? b.score) - (a._unclampedScore ?? a.score);
+        if (Math.abs(uDiff) > 1e-6) return uDiff;
+        return Number(b.id || 0) - Number(a.id || 0);
+    });
     const maxCandidates = Math.min(sorted.length, Math.max(160, Math.ceil(limitTokens / 20)));
 
     // Ensure multi-arm recall: union of top hybrid-scored, top semantic, top user-IDF, and top full-IDF candidates
@@ -138,6 +182,7 @@ export function packTokenBudget(items, limitTokens = 4000, queryTerms = []) {
 
         if (deduped.length > 4 && limitTokens >= 2000) {
             const isBroad = deduped.some(x => x._isBroad);
+            const isGenAdvisory = deduped.some(x => x._generativeAdvisoryMode);
             // Build session-stratified round-robin order for multi-session coverage
             const bySess = new Map();
             for (const x of deduped) {
@@ -153,7 +198,6 @@ export function packTokenBudget(items, limitTokens = 4000, queryTerms = []) {
                     if (r < list.length) sessStratified.push(list[r]);
                 }
             }
-
             const topDirectives = [...deduped]
                 .filter(x => x._isStandingDirective)
                 .sort((a, b) => ((b.userOverlap || 0) * 0.55 + (b.semanticScore || 0) * 0.45) - ((a.userOverlap || 0) * 0.55 + (a.semanticScore || 0) * 0.45));
@@ -161,9 +205,13 @@ export function packTokenBudget(items, limitTokens = 4000, queryTerms = []) {
             const topUserIdf = [...deduped].sort((a, b) => (b.userOverlap || 0) - (a.userOverlap || 0)).slice(0, 20);
             const topSemRem = [...deduped].sort((a, b) => (b.semanticScore || 0) - (a.semanticScore || 0)).slice(0, 20);
             const topIdfRem = [...deduped].sort((a, b) => (b.idfOverlap || 0) - (a.idfOverlap || 0)).slice(0, 16);
-            const boundedSessStratified = sessStratified.slice(0, Math.max(15, sessLists.length * 3));
-            const prioritySet = isBroad
-                ? new Set([
+            const boundedSessStratified = sessStratified.slice(
+                0,
+                isBroad ? Math.max(24, sessLists.length * 4) : Math.max(15, sessLists.length * 3)
+            );
+            let prioritySet;
+            if (isBroad) {
+                prioritySet = new Set([
                     ...deduped.slice(0, 16),
                     ...reordered.slice(0, 10),
                     ...topSessOpeners.slice(0, 8),
@@ -171,8 +219,24 @@ export function packTokenBudget(items, limitTokens = 4000, queryTerms = []) {
                     ...topUserIdf,
                     ...topSemRem,
                     ...deduped
-                ])
-                : new Set([
+                ]);
+            } else if (isGenAdvisory) {
+                prioritySet = new Set([
+                    ...deduped.slice(0, 5),
+                    ...topDirectives.slice(0, 5),
+                    ...deduped.slice(5, 12),
+                    ...reordered.slice(0, 6),
+                    ...topDirectives.slice(5, 8),
+                    ...deduped.slice(12, 24),
+                    ...topUserIdf,
+                    ...topSemRem,
+                    ...topIdfRem,
+                    ...topDirectives,
+                    ...boundedSessStratified,
+                    ...deduped
+                ]);
+            } else {
+                prioritySet = new Set([
                     ...deduped.slice(0, 12),
                     ...reordered.slice(0, 8),
                     ...topDirectives.slice(0, 8),
@@ -184,6 +248,7 @@ export function packTokenBudget(items, limitTokens = 4000, queryTerms = []) {
                     ...boundedSessStratified,
                     ...deduped
                 ]);
+            }
             orderedCandidates = [...prioritySet];
         } else {
             orderedCandidates = [...reordered, ...remaining];
@@ -340,6 +405,10 @@ export async function unifiedRetrieve({
     // 3. Search project memories from local SQLite cache (Full-Store Hybrid Pre-Filter + Lineage Resolution)
     let allCandidateRows = [];
     let storageError = null;
+    const sequenceOrderMode = !isWildcard && isSequenceOrderQuery(rawQuery);
+    const knowledgeUpdateMode = !isWildcard && isKnowledgeUpdateQuery(rawQuery);
+    const generativeAdvisoryMode = !isWildcard && isGenerativeOrAdvisoryQuery(rawQuery);
+    const evaluatedNuggets = [];
     if (targetProject) {
         try {
             const db = await getProjectDb(targetProject);
@@ -347,7 +416,7 @@ export async function unifiedRetrieve({
                 const rowCache = new Map();
                 const selectCols = (isWildcard || !embeddingArray)
                     ? `id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at`
-                    : `id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at, embedding`;
+                    : `id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at, embedding, embedding_blob`;
 
                 const candidateMap = new Map();
 
@@ -384,39 +453,50 @@ export async function unifiedRetrieve({
                     }
 
                     // 3b. Full-store lexical scan across SUPERSEDED rows and any deep ACTIVE rows beyond maxActiveVecScan
+                    // Uses Porter-stemmed SQLite FTS5 BM25 index first (O(log N) at 1M+ token scale), with LIKE fallback
                     const hasSuperseded = db.prepare(`SELECT 1 FROM ide_agent_memory WHERE status = 'SUPERSEDED' LIMIT 1`).get();
                     const searchTerms = domainTerms.length > 0 ? domainTerms : queryTerms;
                     if (searchTerms.length > 0 && (hasSuperseded || vecRows.length === maxActiveVecScan)) {
-                        const matchExprs = [];
-                        const matchParams = [];
-                        const likeClauses = [];
-                        const whereParams = [];
-                        for (const term of searchTerms.slice(0, 12)) {
-                            const rootTerm = stemToken(term);
-                            const escaped = rootTerm.replace(/[\\%_]/g, '\\$&');
-                            const pat = `%${escaped}%`;
-                            const clause = `(LOWER(content) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(tags, '')) LIKE ? ESCAPE '\\')`;
-                            matchExprs.push(`(CASE WHEN ${clause} THEN 1 ELSE 0 END)`);
-                            matchParams.push(pat, pat);
-                            likeClauses.push(clause);
-                            whereParams.push(pat, pat);
+                        let lexRows = searchMemoryFts(db, searchTerms, {
+                            includeSuperseded: Boolean(hasSuperseded),
+                            includeActiveBeforeId: (vecRows.length === maxActiveVecScan && Number.isFinite(minVecId)) ? minVecId : null,
+                            category: normCategory,
+                            selectCols,
+                            limit: 300
+                        });
+                        if (!lexRows || (lexRows.length === 0 && hasSuperseded)) {
+                            const matchExprs = [];
+                            const matchParams = [];
+                            const likeClauses = [];
+                            const whereParams = [];
+                            for (const term of searchTerms.slice(0, 12)) {
+                                const rootTerm = stemToken(term);
+                                const escaped = rootTerm.replace(/[\\%_]/g, '\\$&');
+                                const pat = `%${escaped}%`;
+                                const clause = `(LOWER(content) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(tags, '')) LIKE ? ESCAPE '\\')`;
+                                matchExprs.push(`(CASE WHEN ${clause} THEN 1 ELSE 0 END)`);
+                                matchParams.push(pat, pat);
+                                likeClauses.push(clause);
+                                whereParams.push(pat, pat);
+                            }
+                            const scopeClause = (!lexRows && vecRows.length === maxActiveVecScan)
+                                ? `(status = 'SUPERSEDED' OR (status = 'ACTIVE' AND id < ${Number.isFinite(minVecId) ? minVecId : 0}))`
+                                : `status = 'SUPERSEDED'`;
+                            let lexSql = `
+                                SELECT ${selectCols}, (${matchExprs.join(' + ')}) AS _lex_hits
+                                FROM ide_agent_memory
+                                WHERE ${scopeClause}
+                            `;
+                            const sqlParams = [...matchParams];
+                            if (normCategory) {
+                                lexSql += ` AND category = ?`;
+                                sqlParams.push(normCategory);
+                            }
+                            sqlParams.push(...whereParams);
+                            lexSql += ` AND (${likeClauses.join(' OR ')}) ORDER BY _lex_hits DESC, id DESC LIMIT 300`;
+                            lexRows = db.prepare(lexSql).all(...sqlParams);
                         }
-                        const scopeClause = vecRows.length === maxActiveVecScan
-                            ? `(status = 'SUPERSEDED' OR (status = 'ACTIVE' AND id < ${Number.isFinite(minVecId) ? minVecId : 0}))`
-                            : `status = 'SUPERSEDED'`;
-                        let lexSql = `
-                            SELECT ${selectCols}, (${matchExprs.join(' + ')}) AS _lex_hits
-                            FROM ide_agent_memory
-                            WHERE ${scopeClause}
-                        `;
-                        const sqlParams = [...matchParams];
-                        if (normCategory) {
-                            lexSql += ` AND category = ?`;
-                            sqlParams.push(normCategory);
-                        }
-                        sqlParams.push(...whereParams);
-                        lexSql += ` AND (${likeClauses.join(' OR ')}) ORDER BY _lex_hits DESC, id DESC LIMIT 300`;
-                        for (const row of db.prepare(lexSql).all(...sqlParams)) {
+                        for (const row of lexRows) {
                             rowCache.set(Number(row.id), row);
                             if (row.status === 'ACTIVE') {
                                 const existing = candidateMap.get(Number(row.id));
@@ -498,9 +578,25 @@ export async function unifiedRetrieve({
                         const userStems = new Set(userStemsArr);
                         const userStemSeq = userStemsArr.join(' ');
                         const isStandingDirective = r.category === 'invariant' || (hasDialogueTurn && DIRECTIVE_REGEX.test(userRaw));
+                        const hasStateTransition = hasDialogueTurn
+                            ? STATE_TRANSITION_REGEX.test(userRaw)
+                            : STATE_TRANSITION_REGEX.test(lowerContent);
                         const sessMatch = lowerContent.match(/\[[^\]]*\bsession[\s_-]+(\d+)\b/i);
                         const sessionId = sessMatch ? Number(sessMatch[1]) : null;
-                        cachedFeat = { lowerContent, lowerTags, lowerLineage, combinedText, rowStems, userStems, userStemSeq, userRaw, hasDialogueTurn, isStandingDirective, sessionId };
+                        cachedFeat = {
+                            lowerContent,
+                            lowerTags,
+                            lowerLineage,
+                            combinedText,
+                            rowStems,
+                            userStems,
+                            userStemSeq,
+                            userRaw,
+                            hasDialogueTurn,
+                            isStandingDirective,
+                            hasStateTransition,
+                            sessionId
+                        };
                         if (featCache.size >= MAX_FEAT_CACHE_ENTRIES) {
                             const oldestKey = featCache.keys().next().value;
                             if (oldestKey !== undefined) featCache.delete(oldestKey);
@@ -517,6 +613,7 @@ export async function unifiedRetrieve({
                     r._lowerTags = cachedFeat.lowerTags;
                     r._combinedText = cachedFeat.combinedText;
                     r._isStandingDirective = cachedFeat.isStandingDirective;
+                    r._hasStateTransition = Boolean(cachedFeat.hasStateTransition);
                     r._sessionId = cachedFeat.sessionId;
                     if (r._sessionId !== null) {
                         const sPos = sessionCounters.get(r._sessionId) || 0;
@@ -545,7 +642,8 @@ export async function unifiedRetrieve({
                 const skipStatePacked = include_state && (isWildcard || allCandidateRows.length < 30);
                 const rawScoredMemoryItems = [];
 
-                for (const r of allCandidateRows) {
+                for (let rowIdx = 0; rowIdx < allCandidateRows.length; rowIdx++) {
+                    const r = allCandidateRows[rowIdx];
                     if (skipStatePacked && statePackedIds.has(r.id)) {
                         continue; // Avoid re-packing memories already rendered in compileProjectState on small stores
                     }
@@ -557,9 +655,11 @@ export async function unifiedRetrieve({
                     let semanticScore = 0;
                     let idfOverlap = 0;
                     let userOverlap = 0;
+                    let unclampedScore = 0;
 
                     if (isWildcard) {
                         score = 0.85;
+                        unclampedScore = 0.85;
                     } else {
                         if (hasRealQueryEmbedding) {
                             const rowsToScore = [r];
@@ -570,8 +670,8 @@ export async function unifiedRetrieve({
                                 }
                             }
                             for (const scoreRow of rowsToScore) {
-                                if (scoreRow.embedding) {
-                                    const vec = getParsedEmbedding(scoreRow.embedding);
+                                if (scoreRow.embedding || scoreRow.embedding_blob) {
+                                    const vec = getParsedEmbedding(scoreRow.embedding, scoreRow.embedding_blob);
                                     if (vec && !isSyntheticConstantVector(vec)) {
                                         const sim = cosineSimilarity(embeddingArray, vec);
                                         if (sim > semanticScore) semanticScore = sim;
@@ -638,7 +738,8 @@ export async function unifiedRetrieve({
                                 const hybridScore = semanticScore > 0
                                     ? semanticScore * 0.48 + idfOverlap * 0.52 + 0.16 * Math.min(semanticScore, idfOverlap)
                                     : lexicalScore;
-                                score = Math.min(0.99, Math.max(semanticScore, lexicalScore, hybridScore));
+                                unclampedScore = Math.max(semanticScore, lexicalScore, hybridScore);
+                                score = Math.min(0.99, unclampedScore);
                             }
                         } else {
                             // Zero lexical term overlap: require strong genuine semantic similarity (>= 0.68) on atomic rules,
@@ -651,6 +752,9 @@ export async function unifiedRetrieve({
                         if (r._hasDialogueTurn && semanticScore > score) {
                             score = semanticScore;
                         }
+                        if (score > unclampedScore) {
+                            unclampedScore = score;
+                        }
 
                         // Exact and stem-normalized multi-word query phrase match boost
                         if (queryPhrases.length > 0 && score > 0.42) {
@@ -660,18 +764,41 @@ export async function unifiedRetrieve({
                                 : 0;
                             const bestPhraseHits = Math.max(phraseHits, stemPhraseHits);
                             if (bestPhraseHits > 0) {
-                                score = Math.min(0.99, score + Math.min(0.12, bestPhraseHits * 0.05));
+                                const phraseBoost = Math.min(0.12, bestPhraseHits * 0.05);
+                                unclampedScore += phraseBoost;
+                                score = Math.min(0.99, score + phraseBoost);
                             }
                         }
 
-                        // Boost standing invariants/preferences when semantic embeddings are active on non-temporal queries
-                        if (hasRealQueryEmbedding && !isBroadQuery && !temporalMode && r._isStandingDirective) {
+                        // Boost explicit user state transitions and chronological progression on Knowledge Update queries
+                        if (!isBroadQuery && !sequenceOrderMode && score > 0.46) {
+                            if (knowledgeUpdateMode) {
+                                if (r._hasStateTransition && (idfOverlap >= 0.16 || userOverlap >= 0.16 || semanticScore >= 0.56)) {
+                                    unclampedScore += 0.07;
+                                    score = Math.min(0.99, score + 0.07);
+                                }
+                                if ((idfOverlap >= 0.20 || semanticScore >= 0.58) && corpusN > 1) {
+                                    const progBoost = 0.035 * (rowIdx / (corpusN - 1));
+                                    unclampedScore += progBoost;
+                                    score = Math.min(0.99, score + progBoost);
+                                }
+                            } else if (r._hasStateTransition && (userOverlap >= 0.24 || (idfOverlap >= 0.24 && semanticScore >= 0.58))) {
+                                unclampedScore += 0.04;
+                                score = Math.min(0.99, score + 0.04);
+                            }
+                        }
+
+                        // Boost standing invariants/preferences when semantic embeddings are active on non-temporal or generative/advisory queries
+                        if (hasRealQueryEmbedding && !isBroadQuery && (!temporalMode || generativeAdvisoryMode) && r._isStandingDirective) {
                             if ((r.category === 'invariant' || r._isStandingDirective) && score > 0.42) {
                                 const invBoost = (allCandidateRows.length < 30 || idfOverlap >= 0.25 || semanticScore >= 0.66) ? 0.14 : 0.06;
+                                unclampedScore += invBoost;
                                 score = Math.min(0.98, score + invBoost);
                             }
                             if (isEpisodicStore && r._hasDialogueTurn && semanticScore >= 0.38) {
-                                score = Math.max(score, semanticScore + 0.22, 0.66);
+                                const dirFloor = Math.max(semanticScore + 0.22, 0.66);
+                                score = Math.max(score, dirFloor);
+                                unclampedScore = Math.max(unclampedScore, dirFloor);
                             }
                         }
 
@@ -680,21 +807,27 @@ export async function unifiedRetrieve({
                             const openerBoost = isBroadQuery
                                 ? (r._sessionPos === 0 ? 0.14 : 0.11)
                                 : 0.06;
+                            unclampedScore += openerBoost;
                             score = Math.min(0.99, score + openerBoost);
                         }
 
                         // Boost items with multi-step lineage on explicit temporal/ordering queries
                         if (temporalMode && lineage && lineage.length > 1 && score > 0.45) {
+                            unclampedScore += 0.06;
                             score = Math.min(0.99, score + 0.06);
                         }
 
-                        // Gentle temporal recency factor (up to +0.02 for fresh records)
+                        // Gentle temporal recency factor (up to +0.02 for fresh records; state-transition updates allow +0.005 tie-break headroom)
+                        const maxCeiling = (knowledgeUpdateMode && r._hasStateTransition) ? 1.0 : 0.995;
                         if (score > 0.4 && r.created_at) {
                             const ageDays = Math.max(0, (nowMs - new Date(r.created_at).getTime()) / 86_400_000);
                             if (Number.isFinite(ageDays)) {
                                 const recencyBoost = 0.02 * Math.exp(-DECAY_RATE * ageDays);
-                                score = Math.min(1.0, score + recencyBoost);
+                                unclampedScore += recencyBoost;
+                                score = Math.min(maxCeiling, score + recencyBoost);
                             }
+                        } else if (score > maxCeiling) {
+                            score = maxCeiling;
                         }
                     }
 
@@ -711,6 +844,7 @@ export async function unifiedRetrieve({
                         created_at: r.created_at || null,
                         rawScore: score,
                         score,
+                        _unclampedScore: unclampedScore,
                         semanticScore,
                         idfOverlap,
                         userOverlap,
@@ -719,9 +853,13 @@ export async function unifiedRetrieve({
                         _userRaw: r._userRaw,
                         _hasDialogueTurn: r._hasDialogueTurn,
                         _isStandingDirective: r._isStandingDirective,
+                        _hasStateTransition: r._hasStateTransition,
                         _sessionId: r._sessionId,
                         _sessionPos: r._sessionPos,
-                        _isBroad: isBroadQuery
+                        _isBroad: isBroadQuery,
+                        _temporalMode: temporalMode,
+                        _sequenceOrderMode: sequenceOrderMode,
+                        _generativeAdvisoryMode: generativeAdvisoryMode
                     });
                 }
 
@@ -731,7 +869,7 @@ export async function unifiedRetrieve({
                 if (isEpisodicStore && rawScoredMemoryItems.length >= 20 && evalStems.length > 0) {
                     const evalStemSet = new Set(evalStems);
                     const topSeeds = [...rawScoredMemoryItems]
-                        .sort((a, b) => b.rawScore - a.rawScore)
+                        .sort((a, b) => (b._unclampedScore - a._unclampedScore) || (b.rawScore - a.rawScore))
                         .slice(0, 8)
                         .filter(x => x.rawScore >= 0.52);
 
@@ -774,7 +912,9 @@ export async function unifiedRetrieve({
                                 }
                                 if (matchedPrf > 0) {
                                     const prfOverlap = matchedPrf / totalPrfWeight;
-                                    item.rawScore = Math.min(0.99, item.rawScore + 0.14 * prfOverlap);
+                                    const itemCeiling = (knowledgeUpdateMode && item._hasStateTransition) ? 1.0 : 0.995;
+                                    item._unclampedScore += 0.14 * prfOverlap;
+                                    item.rawScore = Math.min(itemCeiling, item.rawScore + 0.14 * prfOverlap);
                                     item.score = item.rawScore;
                                 }
                             }
@@ -832,6 +972,7 @@ export async function unifiedRetrieve({
                     const nugMap = new Map();
                     for (const n of nugRows) nugMap.set(n.key, n);
                     for (const n of nugMap.values()) {
+                        evaluatedNuggets.push(n);
                         if (include_state && statePackedNuggets.has(n.key)) {
                             continue; // Avoid re-packing nuggets already rendered in compileProjectState
                         }
@@ -882,7 +1023,7 @@ export async function unifiedRetrieve({
     const stateDeduction = estimateTokens(stateHeader);
     let headerAndTimelineReserve = 0;
     if (!isWildcard && safeLimitTokens >= 2000 && allCandidateRows.length >= 30) {
-        headerAndTimelineReserve = Math.max(0, (temporalMode ? 1550 : 220) - stateDeduction);
+        headerAndTimelineReserve = Math.max(0, (temporalMode ? 980 : 280) - stateDeduction);
     } else if (!isWildcard && safeLimitTokens >= 400 && safeLimitTokens < 2000) {
         const targetReserve = temporalMode
             ? Math.min(450, Math.floor(safeLimitTokens * 0.28))
@@ -958,6 +1099,14 @@ export async function unifiedRetrieve({
         chronologicalEvents.sort((a, b) => a.id - b.id);
     }
 
+    const unattestedBadge = unattestedQueryTerms.length > 0
+        ? ` | **Unattested Query Terms**: \`${unattestedQueryTerms.join(', ')}\``
+        : '';
+    const stateBadge = (mode === 'state' || include_state) ? ' (State Included)' : '';
+    const fixedHeaderSample = `# 🔍 Unified Context Retrieval: "${rawQuery}"${stateBadge}\n` +
+        `**Epistemic Status**: ${epistemicStatus} | **Tokens**: ~9999 / Budget: ${safeLimitTokens} | ` +
+        `**Items Packed**: ${packed.packedCount} / ${items.length} candidates${unattestedBadge}\n\n`;
+
     let statusSection = '';
     if (storageError) {
         statusSection += `> ⚠️ **STORAGE WARNING**: SQLite retrieval encountered an error (\`${storageError.message}\`). Results may be incomplete.\n\n`;
@@ -971,20 +1120,46 @@ export async function unifiedRetrieve({
         statusSection += `### ⚠️ Contradiction Resolution Alert (\`CONFLICTED\`)\n${conflictLines}\n\n`;
     }
 
-    const unattestedBadge = unattestedQueryTerms.length > 0
-        ? ` | **Unattested Query Terms**: \`${unattestedQueryTerms.join(', ')}\``
-        : '';
-    const stateBadge = (mode === 'state' || include_state) ? ' (State Included)' : '';
-    const fixedHeaderSample = `# 🔍 Unified Context Retrieval: "${rawQuery}"${stateBadge}\n` +
-        `**Epistemic Status**: ${epistemicStatus} | **Tokens**: ~9999 / Budget: ${safeLimitTokens} | ` +
-        `**Items Packed**: ${packed.packedCount} / ${items.length} candidates${unattestedBadge}\n\n`;
-    const remainingTimelineTokens = safeLimitTokens - (
+    const getRemainingAuxTokens = () => safeLimitTokens - (
         packed.totalTokens +
         estimateTokens(stateHeader) +
         estimateTokens(statusSection) +
         estimateTokens(fixedHeaderSample) +
-        3
+        4
     );
+
+    let temporalUpdates = [];
+    if (epistemicStatus === 'SUPPORTED' && !isWildcard && safeLimitTokens >= 1200) {
+        if (!sequenceOrderMode) {
+            temporalUpdates = detectTemporalUpdates(
+                packed.packedItems,
+                domainTerms.length > 0 ? domainTerms : queryTerms
+            );
+            if (temporalUpdates.length > 0) {
+                const evoLines = temporalUpdates.slice(0, 3).map(
+                    u => `- **#${u.older_id} → #${u.newer_id} (Latest)** [\`${u.shared_subject.join(', ')}\`]: Earlier *"${u.older_excerpt}"* → Updated *"${u.newer_excerpt}"*`
+                ).join('\n');
+                const evoBlock = `### 🔄 Chronological State Evolution (Earlier → Latest)\n${evoLines}\n\n`;
+                if (estimateTokens(evoBlock) <= getRemainingAuxTokens()) {
+                    statusSection += evoBlock;
+                }
+            }
+        }
+
+        const corpusUnattestedTerms = computeCorpusUnattestedTerms(
+            distinctiveTerms,
+            allCandidateRows,
+            evaluatedNuggets
+        );
+        if (corpusUnattestedTerms.length > 0) {
+            const groundingBlock = `> ℹ️ **Lexical Grounding Note**: Query term(s) \`${corpusUnattestedTerms.slice(0, 6).join(', ')}\` have zero exact or stemmed occurrences anywhere in this project's memory store. Verify whether the exact queried detail is explicitly attested in the turns below before asserting it as recorded fact.\n\n`;
+            if (estimateTokens(groundingBlock) <= getRemainingAuxTokens()) {
+                statusSection += groundingBlock;
+            }
+        }
+    }
+
+    const remainingTimelineTokens = getRemainingAuxTokens();
 
     let timelineSection = '';
     if (temporalMode && chronologicalEvents.length > 1 && remainingTimelineTokens >= 45) {
@@ -1001,9 +1176,9 @@ export async function unifiedRetrieve({
         const sortedSessEntries = [...bySess.entries()].sort((a, b) => a[0] - b[0]);
         const sessLists = sortedSessEntries.map(e => e[1]);
         const selectedTimeline = [];
-        for (let r = 0; r < 6 && selectedTimeline.length < 15; r++) {
+        for (let r = 0; r < 8 && selectedTimeline.length < 24; r++) {
             for (const list of sessLists) {
-                if (r < list.length && selectedTimeline.length < 15) {
+                if (r < list.length && selectedTimeline.length < 24) {
                     selectedTimeline.push(list[r]);
                 }
             }
@@ -1017,20 +1192,25 @@ export async function unifiedRetrieve({
                 const openers = list.filter(ev => ev.sessionPos <= 2 && String(ev.content || '').length >= 320);
                 const pool = openers.length > 0 ? openers : list;
                 const rep = [...pool].sort((a, b) => (b.score + (b.sessionPos === 0 ? 0.04 : 0)) - (a.score + (a.sessionPos === 0 ? 0.04 : 0)))[0];
-                return `- **Session ${sKey} Primary Focus (#${rep.id})**: ${prunePreSynthesis(String(rep.content || ''), { maxChars: 340 })}`;
+                const compactRep = formatCompactTimelineEntry(rep.content, 195);
+                return `- **Session ${sKey} Primary Focus (#${rep.id})**${compactRep.metaBadge}: ${compactRep.summary}`;
             }).join('\n');
             macroSessionHeader = `#### 🧭 Session-by-Session Macro Progression\n${sessionFocusLines}\n\n`;
         }
 
-        const lineMaxChars = remainingTimelineTokens < 320 ? 120 : 280;
-        const orderedLines = selectedTimeline.map(
-            (ev, idx) => `${idx + 1}. **#${ev.id}** [${ev.status}]: ${prunePreSynthesis(String(ev.content || ''), { maxChars: lineMaxChars })}`
-        );
+        const lineMaxChars = remainingTimelineTokens < 320 ? 110 : 175;
+        const orderedLines = selectedTimeline.map((ev, idx) => {
+            const compactEv = formatCompactTimelineEntry(ev.content, lineMaxChars);
+            return `${idx + 1}. **#${ev.id}** [${ev.status}]${compactEv.metaBadge}: ${compactEv.summary}`;
+        });
         const candidateFull = `${macroSessionHeader}### 📅 Chronological Event Sequence (Oldest → Newest)\n${orderedLines.join('\n')}\n\n`;
         if (estimateTokens(candidateFull) <= remainingTimelineTokens) {
             timelineSection = candidateFull;
         } else {
-            const seqHeader = `### 📅 Chronological Event Sequence (Oldest → Newest)\n`;
+            const keepMacro = (macroSessionHeader && estimateTokens(macroSessionHeader) <= Math.floor(remainingTimelineTokens * 0.48))
+                ? macroSessionHeader
+                : '';
+            const seqHeader = `${keepMacro}### 📅 Chronological Event Sequence (Oldest → Newest)\n`;
             const fittedLines = [];
             for (const line of orderedLines) {
                 const nextCandidate = `${seqHeader}${[...fittedLines, line].join('\n')}\n\n`;
@@ -1048,12 +1228,14 @@ export async function unifiedRetrieve({
         + estimateTokens(statusSection)
         + estimateTokens(timelineSection)
         + estimateTokens(fixedHeaderSample);
+    const orderedBodySection = (sequenceOrderMode && timelineSection)
+        ? `${timelineSection}---\n\n${packed.contextText}`
+        : `${packed.contextText}${timelineSection ? `\n---\n${timelineSection}` : ''}`;
     const retrievalBody = `# 🔍 Unified Context Retrieval: "${rawQuery}"${stateBadge}\n` +
         `**Epistemic Status**: ${epistemicStatus} | **Tokens**: ~${totalReportedTokens} / Budget: ${safeLimitTokens} | ` +
         `**Items Packed**: ${packed.packedCount} / ${items.length} candidates${unattestedBadge}\n\n` +
         statusSection +
-        packed.contextText +
-        (timelineSection ? `\n---\n${timelineSection}` : '');
+        orderedBodySection;
 
     const fullPayload = (isPureDialogueTranscript && stateHeader)
         ? `${retrievalBody}\n---\n${stateHeader}`
@@ -1064,6 +1246,7 @@ export async function unifiedRetrieve({
         citations: packed.citations,
         epistemic_status: epistemicStatus,
         conflicts,
+        temporal_updates: temporalUpdates,
         chronological_order: chronologicalEvents.map(e => e.id),
         unattested_query_terms: unattestedQueryTerms,
         ...(storageError ? { storage_error: storageError.message } : {})

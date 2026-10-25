@@ -82,6 +82,7 @@ export function getSqliteDb(workspaceDir = process.cwd()) {
             content TEXT NOT NULL,
             tags TEXT,
             embedding TEXT,
+            embedding_blob BLOB,
             status TEXT DEFAULT 'ACTIVE',
             supersedes_id INTEGER,
             superseded_by INTEGER,
@@ -163,11 +164,11 @@ export async function checkNearDuplicateMemory({ project, category, embedding, t
         }
     }
 
-    // SQLite in-memory cosine comparison with cached Float64Array vectors
+    // SQLite in-memory cosine comparison with zero-parse Float32Array blobs / cached vectors
     const db = await getProjectDb(project);
     if (!db) return null;
     const rows = db.prepare(`
-        SELECT id, content, category, embedding
+        SELECT id, content, category, embedding, embedding_blob
         FROM ide_agent_memory
         WHERE status = 'ACTIVE'
     `).all();
@@ -176,7 +177,7 @@ export async function checkNearDuplicateMemory({ project, category, embedding, t
     let maxSim = 0;
 
     for (const row of rows) {
-        const rowVec = getParsedEmbedding(row.embedding);
+        const rowVec = getParsedEmbedding(row.embedding, row.embedding_blob);
         if (!rowVec) continue;
         const sim = engineCosineSimilarity(embedding, rowVec);
         if (sim > maxSim) {
