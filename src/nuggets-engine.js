@@ -17,11 +17,12 @@ const VALID_KINDS = new Set(['project', 'user', 'agent']);
  * @param {string} [params.active_project] - Project context for SQLite isolation
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function nuggetRemember({ key, value, kind = 'project', active_project, project, _embedding }) {
-    if (!key || !value) throw new McpError(ErrorCode.InvalidParams, "Missing key or value");
+export async function nuggetRemember({ key, value, content, kind = 'project', active_project, project, _embedding }) {
+    const resolvedValue = value ?? content;
+    if (!key || !resolvedValue) throw new McpError(ErrorCode.InvalidParams, "Missing key or value");
     if (!VALID_KINDS.has(kind)) throw new McpError(ErrorCode.InvalidParams, `Invalid kind: ${kind}. Must be one of: ${[...VALID_KINDS].join(', ')}`);
 
-    const leakedSecretType = scanForSecretLeak(String(value)) || scanForSecretLeak(String(key));
+    const leakedSecretType = scanForSecretLeak(String(resolvedValue)) || scanForSecretLeak(String(key));
     if (leakedSecretType) {
         throw new McpError(
             ErrorCode.InvalidParams,
@@ -31,9 +32,8 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
 
     const mode = getStorageMode();
     const targetProject = active_project || project || (mode === 'sqlite' ? detectCurrentProject() : null);
-    const embeddingArray = _embedding || await getEmbedding(value);
-    if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
-    const embeddingStr = `[${embeddingArray.join(',')}]`;
+    const embeddingArray = _embedding || await getEmbedding(resolvedValue);
+    const embeddingStr = embeddingArray ? `[${embeddingArray.join(',')}]` : null;
 
     if (kind === 'project' && targetProject) {
         const localDb = await getProjectDb(targetProject);
@@ -43,7 +43,7 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
                 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
                 ON CONFLICT (key) DO UPDATE 
                 SET value = excluded.value, kind = excluded.kind, embedding = excluded.embedding, updated_at = CURRENT_TIMESTAMP, pg_synced = 0
-            `).run(key, value, kind, embeddingStr);
+            `).run(key, resolvedValue, kind, embeddingStr);
             
             // Asynchronous write-behind (Compute Cache -> Object Storage)
             pushProjectMemory(targetProject, localDb).catch(e =>
@@ -56,6 +56,7 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
 
     let client = null;
     try {
+        if (!embeddingStr) throw new Error('Offline mode: skipping PostgreSQL vector insert');
         client = await pool.connect();
         await client.query(`
             INSERT INTO ide_agent_nuggets (key, value, kind, embedding)
@@ -63,7 +64,7 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
             ON CONFLICT (key) DO UPDATE 
             SET value = EXCLUDED.value, kind = EXCLUDED.kind, embedding = EXCLUDED.embedding, updated_at = CURRENT_TIMESTAMP
             RETURNING id
-        `, [key, value, kind, embeddingStr]);
+        `, [key, resolvedValue, kind, embeddingStr]);
         return { content: [{ type: "text", text: `[krusch-context] 🧠 Global Nugget remembered (Postgres): '${key}'` }] };
     } catch (err) {
         console.warn(`[nuggets-engine] PostgreSQL unavailable for global nugget: ${err.message}`);
@@ -75,7 +76,7 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
                 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
                 ON CONFLICT (key) DO UPDATE 
                 SET value = excluded.value, kind = excluded.kind, embedding = excluded.embedding, updated_at = CURRENT_TIMESTAMP, pg_synced = 0
-            `).run(key, value, kind, embeddingStr);
+            `).run(key, resolvedValue, kind, embeddingStr);
             return { content: [{ type: "text", text: `[krusch-context] 🧠 Nugget remembered natively in SQLite (.agent/memory.db) [PG fallback]: '${key}'` }] };
         }
         throw err;
@@ -95,18 +96,18 @@ export async function nuggetRemember({ key, value, kind = 'project', active_proj
  * @param {string} [params.project] - Optional alias for active_project
  * @returns {Promise<{content: Array}>} MCP tool response
  */
-export async function nuggetNudges({ query, kinds, limit = 3, active_project, project, _embedding }) {
-    if (!query && !_embedding) throw new McpError(ErrorCode.InvalidParams, "Missing query or embedding");
+export async function nuggetNudges({ query, context, kinds, limit = 3, active_project, project, _embedding }) {
+    const resolvedQuery = query ?? context;
+    if (!resolvedQuery && !_embedding) throw new McpError(ErrorCode.InvalidParams, "Missing query or embedding");
 
     const mode = getStorageMode();
     const targetProject = active_project || project || (mode === 'sqlite' ? detectCurrentProject() : null);
-    const embeddingArray = _embedding || await getEmbedding(query);
-    if (!embeddingArray) throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
+    const embeddingArray = _embedding || await getEmbedding(resolvedQuery);
 
     let combinedResults = [];
 
     // 1. Fetch from Global Postgres (only when in postgres mode or when no local project is targeted)
-    if (mode === 'postgres' || !targetProject) {
+    if (embeddingArray && (mode === 'postgres' || !targetProject)) {
         let client = null;
         try {
             client = await pool.connect();
@@ -141,31 +142,46 @@ export async function nuggetNudges({ query, kinds, limit = 3, active_project, pr
     if (targetProject && (!kinds || kinds.includes('project'))) {
         const localDb = await getProjectDb(targetProject);
         if (localDb) {
-            let sql = `SELECT key, value, kind, created_at, embedding FROM ide_agent_nuggets WHERE embedding IS NOT NULL`;
+            let sql = `SELECT key, value, kind, created_at, embedding FROM ide_agent_nuggets`;
             if (kinds && kinds.length > 0) {
                 const placeholders = kinds.map(() => '?').join(',');
-                sql += ` AND kind IN (${placeholders})`;
+                sql += ` WHERE kind IN (${placeholders})`;
             }
             
             const stmt = localDb.prepare(sql);
             const localRows = kinds && kinds.length > 0 ? stmt.all(...kinds) : stmt.all();
+            const qTokens = String(resolvedQuery || '').toLowerCase().split(/[^a-z0-9_]+/).filter(w => w.length >= 3);
             
             for (const row of localRows) {
-                const dbEmbedding = getParsedEmbedding(row.embedding);
-                if (!dbEmbedding) {
-                    console.warn(`[krusch-context] Warning: Failed to parse JSON embedding for nugget key '${row.key}'`);
-                    continue;
+                if (embeddingArray && row.embedding) {
+                    const dbEmbedding = getParsedEmbedding(row.embedding);
+                    if (dbEmbedding) {
+                        const similarity = cosineSimilarity(embeddingArray, dbEmbedding);
+                        combinedResults.push({
+                            key: row.key,
+                            value: row.value,
+                            kind: row.kind,
+                            created_at: row.created_at,
+                            distance: 1 - similarity,
+                            source: `sqlite:${targetProject}`
+                        });
+                        continue;
+                    }
                 }
-                const similarity = cosineSimilarity(embeddingArray, dbEmbedding);
-                const distance = 1 - similarity;
-                combinedResults.push({
-                    key: row.key,
-                    value: row.value,
-                    kind: row.kind,
-                    created_at: row.created_at,
-                    distance: distance,
-                    source: `sqlite:${targetProject}`
-                });
+                if (qTokens.length > 0) {
+                    const hay = `${row.key} ${row.value}`.toLowerCase();
+                    const hits = qTokens.filter(t => hay.includes(t)).length;
+                    if (hits > 0) {
+                        combinedResults.push({
+                            key: row.key,
+                            value: row.value,
+                            kind: row.kind,
+                            created_at: row.created_at,
+                            distance: Math.max(0.05, 1 - (hits / qTokens.length)),
+                            source: `sqlite:${targetProject}`
+                        });
+                    }
+                }
             }
         }
     }

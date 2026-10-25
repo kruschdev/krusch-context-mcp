@@ -10,6 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const dbCache = new Map();
+const dbMetaCache = new Map();
 
 /**
  * Execute a transaction on DatabaseSync.
@@ -79,7 +80,8 @@ export function cosineSimilarity(vecA, vecB) {
 
 /**
  * Get or initialize a per-project SQLite database connection.
- * Stores a Promise in dbCache to prevent the pull race condition.
+ * Stores a Promise in dbCache to prevent the pull race condition, and verifies
+ * the underlying file inode on cache hits to self-heal rotated or unlinked DBs.
  */
 export async function getProjectDb(projectName) {
     if (!projectName) {
@@ -87,7 +89,27 @@ export async function getProjectDb(projectName) {
     }
     
     if (dbCache.has(projectName)) {
-        return dbCache.get(projectName);
+        const cached = dbCache.get(projectName);
+        if (cached && typeof cached.then !== 'function' && dbMetaCache.has(projectName)) {
+            const meta = dbMetaCache.get(projectName);
+            let isStale = false;
+            try {
+                const st = fs.statSync(meta.dbPath);
+                if (st.ino !== meta.ino) {
+                    isStale = true;
+                }
+            } catch {
+                isStale = true;
+            }
+            if (!isStale) {
+                return cached;
+            }
+            try { cached.close(); } catch {}
+            dbCache.delete(projectName);
+            dbMetaCache.delete(projectName);
+        } else {
+            return cached;
+        }
     }
     
     const initPromise = _initProjectDb(projectName);
@@ -99,10 +121,12 @@ export async function getProjectDb(projectName) {
             dbCache.set(projectName, db);
         } else {
             dbCache.delete(projectName);
+            dbMetaCache.delete(projectName);
         }
         return db;
     } catch (e) {
         dbCache.delete(projectName);
+        dbMetaCache.delete(projectName);
         throw e;
     }
 }
@@ -139,7 +163,27 @@ export function resolveProjectPath(projectName) {
         }
     }
 
-    // 3. Fallback to isolated user project directory
+    // 3. Parent monorepo root match for non-ephemeral projects
+    if (!/^(test_|smoke_)/i.test(safeProjectName)) {
+        const parentMonorepo = path.resolve(__dirname, '../../../');
+        if (
+            path.basename(parentMonorepo) === safeProjectName &&
+            (fs.existsSync(path.join(parentMonorepo, '.agent')) || fs.existsSync(path.join(parentMonorepo, '.git')))
+        ) {
+            return parentMonorepo;
+        }
+        if (process.env.HOMELAB_PATH) {
+            const envMonorepo = path.resolve(process.env.HOMELAB_PATH);
+            if (
+                path.basename(envMonorepo) === safeProjectName &&
+                (fs.existsSync(path.join(envMonorepo, '.agent')) || fs.existsSync(path.join(envMonorepo, '.git')))
+            ) {
+                return envMonorepo;
+            }
+        }
+    }
+
+    // 4. Fallback to isolated user project directory
     const homeDir = process.env.HOME || process.env.USERPROFILE || '/tmp';
     return path.join(homeDir, '.krusch-context', 'projects', safeProjectName);
 }
@@ -202,6 +246,7 @@ async function _initProjectDb(projectName) {
             valid_until DATETIME,
             pg_id INTEGER,
             pg_synced BOOLEAN DEFAULT 0,
+            last_accessed_at DATETIME,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
@@ -247,6 +292,7 @@ async function _initProjectDb(projectName) {
         `ALTER TABLE ide_agent_memory ADD COLUMN valid_until DATETIME;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN invalidated_reason TEXT;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN provenance TEXT;`,
+        `ALTER TABLE ide_agent_memory ADD COLUMN last_accessed_at DATETIME;`,
         `ALTER TABLE ide_agent_nuggets ADD COLUMN project TEXT;`,
         `ALTER TABLE ide_agent_nuggets ADD COLUMN pg_synced BOOLEAN DEFAULT 0;`,
         `ALTER TABLE auditor_feedback ADD COLUMN project TEXT;`
@@ -269,6 +315,9 @@ async function _initProjectDb(projectName) {
         CREATE INDEX IF NOT EXISTS idx_memory_pg_id ON ide_agent_memory(pg_id);
         CREATE INDEX IF NOT EXISTS idx_feedback_project_rule ON auditor_feedback(project, rule_id);
     `);
+
+    const st = fs.statSync(dbPath);
+    dbMetaCache.set(projectName, { dbPath, ino: st.ino });
     
     // Synchronous read-ahead: try pulling from Postgres if configured
     try {
@@ -288,22 +337,28 @@ async function getPgSchemaInfo(client) {
         const res = await client.query(
             `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'ide_agent_memory'`
         );
-        const cols = new Map(res.rows.map(r => [r.column_name, r.data_type]));
-        _pgSchemaInfo = {
+        const rows = Array.isArray(res?.rows) ? res.rows : [];
+        const cols = new Map(rows.map(r => [r.column_name, r.data_type]));
+        const info = {
             hasStatus: cols.has('status'),
+            hasSupersededBy: cols.has('superseded_by'),
             hasInvalidatedReason: cols.has('invalidated_reason'),
             hasProvenance: cols.has('provenance'),
             tagsIsArray: cols.get('tags') === 'ARRAY'
         };
+        if (rows.length > 0) {
+            _pgSchemaInfo = info;
+        }
+        return info;
     } catch {
-        _pgSchemaInfo = {
+        return {
             hasStatus: false,
+            hasSupersededBy: false,
             hasInvalidatedReason: false,
             hasProvenance: false,
             tagsIsArray: false
         };
     }
-    return _pgSchemaInfo;
 }
 
 function normalizeLegacyCat(cat) {
@@ -316,11 +371,21 @@ function normalizeLegacyCat(cat) {
     return 'lesson';
 }
 
+function serializeProvenance(prov) {
+    if (prov === null || prov === undefined || prov === '') return null;
+    if (typeof prov === 'string') return prov;
+    try {
+        return JSON.stringify(prov);
+    } catch {
+        return null;
+    }
+}
+
 /**
  * PULL: Object Storage (Postgres) -> Compute Cache (SQLite)
  */
-export async function pullProjectMemory(projectName, db) {
-    if (!process.env.DATABASE_URL && !process.env.DB_PASSWORD) {
+export async function pullProjectMemory(projectName, db, _pool = pool) {
+    if (_pool === pool && !process.env.DATABASE_URL && !process.env.DB_PASSWORD) {
         return; // Skip if postgres not configured
     }
     if (/^(test_|smoke_)/i.test(String(projectName || ''))) {
@@ -328,28 +393,186 @@ export async function pullProjectMemory(projectName, db) {
     }
     let client;
     try {
-        client = await pool.connect();
+        client = await _pool.connect();
     } catch {
         return; // Postgres unavailable
     }
 
     try {
         const schema = await getPgSchemaInfo(client);
-        // 1. Pull Episodic Memories
-        const memQuery = schema.hasStatus
-            ? `SELECT id::text as id, category, content, tags::text as tags, embedding::text, status, supersedes_id FROM ide_agent_memory WHERE project = $1 ORDER BY created_at DESC LIMIT 200`
-            : `SELECT id::text as id, category, content, tags::text as tags, embedding::text FROM ide_agent_memory WHERE project = $1 ORDER BY created_at DESC LIMIT 200`;
+        // 1. Pull Episodic Memories (full-fidelity status, lineage, invalidation reason, and provenance)
+        const selectCols = [
+            'id::text as id',
+            'category',
+            'content',
+            'tags::text as tags',
+            'embedding::text'
+        ];
+        if (schema.hasStatus) {
+            selectCols.push('status', 'supersedes_id');
+        }
+        if (schema.hasSupersededBy) {
+            selectCols.push('superseded_by');
+        }
+        if (schema.hasInvalidatedReason) {
+            selectCols.push('invalidated_reason');
+        }
+        if (schema.hasProvenance) {
+            selectCols.push('provenance');
+        }
+
+        const memQuery = `SELECT ${selectCols.join(', ')} FROM ide_agent_memory WHERE project = $1 ORDER BY created_at DESC LIMIT 500`;
         const memRes = await client.query(memQuery, [projectName]);
         
+        const findByPgId = db.prepare(`
+            SELECT id, pg_id, pg_synced, status, supersedes_id, superseded_by, invalidated_reason, provenance
+            FROM ide_agent_memory
+            WHERE pg_id = ?
+            LIMIT 1
+        `);
+        const findByContent = db.prepare(`
+            SELECT id
+            FROM ide_agent_memory
+            WHERE content = ?
+            LIMIT 1
+        `);
         const insertMem = db.prepare(`
-            INSERT INTO ide_agent_memory (pg_id, category, content, tags, embedding, status, supersedes_id, pg_synced)
-            SELECT ?, ?, ?, ?, ?, ?, ?, 1 WHERE NOT EXISTS (SELECT 1 FROM ide_agent_memory WHERE pg_id = ? OR content = ?)
+            INSERT INTO ide_agent_memory (
+                pg_id, category, content, tags, embedding, status,
+                supersedes_id, superseded_by, invalidated_reason, provenance, pg_synced
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        `);
+        const updateSyncedMem = db.prepare(`
+            UPDATE ide_agent_memory
+            SET status = ?,
+                supersedes_id = ?,
+                superseded_by = ?,
+                invalidated_reason = ?,
+                provenance = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE pg_id = ? AND pg_synced = 1
+        `);
+        const updateInsertedLineage = db.prepare(`
+            UPDATE ide_agent_memory
+            SET supersedes_id = ?, superseded_by = ?
+            WHERE id = ?
         `);
         
         withTransaction(db, () => {
-            for (const row of memRes.rows) {
+            const pgToLocalId = new Map();
+            const existingMapped = db.prepare(`SELECT id, pg_id FROM ide_agent_memory WHERE pg_id IS NOT NULL`).all();
+            for (const r of existingMapped) {
+                const numPg = Number(r.pg_id);
+                if (Number.isFinite(numPg) && numPg > 0) {
+                    pgToLocalId.set(numPg, Number(r.id));
+                }
+            }
+            const resolveLocalRef = (pgRef) => {
+                if (pgRef === null || pgRef === undefined || pgRef === '') return null;
+                const numRef = Number(pgRef);
+                if (!Number.isFinite(numRef) || numRef <= 0) return null;
+                return pgToLocalId.get(numRef) ?? numRef;
+            };
+
+            const orderedRows = [...(memRes?.rows || [])].reverse();
+            const pendingActions = [];
+
+            for (const row of orderedRows) {
+                if (row.id === null || row.id === undefined) continue;
+                const pgIdStr = String(row.id);
                 const normCat = normalizeLegacyCat(row.category);
-                insertMem.run(row.id, normCat, row.content, row.tags, row.embedding, row.status || 'ACTIVE', row.supersedes_id || null, row.id, row.content);
+                const normStatus = String(row.status || 'ACTIVE').trim().toUpperCase();
+                const normReason = row.invalidated_reason !== undefined && row.invalidated_reason !== null
+                    ? String(row.invalidated_reason)
+                    : null;
+                const serializedProv = serializeProvenance(row.provenance);
+
+                const existing = findByPgId.get(pgIdStr);
+                if (existing) {
+                    pendingActions.push({
+                        type: 'existing',
+                        existing,
+                        row,
+                        pgIdStr,
+                        normStatus,
+                        normReason,
+                        serializedProv
+                    });
+                } else if (!findByContent.get(String(row.content ?? ''))) {
+                    const initSupersedes = resolveLocalRef(row.supersedes_id);
+                    const initSupersededBy = resolveLocalRef(row.superseded_by);
+                    const info = insertMem.run(
+                        pgIdStr,
+                        normCat,
+                        String(row.content ?? ''),
+                        row.tags ?? null,
+                        row.embedding ?? null,
+                        normStatus,
+                        initSupersedes,
+                        initSupersededBy,
+                        normReason,
+                        serializedProv
+                    );
+                    const localId = Number(info.lastInsertRowid);
+                    const numPg = Number(row.id);
+                    if (Number.isFinite(numPg) && numPg > 0) {
+                        pgToLocalId.set(numPg, localId);
+                    }
+                    if (row.supersedes_id || row.superseded_by) {
+                        pendingActions.push({
+                            type: 'inserted',
+                            localId,
+                            row,
+                            initSupersedes,
+                            initSupersededBy
+                        });
+                    }
+                }
+            }
+
+            for (const action of pendingActions) {
+                if (action.type === 'inserted') {
+                    const finalSupersedes = resolveLocalRef(action.row.supersedes_id);
+                    const finalSupersededBy = resolveLocalRef(action.row.superseded_by);
+                    if (finalSupersedes !== action.initSupersedes || finalSupersededBy !== action.initSupersededBy) {
+                        updateInsertedLineage.run(finalSupersedes, finalSupersededBy, action.localId);
+                    }
+                } else if (action.type === 'existing') {
+                    const { existing, row, pgIdStr, normStatus, normReason, serializedProv } = action;
+                    if (Number(existing.pg_synced) === 1) {
+                        const localStatus = String(existing.status || 'ACTIVE').trim().toUpperCase();
+                        const nextStatus = schema.hasStatus ? normStatus : localStatus;
+                        const resolvedSupersedes = resolveLocalRef(row.supersedes_id);
+                        const resolvedSupersededBy = resolveLocalRef(row.superseded_by);
+                        const nextSupersedes = resolvedSupersedes !== null ? resolvedSupersedes : (existing.supersedes_id ?? null);
+                        const nextSupersededBy = resolvedSupersededBy !== null ? resolvedSupersededBy : (existing.superseded_by ?? null);
+                        const nextReason = (schema.hasInvalidatedReason && normReason !== null)
+                            ? normReason
+                            : (existing.invalidated_reason ?? null);
+                        const nextProv = (schema.hasProvenance && serializedProv !== null)
+                            ? serializedProv
+                            : (existing.provenance ?? null);
+
+                        const hasChanges =
+                            nextStatus !== existing.status ||
+                            nextSupersedes !== (existing.supersedes_id ?? null) ||
+                            nextSupersededBy !== (existing.superseded_by ?? null) ||
+                            nextReason !== (existing.invalidated_reason ?? null) ||
+                            nextProv !== (existing.provenance ?? null);
+
+                        if (hasChanges) {
+                            updateSyncedMem.run(
+                                nextStatus,
+                                nextSupersedes,
+                                nextSupersededBy,
+                                nextReason,
+                                nextProv,
+                                pgIdStr
+                            );
+                        }
+                    }
+                }
             }
         });
 
@@ -365,8 +588,8 @@ export async function pullProjectMemory(projectName, db) {
         `);
         
         withTransaction(db, () => {
-            for (const row of nugRes.rows) {
-                insertNug.run(row.key, row.value, row.kind, row.embedding);
+            for (const row of nugRes?.rows || []) {
+                insertNug.run(row.key, row.value, row.kind, row.embedding ?? null);
             }
         });
         
@@ -554,7 +777,7 @@ export async function pushProjectMemory(projectName, db) {
  * Safely closes all cached SQLite project databases.
  */
 export function closeAllDatabases() {
-    for (const [name, entry] of dbCache.entries()) {
+    for (const [, entry] of dbCache.entries()) {
         try {
             if (entry && typeof entry.close === 'function') {
                 entry.close();
@@ -562,4 +785,6 @@ export function closeAllDatabases() {
         } catch (_) {}
     }
     dbCache.clear();
+    dbMetaCache.clear();
+    _pgSchemaInfo = null;
 }

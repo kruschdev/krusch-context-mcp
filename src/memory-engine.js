@@ -521,21 +521,22 @@ export async function addMemory({
 
     const normCat = normalizeCategory(resolvedCategory);
     
-    // 1. Compute embedding
+    // 1. Compute embedding (gracefully null in Zero-GPU offline mode when no provider is configured/reachable)
     const embeddingArray = _embedding || await getEmbedding(content);
-    if (!embeddingArray) {
-        throw new McpError(ErrorCode.InternalError, "Failed to generate embedding");
-    }
 
-    // 2. Near-duplicate detection (non-blocking: proposes revise with candidate id & cosine, does not reject write)
+    // 2. Near-duplicate detection (non-blocking: proposes revise with candidate id & similarity, does not reject write)
     let nearDup = null;
     if (!force && !supersedes_id) {
-        nearDup = await checkNearDuplicateMemory({
-            project: targetProject,
-            category: normCat,
-            embedding: embeddingArray,
-            threshold: 0.85
-        });
+        if (embeddingArray) {
+            nearDup = await checkNearDuplicateMemory({
+                project: targetProject,
+                category: normCat,
+                embedding: embeddingArray,
+                threshold: 0.85
+            });
+        } else if (db) {
+            nearDup = checkOfflineLexicalDuplicate(db, content, 0.82);
+        }
     }
 
     // 3. Process tags (fast deterministic heuristic by default; opt-in LLM tag generation via LLM_AUTO_TAG=true)
@@ -553,7 +554,7 @@ export async function addMemory({
     const anchoredProv = anchorProvenanceToFile(provenance, targetProject);
     const provPayload = JSON.stringify(anchoredProv);
 
-    const embeddingStr = `[${embeddingArray.join(',')}]`;
+    const embeddingStr = embeddingArray ? `[${embeddingArray.join(',')}]` : null;
 
     // 5. Insert into SQLite project DB atomically
     if (db) {
@@ -584,6 +585,7 @@ export async function addMemory({
         pushProjectMemory(targetProject, db).catch(() => {});
 
         const supersedeNote = supersedes_id ? ` (supersedes ID ${supersedes_id})` : '';
+        const offlineNote = !embeddingArray ? ' [offline lexical mode]' : '';
         const nearDupNote = nearDup 
             ? `\n\n⚠️ Near-duplicate memory detected (${(nearDup.similarity * 100).toFixed(1)}% match with Memory #${nearDup.id} [${nearDup.category}]: "${nearDup.content}").\n` +
               `If this memory supersedes or contradicts #${nearDup.id}, call 'revise' with action: 'supersede', target_id: ${nearDup.id}.`
@@ -592,9 +594,10 @@ export async function addMemory({
         const response = {
             content: [{
                 type: "text",
-                text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${targetProject} (${normCat}) #${newId}${supersedeNote}${nearDupNote}`
+                text: `[krusch-context] ✅ Successfully saved memory to SQLite project DB: ${targetProject} (${normCat}) #${newId}${supersedeNote}${offlineNote}${nearDupNote}`
             }],
-            id: newId
+            id: newId,
+            offline: !embeddingArray
         };
 
         if (nearDup) {
@@ -613,6 +616,95 @@ export async function addMemory({
     }
 
     throw new McpError(ErrorCode.InternalError, "Failed to access local database");
+}
+
+/**
+ * Deterministic token-Jaccard near-duplicate detector for Zero-GPU offline writes.
+ */
+function checkOfflineLexicalDuplicate(db, content, threshold = 0.82) {
+    const tokenize = (str) => new Set(
+        String(str || '').toLowerCase().split(/[^a-z0-9_]+/).filter(w => w.length >= 3)
+    );
+    const targetTokens = tokenize(content);
+    if (targetTokens.size === 0) return null;
+
+    const rows = db.prepare(`
+        SELECT id, category, content
+        FROM ide_agent_memory
+        WHERE status = 'ACTIVE'
+        ORDER BY id DESC
+        LIMIT 300
+    `).all();
+
+    let best = null;
+    let maxSim = 0;
+    for (const r of rows) {
+        const candTokens = tokenize(r.content);
+        if (candTokens.size === 0) continue;
+        let inter = 0;
+        for (const t of targetTokens) {
+            if (candTokens.has(t)) inter++;
+        }
+        const union = targetTokens.size + candTokens.size - inter;
+        const sim = union > 0 ? inter / union : 0;
+        if (sim > maxSim) {
+            maxSim = sim;
+            best = { id: r.id, category: r.category, content: r.content, similarity: sim };
+        }
+    }
+    return maxSim >= threshold ? best : null;
+}
+
+/**
+ * Lazily backfills NULL embeddings for active memories saved while in Zero-GPU offline mode.
+ */
+export async function backfillMissingEmbeddings({ project, active_project, limit = 25, _embedFn = getEmbedding } = {}) {
+    const targetProject = project || active_project || detectCurrentProject();
+    const db = await getProjectDb(targetProject);
+    if (!db) return { backfilledCount: 0, remainingNullCount: 0 };
+
+    const nullRows = db.prepare(`
+        SELECT id, content
+        FROM ide_agent_memory
+        WHERE status = 'ACTIVE' AND embedding IS NULL
+        ORDER BY id DESC
+        LIMIT ?
+    `).all(Math.max(1, Number(limit) || 25));
+
+    let backfilledCount = 0;
+    const updStmt = db.prepare(`
+        UPDATE ide_agent_memory
+        SET embedding = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    `);
+
+    for (const row of nullRows) {
+        const vec = await _embedFn(row.content);
+        if (Array.isArray(vec) && vec.length > 0) {
+            updStmt.run(`[${vec.join(',')}]`, row.id);
+            backfilledCount++;
+        } else {
+            break; // Provider still offline; fail fast
+        }
+    }
+
+    if (backfilledCount > 0) {
+        pushProjectMemory(targetProject, db).catch(() => {});
+    }
+
+    const remRow = db.prepare(`
+        SELECT count(*) as count
+        FROM ide_agent_memory
+        WHERE status = 'ACTIVE' AND embedding IS NULL
+    `).get();
+
+    const remCount = remRow ? remRow.count : 0;
+    return {
+        backfilledCount,
+        remainingNullCount: remCount,
+        updated: backfilledCount,
+        remaining: remCount
+    };
 }
 
 
@@ -769,42 +861,159 @@ export async function searchMemory({
 /**
  * Returns memories unreferenced or older than 30 days for decay review, prioritizing non-invariant records.
  */
+function hasMemoryColumn(db, colName) {
+    try {
+        const cols = db.prepare(`PRAGMA table_info(ide_agent_memory)`).all();
+        return Array.isArray(cols) && cols.some(c => c.name === colName);
+    } catch {
+        return false;
+    }
+}
+
+function computeProjectAffinity(row, targetProject) {
+    if (!targetProject || targetProject === 'default' || targetProject === 'homelab' || /^(test_|smoke_)/i.test(String(targetProject))) {
+        return 1;
+    }
+    const projLower = String(targetProject).toLowerCase();
+    let provFile = row?._drift?.provenance?.file || null;
+    if (!provFile && row?.provenance) {
+        try {
+            const parsed = typeof row.provenance === 'string' ? JSON.parse(row.provenance) : row.provenance;
+            provFile = parsed?.file || null;
+        } catch {}
+    }
+    if (provFile && typeof provFile === 'string') {
+        const normFile = provFile.replace(/\\/g, '/').replace(/^\.\//, '');
+        const sibMatch = normFile.match(/^projects\/([^/]+)\//i);
+        if (sibMatch) {
+            return sibMatch[1].toLowerCase() === projLower ? 3 : 0;
+        }
+        if (/^(src|bin|tests|benchmarks|db|docs|templates|scripts)\//i.test(normFile)) {
+            return 3;
+        }
+    }
+    const lowerContent = String(row?.content || '').toLowerCase();
+    if (lowerContent.includes(projLower)) {
+        return 2;
+    }
+    const otherProjRefs = [...lowerContent.matchAll(/\bprojects\/([a-z0-9_-]+)/gi)].map(m => m[1].toLowerCase());
+    if (otherProjRefs.length > 0 && otherProjRefs.every(p => p !== projLower)) {
+        return 0;
+    }
+    return 1;
+}
+
+function sortByProjectAffinity(items, targetProject) {
+    if (!items || items.length <= 1) return items;
+    return items
+        .map((item, idx) => ({ item, idx, aff: computeProjectAffinity(item, targetProject) }))
+        .sort((a, b) => (b.aff - a.aff) || (a.idx - b.idx))
+        .map(x => x.item);
+}
+
+function compactStateText(raw, maxChars) {
+    if (!maxChars || typeof raw !== 'string' || raw.length <= maxChars) return raw;
+    const flat = raw.replace(/\s+/g, ' ').trim();
+    if (flat.length <= maxChars) return flat;
+    const limit = Math.max(40, maxChars - 3);
+    const slice = flat.slice(0, limit);
+    const lastSpace = slice.lastIndexOf(' ');
+    const clean = lastSpace > limit * 0.65 ? slice.slice(0, lastSpace) : slice;
+    return `${clean.replace(/[,;:\s]+$/, '')}...`;
+}
+
+/**
+ * Re-affirms an active memory as verified/referenced, refreshing its 30-day decay window without rewriting content.
+ */
+export async function touchMemory({ id, target_id, project, active_project } = {}) {
+    const resolvedId = target_id ?? id;
+    if (!resolvedId) {
+        throw new McpError(ErrorCode.InvalidParams, "Missing parameter 'id' or 'target_id'");
+    }
+    const targetProject = project || active_project || detectCurrentProject();
+    const db = await getProjectDb(targetProject);
+    if (!db) throw new McpError(ErrorCode.InternalError, "Database unavailable");
+
+    const hasLastAcc = hasMemoryColumn(db, 'last_accessed_at');
+    const sql = hasLastAcc
+        ? `UPDATE ide_agent_memory SET last_accessed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, pg_synced = 0 WHERE id = ? AND status = 'ACTIVE'`
+        : `UPDATE ide_agent_memory SET updated_at = CURRENT_TIMESTAMP, pg_synced = 0 WHERE id = ? AND status = 'ACTIVE'`;
+    const info = db.prepare(sql).run(resolvedId);
+    if (info.changes === 0) {
+        throw new McpError(
+            ErrorCode.InvalidParams,
+            `Active memory #${resolvedId} not found in project '${targetProject}'.`
+        );
+    }
+    return {
+        content: [{
+            type: "text",
+            text: `[krusch-context] ✅ Verified & refreshed freshness window for Memory #${resolvedId}.`
+        }],
+        id: Number(resolvedId),
+        touched: true
+    };
+}
+
+/**
+ * Returns memories unreferenced or older than 30 days for decay review, prioritizing non-invariant records.
+ */
 export async function getStaleMemories({ project, days = 30, limit = 10 } = {}) {
     const targetProject = project || detectCurrentProject();
     const db = await getProjectDb(targetProject);
     if (!db) return [];
 
+    const hasLastAcc = hasMemoryColumn(db, 'last_accessed_at');
+    const tsExpr = hasLastAcc
+        ? `COALESCE(last_accessed_at, updated_at, created_at)`
+        : `COALESCE(updated_at, created_at)`;
+    const fetchPool = Math.max(limit, 30);
+
     const rows = db.prepare(`
-        SELECT id, category, content, created_at, updated_at
+        SELECT id, category, content, provenance, created_at, updated_at
         FROM ide_agent_memory
         WHERE status = 'ACTIVE'
-          AND COALESCE(updated_at, created_at) < datetime('now', '-' || ? || ' days')
+          AND ${tsExpr} < datetime('now', '-' || ? || ' days')
         ORDER BY CASE WHEN category = 'invariant' THEN 1 ELSE 0 END ASC,
-                 COALESCE(updated_at, created_at) ASC
+                 ${tsExpr} ASC
         LIMIT ?
-    `).all(days, limit);
+    `).all(days, fetchPool);
 
-    return rows;
+    if (!targetProject || targetProject === 'default' || targetProject === 'homelab' || /^(test_|smoke_)/i.test(String(targetProject))) {
+        return rows.slice(0, limit);
+    }
+
+    return rows
+        .map((r, idx) => ({
+            r,
+            idx,
+            isInv: r.category === 'invariant' ? 1 : 0,
+            aff: computeProjectAffinity(r, targetProject)
+        }))
+        .sort((a, b) => (a.isInv - b.isInv) || (b.aff - a.aff) || (a.idx - b.idx))
+        .slice(0, limit)
+        .map(x => x.r);
 }
 
 /**
- * Compiles a consolidated project state briefing with KruschNexus INV-12 span drift verification.
+ * Compiles a consolidated project state briefing with KruschNexus INV-12 span drift verification
+ * and bounded token-budget compaction.
  */
-export async function compileProjectState({ project, active_project } = {}) {
+export async function compileProjectState({ project, active_project, max_tokens } = {}) {
     const targetProject = project || active_project || detectCurrentProject();
     const db = await getProjectDb(targetProject);
+    const maxStateTokens = Math.max(300, Number(max_tokens) || Number(process.env.KRUSCH_STATE_MAX_TOKENS) || 2400);
+    const maxCharsBudget = maxStateTokens * 4;
 
-    const decisions = [];
-    const invariants = [];
-    const blockers = [];
-    const bugs = [];
-    const lessons = [];
+    let decisions = [];
+    let invariants = [];
+    let blockers = [];
+    let bugs = [];
+    let lessons = [];
     const handoffs = [];
-    const nuggets = [];
+    let nuggets = [];
     const invalidated = [];
     const drifted = [];
-    const packedIds = [];
-    const packedNuggetKeys = [];
 
     if (db) {
         const rows = db.prepare(`
@@ -816,11 +1025,12 @@ export async function compileProjectState({ project, active_project } = {}) {
         const seenContents = new Set();
 
         for (const r of rows) {
-            if (r.status === 'INVALIDATED') {
+            const normStatus = String(r.status || 'ACTIVE').toUpperCase();
+            if (normStatus === 'INVALIDATED') {
                 if (invalidated.length < 5) invalidated.push(r);
                 continue;
             }
-            if (r.status !== 'ACTIVE') continue;
+            if (normStatus !== 'ACTIVE') continue;
             seenContents.add(String(r.content || '').trim());
 
             const driftCheck = evaluateMemorySpanDrift(r, targetProject, db);
@@ -866,6 +1076,12 @@ export async function compileProjectState({ project, active_project } = {}) {
             } catch {}
         }
 
+        decisions = sortByProjectAffinity(decisions, targetProject);
+        invariants = sortByProjectAffinity(invariants, targetProject);
+        blockers = sortByProjectAffinity(blockers, targetProject);
+        bugs = sortByProjectAffinity(bugs, targetProject);
+        lessons = sortByProjectAffinity(lessons, targetProject);
+
         const nugRows = db.prepare(`SELECT key, value, kind FROM ide_agent_nuggets ORDER BY updated_at ASC`).all();
         const nugMap = new Map();
         for (const n of nugRows) nugMap.set(n.key, n);
@@ -877,6 +1093,17 @@ export async function compileProjectState({ project, active_project } = {}) {
                 nuggets.push(n);
             }
         }
+        if (targetProject && targetProject !== 'default' && targetProject !== 'homelab' && !/^(test_|smoke_)/i.test(String(targetProject))) {
+            const projLower = String(targetProject).toLowerCase();
+            nuggets = nuggets
+                .map((n, idx) => {
+                    const hay = `${n.key || ''} ${n.value || ''}`.toLowerCase();
+                    const aff = hay.includes(projLower) ? 2 : 1;
+                    return { n, idx, aff };
+                })
+                .sort((a, b) => (b.aff - a.aff) || (b.idx - a.idx))
+                .map(x => x.n);
+        }
     }
 
     const stale = await getStaleMemories({ project: targetProject, days: 30 });
@@ -886,90 +1113,150 @@ export async function compileProjectState({ project, active_project } = {}) {
         return r._drift.is_drifted ? ` ⚠️ *[DRIFTED: ${cit}]*` : ` *[Anchor: ${cit}]*`;
     };
 
-    let output = `# 🧠 Compiled Project State: ${targetProject}\n\n`;
+    const renderState = (cfg = null) => {
+        const packedIds = [];
+        const packedNuggetKeys = [];
+        let out = `# 🧠 Compiled Project State: ${targetProject}\n\n`;
 
-    if (handoffs.length > 0) {
-        output += `## 🤝 Active Session Handoff (${handoffs.length})\n`;
-        for (const h of handoffs) {
-            packedNuggetKeys.push(h.key);
-            output += `- **${h.key}**: ${h.value}\n`;
+        if (handoffs.length > 0) {
+            out += `## 🤝 Active Session Handoff (${handoffs.length})\n`;
+            for (const h of handoffs) {
+                packedNuggetKeys.push(h.key);
+                out += `- **${h.key}**: ${compactStateText(h.value, cfg?.handoffChars)}\n`;
+            }
+            out += `\n`;
         }
-        output += `\n`;
-    }
 
-    output += `## 🎯 Decisions & Priorities (${decisions.length})\n`;
-    if (decisions.length === 0) output += `- No active decisions or priorities recorded.\n`;
-    for (const d of decisions.slice(0, 5)) {
-        packedIds.push(d.id);
-        output += `- **#${d.id}**: ${d.content}${formatSpanBadge(d)}\n`;
-    }
-    output += `\n`;
-
-
-    output += `## 🛡️ Project Invariants (${invariants.length})\n`;
-    if (invariants.length === 0) output += `- No invariants recorded.\n`;
-    for (const inv of invariants.slice(0, 5)) {
-        packedIds.push(inv.id);
-        output += `- **#${inv.id}**: ${inv.content}${formatSpanBadge(inv)}\n`;
-    }
-    output += `\n`;
-
-    // Active blockers always surface ahead of resolved historical bug postmortems
-    const bugsAndBlockers = [...blockers, ...bugs];
-    output += `## 🐛 Known Bugs & Blockers (${bugsAndBlockers.length})\n`;
-    if (bugsAndBlockers.length === 0) output += `- Zero active blockers.\n`;
-    for (const b of bugsAndBlockers.slice(0, 5)) {
-        packedIds.push(b.id);
-        output += `- **#${b.id}** [${b.category}]: ${b.content}${formatSpanBadge(b)}\n`;
-    }
-    output += `\n`;
-
-    output += `## 📖 Core Lessons (${lessons.length})\n`;
-    if (lessons.length === 0) output += `- No lessons recorded yet.\n`;
-    for (const l of lessons.slice(0, 5)) {
-        packedIds.push(l.id);
-        output += `- **#${l.id}**: ${l.content}${formatSpanBadge(l)}\n`;
-    }
-    output += `\n`;
-
-    if (nuggets.length > 0) {
-        output += `## ⚡ Steering Nuggets (${nuggets.length})\n`;
-        for (const n of nuggets) {
-            packedNuggetKeys.push(n.key);
-            output += `- **${n.key}**: ${n.value}\n`;
+        const decLimit = cfg?.decisionCount ?? 5;
+        out += `## 🎯 Decisions & Priorities (${decisions.length})\n`;
+        if (decisions.length === 0) out += `- No active decisions or priorities recorded.\n`;
+        for (const d of decisions.slice(0, decLimit)) {
+            packedIds.push(d.id);
+            out += `- **#${d.id}**: ${compactStateText(d.content, cfg?.decisionChars)}${formatSpanBadge(d)}\n`;
         }
-        output += `\n`;
+        out += `\n`;
+
+        const invLimit = cfg?.invariantCount ?? 5;
+        out += `## 🛡️ Project Invariants (${invariants.length})\n`;
+        if (invariants.length === 0) out += `- No invariants recorded.\n`;
+        for (const inv of invariants.slice(0, invLimit)) {
+            packedIds.push(inv.id);
+            out += `- **#${inv.id}**: ${compactStateText(inv.content, cfg?.invariantChars)}${formatSpanBadge(inv)}\n`;
+        }
+        out += `\n`;
+
+        // Active blockers always surface ahead of resolved historical bug postmortems
+        const bugsAndBlockers = [...blockers, ...bugs];
+        const bugLimit = cfg?.bugCount ?? 5;
+        out += `## 🐛 Known Bugs & Blockers (${bugsAndBlockers.length})\n`;
+        if (bugsAndBlockers.length === 0) out += `- Zero active blockers.\n`;
+        for (const b of bugsAndBlockers.slice(0, bugLimit)) {
+            packedIds.push(b.id);
+            const charCap = b.category === 'blocker' ? cfg?.blockerChars : cfg?.bugChars;
+            out += `- **#${b.id}** [${b.category}]: ${compactStateText(b.content, charCap)}${formatSpanBadge(b)}\n`;
+        }
+        out += `\n`;
+
+        const lesLimit = cfg?.lessonCount ?? 5;
+        out += `## 📖 Core Lessons (${lessons.length})\n`;
+        if (lessons.length === 0) out += `- No lessons recorded yet.\n`;
+        for (const l of lessons.slice(0, lesLimit)) {
+            packedIds.push(l.id);
+            out += `- **#${l.id}**: ${compactStateText(l.content, cfg?.lessonChars)}${formatSpanBadge(l)}\n`;
+        }
+        out += `\n`;
+
+        if (nuggets.length > 0) {
+            const nugSlice = cfg?.maxNuggets ? nuggets.slice(0, cfg.maxNuggets) : nuggets;
+            out += `## ⚡ Steering Nuggets (${nuggets.length})\n`;
+            for (const n of nugSlice) {
+                packedNuggetKeys.push(n.key);
+                out += `- **${n.key}**: ${compactStateText(n.value, cfg?.nuggetChars)}\n`;
+            }
+            out += `\n`;
+        }
+
+        if (drifted.length > 0) {
+            const driftSlice = cfg?.maxDrifted ? drifted.slice(0, cfg.maxDrifted) : drifted;
+            out += `## ⚠️ Span-Grounded Drift Review (${drifted.length} drifted)\n`;
+            for (const dr of driftSlice) {
+                const cit = dr.provenance?.citation || dr.provenance?.file || 'anchored file';
+                out += `- Memory #${dr.id} [${dr.category}] (${cit} — ${dr.drift_reason}): "${dr.content.substring(0, 80)}..."\n`;
+            }
+            out += `\n`;
+        }
+
+        if (invalidated.length > 0) {
+            const invRuleSlice = cfg?.maxInvalidated ? invalidated.slice(0, cfg.maxInvalidated) : invalidated;
+            out += `## 🚫 Recently Invalidated Rules (${invalidated.length})\n`;
+            for (const inv of invRuleSlice) {
+                out += `- ~~#${inv.id} (${inv.category})~~ — *Revocation Reason*: ${compactStateText(inv.invalidated_reason || 'Deprecated', cfg?.invalidatedChars)}\n`;
+            }
+            out += `\n`;
+        }
+
+        if (stale.length > 0) {
+            const staleSlice = cfg?.maxStale ? stale.slice(0, cfg.maxStale) : stale;
+            out += `## ⏳ Decay Review (${stale.length} items >30 days old)\n`;
+            for (const s of staleSlice) {
+                out += `- Memory #${s.id} [${s.category}]: "${s.content.substring(0, 80)}..." (Review if still valid)\n`;
+            }
+            out += `\n`;
+        }
+
+        return { out, packedIds, packedNuggetKeys };
+    };
+
+    // Pass 1: Un-compacted rendering (preserves 100% verbatim text on small/medium stores)
+    let rendered = renderState(null);
+
+    // Pass 2: Progressive entry compaction when mature repositories exceed state token budget
+    if (rendered.out.length > maxCharsBudget) {
+        rendered = renderState({
+            handoffChars: 480,
+            invariantChars: 420,
+            blockerChars: 420,
+            decisionChars: 300,
+            lessonChars: 280,
+            bugChars: 210,
+            nuggetChars: 200,
+            maxNuggets: 6,
+            maxDrifted: 5,
+            maxInvalidated: 3,
+            invalidatedChars: 150,
+            maxStale: 5
+        });
     }
 
-    if (drifted.length > 0) {
-        output += `## ⚠️ Span-Grounded Drift Review (${drifted.length} drifted)\n`;
-        for (const dr of drifted) {
-            const cit = dr.provenance?.citation || dr.provenance?.file || 'anchored file';
-            output += `- Memory #${dr.id} [${dr.category}] (${cit} — ${dr.drift_reason}): "${dr.content.substring(0, 80)}..."\n`;
+    // Pass 3: Tight budget compaction when caller supplies a small max_tokens ceiling
+    if (rendered.out.length > maxCharsBudget) {
+        rendered = renderState({
+            decisionCount: 3,
+            invariantCount: 4,
+            bugCount: 3,
+            lessonCount: 3,
+            handoffChars: 240,
+            invariantChars: 220,
+            blockerChars: 220,
+            decisionChars: 160,
+            lessonChars: 150,
+            bugChars: 130,
+            nuggetChars: 120,
+            maxNuggets: 3,
+            maxDrifted: 3,
+            maxInvalidated: 2,
+            invalidatedChars: 100,
+            maxStale: 3
+        });
+        if (rendered.out.length > maxCharsBudget) {
+            rendered.out = rendered.out.slice(0, Math.max(200, maxCharsBudget - 4)).trimEnd() + '\n';
         }
-        output += `\n`;
-    }
-
-    if (invalidated.length > 0) {
-        output += `## 🚫 Recently Invalidated Rules (${invalidated.length})\n`;
-        for (const inv of invalidated) {
-            output += `- ~~#${inv.id} (${inv.category})~~ — *Revocation Reason*: ${inv.invalidated_reason || 'Deprecated'}\n`;
-        }
-        output += `\n`;
-    }
-
-    if (stale.length > 0) {
-        output += `## ⏳ Decay Review (${stale.length} items >30 days old)\n`;
-        for (const s of stale) {
-            output += `- Memory #${s.id} [${s.category}]: "${s.content.substring(0, 80)}..." (Review if still valid)\n`;
-        }
-        output += `\n`;
     }
 
     return {
-        content: [{ type: "text", text: output }],
-        packedIds,
-        packedNuggetKeys
+        content: [{ type: "text", text: rendered.out }],
+        packedIds: rendered.packedIds,
+        packedNuggetKeys: rendered.packedNuggetKeys
     };
 }
 
@@ -988,13 +1275,16 @@ export async function getHealthStats({ project } = {}) {
     let anchoredCount = 0;
     let driftedCount = 0;
     let staleCount = 0;
+    let unembeddedCount = 0;
     const categoryCounts = {};
 
     if (db) {
-        const memRows = db.prepare(`SELECT id, category, status, provenance FROM ide_agent_memory`).all();
+        const memRows = db.prepare(`SELECT id, category, status, provenance, embedding FROM ide_agent_memory`).all();
         for (const r of memRows) {
-            if (r.status === 'ACTIVE') {
+            const normStatus = String(r.status || 'ACTIVE').toUpperCase();
+            if (normStatus === 'ACTIVE') {
                 activeCount++;
+                if (!r.embedding) unembeddedCount++;
                 let normCat = 'lesson';
                 try { normCat = normalizeCategory(r.category); } catch { normCat = 'lesson'; }
                 categoryCounts[normCat] = (categoryCounts[normCat] || 0) + 1;
@@ -1003,20 +1293,24 @@ export async function getHealthStats({ project } = {}) {
                     anchoredCount++;
                     if (driftCheck.is_drifted) driftedCount++;
                 }
-            } else if (r.status === 'SUPERSEDED') {
+            } else if (normStatus === 'SUPERSEDED') {
                 supersededCount++;
-            } else if (r.status === 'INVALIDATED') {
+            } else if (normStatus === 'INVALIDATED') {
                 invalidatedCount++;
             }
         }
         const nugRow = db.prepare(`SELECT count(*) as count FROM ide_agent_nuggets`).get();
         nuggetCount = nugRow ? nugRow.count : 0;
 
+        const hasLastAcc = hasMemoryColumn(db, 'last_accessed_at');
+        const tsExpr = hasLastAcc
+            ? `COALESCE(last_accessed_at, updated_at, created_at)`
+            : `COALESCE(updated_at, created_at)`;
         const staleRow = db.prepare(`
             SELECT count(*) as count
             FROM ide_agent_memory
             WHERE status = 'ACTIVE'
-              AND COALESCE(updated_at, created_at) < datetime('now', '-30 days')
+              AND ${tsExpr} < datetime('now', '-30 days')
         `).get();
         staleCount = staleRow ? staleRow.count : 0;
     }
@@ -1032,6 +1326,9 @@ export async function getHealthStats({ project } = {}) {
         output += `  - ${cat}: ${categoryCounts[cat] || 0}\n`;
     }
     output += `* **Span-Anchored Memories (INV-12)**: ${anchoredCount} (${driftedCount > 0 ? `⚠️ ${driftedCount} drifted` : '✅ 0 drifted'})\n`;
+    if (unembeddedCount > 0) {
+        output += `* **Offline / Unembedded Memories**: ${unembeddedCount} (lexical-indexed)\n`;
+    }
     output += `* **Superseded Lineage**: ${supersededCount}\n`;
     output += `* **Invalidated Records**: ${invalidatedCount}\n`;
     output += `* **Steering Nuggets**: ${nuggetCount}\n`;
@@ -1049,6 +1346,7 @@ export async function getHealthStats({ project } = {}) {
             activeCount,
             anchoredCount,
             driftedCount,
+            unembeddedCount,
             supersededCount,
             invalidatedCount,
             nuggetCount,
