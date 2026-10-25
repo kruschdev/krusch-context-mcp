@@ -1,4 +1,4 @@
-# ⚙️ Setup & Operations Guide (v1.8.0)
+# ⚙️ Setup & Operations Guide (v1.9.0)
 
 > Zero-Docker, SQLite-first setup for AI coding agents.
 > For the canonical tool reference, see [TOOL_REFERENCE.md](TOOL_REFERENCE.md).
@@ -85,7 +85,7 @@ For team environments or multi-machine fleets sharing a centralized persistent d
 1. Create a `.env` file in your workspace:
    ```bash
    STORAGE_MODE="postgres"
-   DATABASE_URL="postgresql://krusch:password@localhost:5432/kruschdb"
+   DATABASE_URL="postgresql://postgres:password@localhost:5432/context_db"
    ```
 2. The server will automatically connect to PostgreSQL and sync with local project caches.
 3. If PostgreSQL is temporarily unreachable, the engine gracefully falls back to local SQLite without crashing.
@@ -94,18 +94,19 @@ For team environments or multi-machine fleets sharing a centralized persistent d
 
 ## 🧠 Optional: Semantic Embedding Backends
 
-By default, `krusch-context-mcp` uses deterministic lexical keyword matching, recency scoring, and heuristic tag indexing. If you wish to enable dense vector embeddings:
+By default, `krusch-context-mcp` uses deterministic lexical keyword matching, Porter-stemmed `FTS5` search (`ide_agent_memory_fts`), recency scoring, and heuristic tag indexing. If you wish to enable dense `1024`-dimensional vector embeddings:
 
-### Option A: Local Ollama (Zero Cloud)
+### Option A: Local Ollama (Zero Cloud, `8,192`-Token Context)
 ```bash
-ollama pull bge-large
+ollama pull snowflake-arctic-embed2
 ```
 In `.env`:
 ```bash
 OLLAMA_URL="http://127.0.0.1:11434"
-EMBED_MODEL="bge-large"
+EMBED_MODEL="snowflake-arctic-embed2"
 EMBED_DIMS=1024
 ```
+*(Also supports `qwen3-embedding:0.6b` / `qwen3-embedding:4b` via Matryoshka `1024d` truncation, `nomic-embed-text`, and legacy `bge-large`.)*
 
 ### Option B: Cloud OpenRouter (Zero Local VRAM)
 In `.env`:

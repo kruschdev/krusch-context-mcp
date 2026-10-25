@@ -61,7 +61,7 @@ To eliminate every external dependency questioned in peer review (multi-node LAN
 
 - **Network & API Isolation**: `OLLAMA_HOST=127.0.0.1:11434`, `GEMINI_API_KEY=""`, zero `.env` files, zero `.agent/context.db` state, and fresh HTTPS download of `Mohammadta/BEAM` (`100K` split) directly from Hugging Face (`datasets-server.huggingface.co`), parsed via zero-dependency [`parseJsonOrPythonLiteral`](../scripts/benchmark_official_beam.js).
 - **Simultaneous 4-Model `100% GPU` Co-Location (`90.5 GB / 97.9 GB` VRAM)**:
-  - **Embedder**: `bge-large:latest` (`0.7 GB`, BAAI BERT 1024-dim — embedded all `3,266` raw dialogue turns + un-prefixed queries from scratch in `52.85s`)
+  - **Embedder**: `bge-large:latest` (`0.7 GB`, BAAI BERT 1024-dim — embedded all `3,266` raw dialogue turns + un-prefixed queries from scratch in `52.85s`; held fixed here for strict apples-to-apples engine comparison against `v1.8.1`, while production `v1.9.0` upgrades the default local embedder to `8,192`-context `snowflake-arctic-embed2`)
   - **Reader**: `gpt-oss:120b` (`64 GB`, OpenAI 117B MXFP4 MoE, `16,384` ctx, `think: "low"`, `num_predict: 2560`)
   - **Primary Judge (32B Dense)**: `qwen2.5:32b` (`21 GB`, Alibaba Qwen 2.5 32B, `4,096` ctx, `temperature: 0`)
   - **Continuity Judge (8B Dense)**: `hermes3:latest` (`5.5 GB`, Nous Hermes 3 Llama-3.1 8B, `4,096` ctx, `temperature: 0`)

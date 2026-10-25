@@ -1,6 +1,6 @@
 # Contributing to `krusch-context-mcp`
 
-Thank you for contributing! To preserve the boring reliability and ergonomic focus of this project, all contributions must respect the **v1.8.0 architectural boundaries**.
+Thank you for contributing! To preserve the boring reliability and ergonomic focus of this project, all contributions must respect the **v1.9.0 architectural boundaries**.
 
 ---
 

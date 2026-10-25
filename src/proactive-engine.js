@@ -664,7 +664,7 @@ export async function handleProactiveNudge({
                 });
                 if (hasRealRuleVector) {
                     try {
-                        const computed = await getEmbedding(queryText.slice(0, 2000));
+                        const computed = await getEmbedding(queryText.slice(0, 2000), { mode: 'query', domain: 'memory' });
                         if (computed && !isSyntheticConstantVector(computed)) {
                             queryEmbedding = computed;
                         }

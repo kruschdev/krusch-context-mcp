@@ -394,7 +394,7 @@ export async function unifiedRetrieve({
     let embeddingArray = _embedding || null;
     if (!embeddingArray && !isWildcard) {
         try {
-            embeddingArray = await getEmbedding(cleanQuery);
+            embeddingArray = await getEmbedding(cleanQuery, { mode: 'query', domain: 'memory' });
         } catch (embErr) {
             console.warn(`[unified-retrieval] Embedding fallback warning: ${embErr.message}`);
             embeddingArray = null;

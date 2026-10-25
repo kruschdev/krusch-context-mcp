@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.9.0] - 2026-10-25
 
 ### Added
+- **Sovereign 8K Embedding Engine Upgrade (`snowflake-arctic-embed2`)**:
+  - Upgraded the default local Ollama embedding model from 512-token `bge-large` to `8,192`-token `snowflake-arctic-embed2` (`1024` dims, ~`664 MB` VRAM) across `src/embedding-helper.js` and `bin/cli.js`.
+  - Added modern Ollama `POST /api/embed` support with automatic HTTP `404` fallback to legacy `/api/embeddings`, model-aware chunk sizing, Matryoshka (`MRL`) dimension truncation (`dimensions: 1024`) for `qwen3-embedding` and `nomic-embed-text`, and asymmetric query formatting (`formatEmbeddingQuery`, `mode: 'query'`) wired across `unifiedRetrieve`, `searchMemory`, `nuggetNudges`, and `handleProactiveNudge`.
 - **Compact Binary `Float32Array` Vector Storage (`embedding_blob`)**:
   - Added `embedding_blob BLOB` migration and lazy startup backfill (`encodeEmbeddingBlob` / `decodeEmbeddingBlob` with unaligned `Uint8Array` buffer slice handling) across `src/sqlite-engine.js`, `src/storage-adapter.js`, and `src/memory-engine.js`. Cuts 1024-dim SQLite vector storage footprint by ~4.5x (`4,096` bytes vs ~18–22 KB JSON text) and eliminates `JSON.parse` overhead on cold scans while maintaining full backward compatibility.
 - **External-Content Porter-Stemmed SQLite FTS5 Index (`ide_agent_memory_fts`)**:

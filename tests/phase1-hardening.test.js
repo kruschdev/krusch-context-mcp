@@ -187,6 +187,62 @@ test('Phase 1 Production Hardening Suite (Zero-GPU Offline, Token Budget, Hybrid
     }
   });
 
+  await t.test('1c. Default snowflake-arctic-embed2 provider, asymmetric query: prefix, and /api/embed 404 fallback', async () => {
+    const envSnap = snapshotEnv(EMBED_ENV_KEYS);
+    const savedEndpoints = [...ollamaQueue.endpoints];
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+
+    try {
+      for (const k of EMBED_ENV_KEYS) delete process.env[k];
+      process.env.OLLAMA_URL = 'http://mock-ollama-arctic:11434';
+      ollamaQueue.endpoints = ['http://mock-ollama-arctic:11434'];
+
+      const provider = getEmbeddingProvider();
+      assert.equal(provider.provider, 'ollama');
+      assert.equal(provider.model, 'snowflake-arctic-embed2');
+      assert.equal(provider.dimensions, 1024);
+
+      let simulate404Once = false;
+      globalThis.fetch = async (url, options) => {
+        const body = JSON.parse(options.body);
+        calls.push({ url, body });
+        if (simulate404Once && url.endsWith('/api/embed')) {
+          simulate404Once = false;
+          return { status: 404, ok: false, text: async () => 'Not Found' };
+        }
+        return {
+          status: 200,
+          ok: true,
+          json: async () => url.endsWith('/api/embed')
+            ? { embeddings: [new Array(1024).fill(0.25)] }
+            : { embedding: new Array(1024).fill(0.5) }
+        };
+      };
+
+      const docVec = await getEmbedding('Store binary Float32Array vector blobs');
+      assert.equal(docVec.length, 1024);
+      assert.ok(calls[0].url.endsWith('/api/embed'));
+      assert.equal(calls[0].body.model, 'snowflake-arctic-embed2');
+      assert.equal(calls[0].body.input, 'Store binary Float32Array vector blobs');
+
+      const queryVec = await getEmbedding('how are vector blobs stored?', { mode: 'query', domain: 'memory' });
+      assert.equal(queryVec.length, 1024);
+      assert.equal(calls[1].body.input, 'query: how are vector blobs stored?');
+
+      simulate404Once = true;
+      const fallbackVec = await getEmbedding('fallback legacy endpoint test');
+      assert.equal(fallbackVec.length, 1024);
+      assert.ok(calls[2].url.endsWith('/api/embed'));
+      assert.ok(calls[3].url.endsWith('/api/embeddings'));
+      assert.equal(calls[3].body.prompt, 'fallback legacy endpoint test');
+    } finally {
+      globalThis.fetch = originalFetch;
+      ollamaQueue.endpoints = savedEndpoints;
+      restoreEnv(envSnap);
+    }
+  });
+
   await t.test('2. Bounded compileProjectState & Project-Affinity Sorting under 4,000-token Turn-1 budget', async () => {
     const proj = makeTestProject('budget');
 

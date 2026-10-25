@@ -1,13 +1,13 @@
 # 🧠 What Makes `krusch-context-mcp` Special
 
 > **Author**: Kevin (`kruschdev`)  
-> **Version**: v1.8.1  
+> **Version**: v1.9.0  
 > **Category**: `#AI` `#MCP` `#DeveloperTools` `#AgentArchitecture` `#SQLite` `#NodeJS`
 
 ![Unified AI Agent Working Memory Engine](assets/krusch_context_mcp_spotlight.png)
 
 > 💡 **Social Caption**:  
-> *Most agent memory tools dump unstructured notes into a flat vector bag and rot within a week. What makes krusch-context-mcp v1.8.1 special? A radical 5-verb contract, closed taxonomy, span-grounded provenance with drift self-healing, temporal lineage, zero-Docker SQLite, and pre-commit invariant steering.*
+> *Most agent memory tools dump unstructured notes into a flat vector bag and rot within a week. What makes krusch-context-mcp v1.9.0 special? A radical 5-verb contract, closed taxonomy, span-grounded provenance with drift self-healing, temporal lineage, Porter FTS5 + 8K-context `snowflake-arctic-embed2` binary `Float32Array` vectors on zero-Docker SQLite, and pre-commit invariant steering.*
 
 ---
 
@@ -28,7 +28,7 @@ Within a week, this breaks down:
 
 ---
 
-## 2. What Makes `krusch-context-mcp` Special in v1.8.1
+## 2. What Makes `krusch-context-mcp` Special in v1.9.0
 
 `krusch-context-mcp` rejects the flat note-bag pattern. Instead, it treats agent memory as a **structured, governed lifecycle**:
 
@@ -129,7 +129,7 @@ In one turn at session start, the agent is fully grounded in the project's livin
   npx krusch-context-mcp init
   ```
   Initializes `.agent/context.db`, configures `.env`, seeds the starter project invariant, installs `AGENTS.md`, and prints copy-paste configurations for Cursor and Claude Code in under 5 seconds.
-* **Operational Honesty**: If an Ollama embedding daemon is available, it uses vector similarity (`bge-large` @ 1024-d). If no embedding service is running, it seamlessly falls back to deterministic lexical search, recency scoring, and tag indexing without crashing.
+* **Operational Honesty**: If an Ollama embedding daemon is available, it uses `8,192`-context dense vector similarity (`snowflake-arctic-embed2` @ `1024`-d, stored as compact `4 KB` binary `Float32Array` blobs with asymmetric `query:` retrieval). If no embedding service is running, it seamlessly falls back to Porter-stemmed `FTS5` lexical search, recency scoring, and tag indexing without crashing.
 * **Optional Fleet Adapter**: For multi-machine homelab fleets, setting `STORAGE_MODE=postgres` connects to PostgreSQL + `pgvector` with zero code changes.
 
 ---
@@ -189,7 +189,7 @@ In v1.8.0, **Codebase RAG was decoupled into [krusch-git](https://github.com/kru
 
 ## 4. Feature Comparison: The Evolution
 
-| Capability | Generic Vector DB | Naive MCP Memory | krusch-context-mcp v1.8.1 |
+| Capability | Generic Vector DB | Naive MCP Memory | krusch-context-mcp v1.9.0 |
 | :--- | :---: | :---: | :---: |
 | **Tool Count** | REST APIs / 10+ | 8–20 tools | **Strictly 5 Canonical Verbs** (~350 schema tokens) |
 | **Write Model** | Raw vectors | Unbounded strings | **Closed Taxonomy** (`decision`, `invariant`, `bug`, etc.) |
@@ -197,8 +197,9 @@ In v1.8.0, **Codebase RAG was decoupled into [krusch-git](https://github.com/kru
 | **Span-Grounded Provenance** | ❌ None | ❌ None | **✅ `INV-12` `quoted_sentence` hash + line self-healing & drift flags** |
 | **Near-Duplicate Guard** | ❌ None | ❌ None | **✅ Cosine >= 0.85 warning + candidate suggestion** |
 | **Pre-Commit Audit** | ❌ None | ❌ None | **✅ `nudge` diff check (max 1–3 high-signal findings)** |
-| **Local Dependencies** | Docker / SaaS | better-sqlite3 / native build | **✅ Node 22 native `node:sqlite` (zero compilation)** |
-| **Embeddings Fallback** | Hard crash | None | **✅ Graceful degradation to lexical + recency** |
+| **Local Storage & Vectors** | Docker / SaaS | JSON text / native build | **✅ Node 22 `node:sqlite` + Porter `FTS5` + `4 KB` `Float32Array` blobs** |
+| **Default Local Embedder** | External API | 512-ctx symmetric | **✅ `snowflake-arctic-embed2` (`8,192` ctx, `1024d`, asymmetric `query:`)** |
+| **Embeddings Fallback** | Hard crash | None | **✅ Graceful degradation to FTS5 lexical + recency** |
 | **Agent Protocol Enforcement** | Manual prompt | Manual prompt | **✅ Automated `AGENTS.md` installer in `init`** |
 
 ---

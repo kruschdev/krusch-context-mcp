@@ -103,8 +103,8 @@ To prevent memory hallucination and database pollution:
 ## 🧠 Embedding Reality & Offline Mode
 
 * **Zero-GPU Default**: If neither Ollama nor an API key is present, the engine runs 100% offline using deterministic keyword extraction, recency scoring, and heuristic tag indexing.
-* **Local Ollama** (Optional): Set `OLLAMA_URL="http://127.0.0.1:11434"` with `EMBED_MODEL="bge-large"` (1024 dims).
-* **Remote Cloud** (Optional): Set `OPENROUTER_API_KEY="sk-..."` with `EMBED_MODEL="baai/bge-large-en-v1.5"` for zero-local-VRAM embeddings.
+* **Local Ollama** (Optional): Set `OLLAMA_URL="http://127.0.0.1:11434"` with `EMBED_MODEL="snowflake-arctic-embed2"` (`8,192`-token context, `1024` dims, ~`664 MB` VRAM, asymmetric `query:` retrieval via `/api/embed`; also supports `qwen3-embedding` MRL `1024d`, `nomic-embed-text`, and legacy `bge-large`).
+* **Remote Cloud** (Optional): Set `OPENROUTER_API_KEY="sk-..."` with `EMBED_MODEL="baai/bge-large-en-v1.5"` (or any `1024`-dim OpenRouter embedding model) for zero-local-VRAM embeddings.
 
 ---
 
@@ -187,7 +187,7 @@ claude mcp add krusch-context -- npx -y krusch-context-mcp
 * **[Canonical Tool Reference](docs/TOOL_REFERENCE.md)**: Generated directly from live schemas (`npm run docs:generate`).
 * **[Architecture & Failure Modes](docs/ARCHITECTURE.md)**: 2-page specification covering schemas, indexes, and invariants.
 * **[Setup & Operations Guide](docs/SETUP.md)**: Zero-Docker setup and optional configurations.
-* **[Migration Guide](docs/MIGRATION.md)**: Step-by-step v1.5 → v1.6 → v1.7 → v1.8.0 mapping.
+* **[Migration Guide](docs/MIGRATION.md)**: Step-by-step v1.5 → v1.6 → v1.7 → v1.8 → v1.9.0 mapping.
 * **[Episodic Memory Guide](docs/EPISODIC_MEMORY.md)**: Deep dive into the closed taxonomy and lifecycle.
 * **[Changelog](CHANGELOG.md)**: Version release notes.
 * **[Official ICLR 2026 BEAM Empirical Report](benchmarks/BEAM_EMPIRICAL_REPORT.md)**: Closed-system `n = 400/400` 100K-split retrieval (`92.97%`) & open-weights E2E QA (`73.53%` / `67.19%`) audit and zero-leakage verification.

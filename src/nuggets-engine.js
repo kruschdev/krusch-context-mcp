@@ -102,7 +102,7 @@ export async function nuggetNudges({ query, context, kinds, limit = 3, active_pr
 
     const mode = getStorageMode();
     const targetProject = active_project || project || (mode === 'sqlite' ? detectCurrentProject() : null);
-    const embeddingArray = _embedding || await getEmbedding(resolvedQuery);
+    const embeddingArray = _embedding || await getEmbedding(resolvedQuery, { mode: 'query', domain: 'memory' });
 
     let combinedResults = [];
 

@@ -210,7 +210,7 @@ async function runInit() {
     const defaultVars = [
         ['STORAGE_MODE', 'sqlite'],
         ['OLLAMA_URL', 'http://127.0.0.1:11434'],
-        ['EMBED_MODEL', 'bge-large'],
+        ['EMBED_MODEL', 'snowflake-arctic-embed2'],
         ['EMBED_DIMS', '1024']
     ];
 

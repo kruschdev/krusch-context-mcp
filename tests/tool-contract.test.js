@@ -121,9 +121,9 @@ describe('Tool Contract & Invariant Suite', () => {
     }
   });
 
-  it('CLI default configuration specifies bge-large and zero bge-m3 references', () => {
+  it('CLI default configuration specifies snowflake-arctic-embed2 and zero bge-m3 references', () => {
     const cliContent = fs.readFileSync(path.join(ROOT_DIR, 'bin', 'cli.js'), 'utf-8');
-    assert.ok(cliContent.includes("bge-large"), 'bin/cli.js must default to bge-large');
+    assert.ok(cliContent.includes("snowflake-arctic-embed2"), 'bin/cli.js must default to snowflake-arctic-embed2');
     assert.ok(!cliContent.includes("bge-m3"), 'bin/cli.js must not reference bge-m3');
   });
 });

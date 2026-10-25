@@ -1,17 +1,18 @@
-# Migration Guide: v1.5 → v1.6 → v1.7 → v1.8.0
+# Migration Guide: v1.5 → v1.6 → v1.7 → v1.8 → v1.9.0
 
-This guide documents the architectural evolution and tool deprecation map for `krusch-context-mcp`.
+This guide documents the architectural evolution, embedding upgrade, and tool deprecation map for `krusch-context-mcp`.
 
 ---
 
-## ⚡ Executive Summary of v1.8.0
+## ⚡ Executive Summary of v1.8+ / v1.9.0
 
-| Dimension | v1.5 – v1.6 | v1.7 | v1.8.0 (Current) |
+| Dimension | v1.5 – v1.6 | v1.7 | v1.8+ / v1.9.0 (Current) |
 |---|---|---|---|
 | **Primary Focus** | Multi-engine monolith (memory + code AST + research + cloud) | Sovereign Triad (13 core + 24 companion tools) | **Lean 5-Verb Project Memory & Steering** |
 | **Tool Count** | 26–61 tools | 13 core / 37 suite | **5 canonical verbs** (`retrieve`, `remember`, `revise`, `nudge`, `health`) |
-| **Default Storage** | PostgreSQL 16 + pgvector + Ollama | Lakebase (`.agent/memory.db` + Postgres push) | **SQLite-First** (`.agent/context.db`, `node:sqlite`) |
-| **External Dependencies** | Docker, PostgreSQL, Ollama, native C++ compilation | `better-sqlite3`, `@opentelemetry/*` | **Zero compilation**, 3 pure JS runtime dependencies |
+| **Default Storage** | PostgreSQL 16 + pgvector + Ollama | Lakebase (`.agent/memory.db` + Postgres push) | **SQLite-First** (`.agent/context.db`, `node:sqlite`, `FTS5` + `Float32Array` blobs) |
+| **Default Local Embedder** | `bge-large` (`512` ctx, `1024d`) | `bge-large` (`512` ctx, `1024d`) | **`snowflake-arctic-embed2`** (`8,192` ctx, `1024d`, ~`664 MB` VRAM, asymmetric `query:`) |
+| **External Dependencies** | Docker, PostgreSQL, Ollama, native C++ compilation | `better-sqlite3`, `@opentelemetry/*` | **Zero compilation**, 2 runtime JS dependencies (`pg` optional) |
 | **Node.js Floor** | Node >= 18 | Node >= 20 | **Node >= 22.0.0** (native `node:sqlite`) |
 | **Codebase Search** | Bundled (`search_code`, `symbol_graph`) | Bundled PG-Git | **Extracted to [`krusch-git`](https://github.com/kruschdev/krusch-git)** |
 | **Domain Tools** | Bundled (`law`, `biz`, `nexus`) | Embedded companion bridges | **Independent MCP server processes** |
@@ -71,6 +72,11 @@ In v1.8.0, all writes (`remember`) enforce a **closed taxonomy** to ensure high-
 | `activity`, `notes` | `lesson` | Tactical learnings and implementation discoveries |
 | `issues`, `deps` | `blocker` | Active obstacles or external dependencies |
 
+### 3. Embedding Model Upgrade (`v1.9.0`: `bge-large` → `snowflake-arctic-embed2`)
+In `v1.9.0`, the default local Ollama embedding model upgrades from `512`-token `bge-large` to **`8,192`-token `snowflake-arctic-embed2`** (`1024` dims, ~`664 MB` VRAM, asymmetric `query:` retrieval via `/api/embed`):
+- **Schema Continuity**: Both models emit `1024`-dimensional vectors (`EMBED_DIMS=1024`), so zero SQLite or `pgvector` column migrations are required.
+- **Vector-Space Consistency**: Because `snowflake-arctic-embed2` and `bge-large` occupy distinct `1024`-d vector spaces, if you upgrade an existing store with pre-`v1.9.0` dense vectors, either pull `ollama pull snowflake-arctic-embed2` and re-embed existing rows (or set `embedding = NULL, embedding_blob = NULL` to trigger automatic backfill), or explicitly set `EMBED_MODEL="bge-large"` in `.env` to retain your legacy vector space.
+
 ---
 
 ## 🚀 Migrating Your Agent Configuration
@@ -85,7 +91,7 @@ Update your MCP configuration file (`mcp_config.json` or `claude_desktop_config.
       "command": "node",
       "args": ["/path/to/krusch-context-mcp/src/index.js", "--profile=core"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres:password@localhost:5432/kruschdb",
+        "DATABASE_URL": "postgresql://postgres:password@localhost:5432/context_db",
         "OLLAMA_URL": "http://localhost:11434"
       }
     }
@@ -93,7 +99,7 @@ Update your MCP configuration file (`mcp_config.json` or `claude_desktop_config.
 }
 ```
 
-### After (v1.8.0, Zero-Docker Default):
+### After (v1.8+ / v1.9.0, Zero-Docker Default):
 ```json
 {
   "mcpServers": {

@@ -76,9 +76,9 @@ Tracks project-scoped developer feedback on proactive auditor findings to dynami
 
 ## 3. Embedding Dimension Invariant
 
-* **Zero-GPU Default**: Deterministic lexical keyword matching, recency scoring, and heuristic tag indexing. Runs 100% offline without external services.
-* **Optional Dense Vectors**: Local Ollama (`bge-large` @ 1024 dims) or cloud OpenRouter (`baai/bge-large-en-v1.5` @ 1024 dims).
-* **Vector Dimension Invariant**: When vector embeddings are enabled, the vector dimension is strictly **`1024`** float elements. Startup diagnostics validate dimension consistency on `health` checks.
+* **Zero-GPU Default**: Deterministic lexical keyword matching, Porter-stemmed `FTS5` search (`ide_agent_memory_fts`), recency scoring, and heuristic tag indexing. Runs 100% offline without external services.
+* **Optional Dense Vectors**: Local Ollama (`snowflake-arctic-embed2` @ `1024` dims, `8,192`-token context, `/api/embed` with `/api/embeddings` fallback and asymmetric `query:` prefixing; also supports `qwen3-embedding` MRL `1024d`, `nomic-embed-text`, and `bge-large`) or cloud OpenRouter (`baai/bge-large-en-v1.5` @ `1024` dims).
+* **Vector Dimension Invariant**: When vector embeddings are enabled, the vector dimension is strictly **`1024`** float elements (`4,096`-byte binary `Float32Array` `embedding_blob` in SQLite). Startup diagnostics and runtime assertions validate dimension and finite-float consistency.
 
 ---
 

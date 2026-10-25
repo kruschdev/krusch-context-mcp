@@ -827,7 +827,7 @@ export async function searchMemory({
     sql += ` ORDER BY created_at DESC LIMIT 250`;
 
     const rows = db.prepare(sql).all(...params);
-    const embeddingArray = _embedding || await getEmbedding(query);
+    const embeddingArray = _embedding || await getEmbedding(query, { mode: 'query', domain: 'memory' });
     const lowerQuery = query.toLowerCase();
 
     const scored = rows.map(r => {

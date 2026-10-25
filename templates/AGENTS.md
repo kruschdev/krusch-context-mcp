@@ -1,6 +1,6 @@
 # Agent Operating Manual & Memory Protocol (`krusch-context-mcp`)
 
-You are paired with a developer using `krusch-context-mcp` (v1.8.0) for cross-session working memory.
+You are paired with a developer using `krusch-context-mcp` (v1.9.0) for cross-session working memory.
 Memory is stored locally in `.agent/context.db` (SQLite).
 
 ## The 5-Verb Memory Protocol
