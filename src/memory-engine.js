@@ -15,7 +15,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { pool } from '../db/pool.js';
-import { getEmbedding } from './embedding-helper.js';
+import { getEmbedding, calibrateQuerySimilarity } from './embedding-helper.js';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { getProjectDb, cosineSimilarity, getParsedEmbedding, encodeEmbeddingBlob, pushProjectMemory, resolveProjectPath, withTransaction } from './sqlite-engine.js';
 import { checkNearDuplicateMemory, getStorageMode } from './storage-adapter.js';
@@ -835,7 +835,7 @@ export async function searchMemory({
         if (embeddingArray && (r.embedding || r.embedding_blob)) {
             const vec = getParsedEmbedding(r.embedding, r.embedding_blob);
             if (vec) {
-                score = cosineSimilarity(embeddingArray, vec);
+                score = calibrateQuerySimilarity(cosineSimilarity(embeddingArray, vec), { queryVec: embeddingArray });
             }
         }
         if (r.content.toLowerCase().includes(lowerQuery)) {

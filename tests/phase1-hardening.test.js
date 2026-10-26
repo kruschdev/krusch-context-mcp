@@ -243,6 +243,66 @@ test('Phase 1 Production Hardening Suite (Zero-GPU Offline, Token Budget, Hybrid
     }
   });
 
+  await t.test('1d. Isotropic query-document cosine calibration (snowflake-arctic-embed2 zero-lexical-overlap retrieval & abstention)', async () => {
+    const { calibrateQuerySimilarity } = await import('../src/embedding-helper.js');
+    // Dense 1024-dim unit vectors with controlled dot product (all 1024 coords non-zero)
+    const makeDensePair = (targetCos) => {
+      const n = 1024;
+      const q = Array.from({ length: n }, (_, i) => (i % 2 === 0 ? 1 : -1) / Math.sqrt(n));
+      const ortho = Array.from({ length: n }, (_, i) => (i < n / 2 ? 1 : -1) / Math.sqrt(n));
+      // q and ortho have exact dot product 0 (each half of ortho has equal +1/-1 in q)
+      const s = Math.sqrt(Math.max(0, 1 - targetCos * targetCos));
+      const d = q.map((qv, i) => targetCos * qv + s * ortho[i]);
+      return { q, d };
+    };
+
+    const { q: denseQ } = makeDensePair(0.40);
+    assert.equal(calibrateQuerySimilarity(-0.02, { model: 'snowflake-arctic-embed2', queryVec: denseQ }), 0);
+    assert.ok(calibrateQuerySimilarity(0.075, { model: 'snowflake-arctic-embed2', queryVec: denseQ }) < 0.30);
+    assert.ok(calibrateQuerySimilarity(0.394, { model: 'snowflake-arctic-embed2', queryVec: denseQ }) >= 0.68);
+    assert.equal(calibrateQuerySimilarity(0.394, { model: 'bge-large', queryVec: denseQ }), 0.394);
+
+    const isoProj = makeTestProject('iso_arctic');
+    const envSnap = snapshotEnv(EMBED_ENV_KEYS);
+    try {
+      process.env.EMBED_MODEL = 'snowflake-arctic-embed2:latest';
+      const matchPair = makeDensePair(0.395); // realistic snowflake-arctic-embed2 zero-lex semantic paraphrase
+      const ortho2 = Array.from({ length: 1024 }, (_, i) => (Math.floor(i / 2) % 2 === 0 ? 1 : -1) / Math.sqrt(1024));
+      const noiseCos = 0.06;
+      const noiseSin = Math.sqrt(1 - noiseCos * noiseCos);
+      const noiseQuery = matchPair.d.map((dv, i) => noiseCos * dv + noiseSin * ortho2[i]);
+
+      await addMemory({
+        category: 'invariant',
+        content: 'Never execute root package upgrades on production host prod-db-01 without human sign-off.',
+        project: isoProj,
+        force: true,
+        _embedding: matchPair.d
+      });
+
+      const hit = await unifiedRetrieve({
+        query: 'Can an automated daemon elevate privileges on live nodes?',
+        project: isoProj,
+        include_state: false,
+        limit_tokens: 2000,
+        _embedding: matchPair.q
+      });
+      assert.equal(hit.epistemic_status, 'SUPPORTED');
+      assert.ok(hit.content[0].text.includes('prod-db-01'), 'Zero-lexical-overlap atomic invariant at raw cosine ~0.395 must retrieve cleanly');
+
+      const miss = await unifiedRetrieve({
+        query: 'What lunar telescope eyepiece focal length was chosen?',
+        project: isoProj,
+        include_state: false,
+        limit_tokens: 2000,
+        _embedding: noiseQuery
+      });
+      assert.equal(miss.epistemic_status, 'NO_KNOWN_SUPPORT', 'Unrelated isotropic cosine (~0.02) must still abstain cleanly');
+    } finally {
+      restoreEnv(envSnap);
+    }
+  });
+
   await t.test('2. Bounded compileProjectState & Project-Affinity Sorting under 4,000-token Turn-1 budget', async () => {
     const proj = makeTestProject('budget');
 

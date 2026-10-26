@@ -112,6 +112,49 @@ export function formatEmbeddingQuery(text, options = {}) {
 
 export { formatEmbeddingQuery as formatEmbeddingInput };
 
+function _isSparseSyntheticVector(vec) {
+    if (!vec || typeof vec.length !== 'number') return false;
+    const checkLen = Math.min(vec.length, 64);
+    let nonZero = 0;
+    for (let i = 0; i < checkLen; i++) {
+        if (Math.abs(vec[i]) > 1e-7) nonZero++;
+    }
+    return nonZero < Math.min(12, checkLen);
+}
+
+/**
+ * Calibrate raw query-to-document cosine similarity across embedding model geometries.
+ * Anisotropic encoders (`bge-large`) cluster unrelated texts around ~0.48 and paraphrases around ~0.70,
+ * whereas isotropic contrastive asymmetric encoders (`snowflake-arctic-embed2`, `qwen3-embedding`)
+ * center unrelated texts near ~0.00 and paraphrases around ~0.36-0.55.
+ * Strictly continuous, concave, and order-preserving (`0 -> 0`, `1 -> 1`).
+ * @param {number} rawCosine
+ * @param {{ model?: string, queryVec?: ArrayLike<number> | null }} [options={}]
+ * @returns {number}
+ */
+export function calibrateQuerySimilarity(rawCosine, options = {}) {
+    if (!Number.isFinite(rawCosine) || rawCosine <= 0) return 0;
+    if (rawCosine >= 1) return 1;
+    const { model, queryVec = null } = options || {};
+    if (queryVec && _isSparseSyntheticVector(queryVec)) {
+        return rawCosine;
+    }
+    const base = _normalizeModelName(model);
+    if (base.startsWith('snowflake-arctic-embed2') || base.startsWith('qwen3-embedding')) {
+        if (rawCosine <= 0.12) {
+            return rawCosine * 3.0;
+        }
+        if (rawCosine <= 0.38) {
+            return 0.36 + ((rawCosine - 0.12) / 0.26) * 0.32;
+        }
+        if (rawCosine <= 0.60) {
+            return 0.68 + ((rawCosine - 0.38) / 0.22) * 0.16;
+        }
+        return 0.84 + ((rawCosine - 0.60) / 0.40) * 0.16;
+    }
+    return rawCosine;
+}
+
 const EMBEDDING_PROVIDER_ENV_KEYS = [
     'OPENROUTER_API_KEY',
     'EMBEDDING_URL',

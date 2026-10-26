@@ -440,7 +440,7 @@ function runIntegrityAudit() {
     assertPctMatch(overallR30, report.overall.recall_at_30_9cat_pct, '[FAIL] Overall 9-category R@30 mismatch');
     assertPctMatch(overallR50, report.overall.recall_at_50_9cat_pct, '[FAIL] Overall 9-category R@50 mismatch');
     assertPctMatch(overallStrict9, report.overall.strict_primary_turn_recall_9cat_pct, '[FAIL] Overall 9-category strict primary recall mismatch');
-    assertPctMatch(overallDense9, report.overall.dense_packed_8k_recall_9cat_pct, '[FAIL] Overall 9-category Dense BGE 8K recall mismatch');
+    assertPctMatch(overallDense9, report.overall.dense_packed_8k_recall_9cat_pct, '[FAIL] Overall 9-category Dense Vector 8K recall mismatch');
     assert.ok(Math.abs(overallLegacy9 - report.overall.legacy_primary_recall_9cat_pct) <= 0.02, '[FAIL] Overall 9-category legacy primary recall mismatch');
     assert.equal(totalJudgeEvaluated, report.overall.llm_judge_evaluated_questions, '[FAIL] Overall llm_judge_evaluated_questions mismatch');
     if (overallJudge10 === null) {
@@ -452,11 +452,12 @@ function runIntegrityAudit() {
         assert.ok(Math.abs(overallSecJudge10 - report.overall.secondary_llm_judge_10cat_pct) <= 0.02, `[FAIL] Overall 10-category Secondary Judge score mismatch: ${overallSecJudge10} vs ${report.overall.secondary_llm_judge_10cat_pct}`);
     }
 
+    const embedLabel = report.overall.embed_model || 'Dense Vector';
     console.log(`✅ [Check 4/5] Per-Question Turn-ID Re-Computation & 400-Question Re-Tally PASSED:`);
     if (recomputedQuestionsVerified > 0) {
         console.log(`   • Recomputed Recall@10..50, Hybrid 8K & Dense 8K from raw source_chat_ids on ${recomputedQuestionsVerified}/400 questions`);
     }
-    console.log(`   • Re-tallied Un-Condensed Lex 8K / Dense BGE-Large 8K    : ${overallLegacy9.toFixed(2)}% / ${overallDense9.toFixed(2)}%`);
+    console.log(`   • Re-tallied Un-Condensed Lex 8K / Dense (${embedLabel}) 8K : ${overallLegacy9.toFixed(2)}% / ${overallDense9.toFixed(2)}%`);
     console.log(`   • Re-tallied Hybrid Fixed-Rank R@10 / @20 / @30 / @50    : ${overallR10.toFixed(2)}% / ${overallR20.toFixed(2)}% / ${overallR30.toFixed(2)}% / ${overallR50.toFixed(2)}%`);
     console.log(`   • Re-tallied Hybrid Substantive 8K Packed Recall (9-Cat) : ${overallStrict9.toFixed(2)}%`);
     console.log(`   • Re-tallied Primary Judge (${report.overall.judge_model}, n=${totalJudgeEvaluated}/400) : ${overallJudge10 !== null ? overallJudge10.toFixed(2) + '%' : 'N/A'}`);

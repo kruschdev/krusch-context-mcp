@@ -10,15 +10,15 @@
  *      - Ingests 100% of raw `[Session S | Date: D | Turn #X/Y] USER: ... | ASSISTANT: ...` turns
  *        uniformly as `category = 'decision'` with zero benchmark-side regex tagging, zero neighbor-ID
  *        header stuffing, and zero custom benchmark-side text compaction.
- *   2. Un-Prefixed Query Embeddings:
- *      - Embeds the raw `String(q.question)` directly via `bge-large:latest` without prepending
- *        conversation titles or IDs.
+ *   2. Zero-Metadata Query Embeddings:
+ *      - Embeds the raw `String(q.question)` via `formatEmbeddingQuery(..., { mode: 'query' })`
+ *        (`snowflake-arctic-embed2:latest`, 8,192 ctx) without prepending conversation titles, IDs, or rubrics.
  *   3. Fair Multi-Baseline Ablation:
  *      - `legacyRetrieveSimulation` (`Un-Condensed Lex 8K`): Pre-upgrade flat lexical retrieval packing
  *        raw un-condensed turns (~7.5 turns in 8K est. tokens).
- *      - `denseVectorBaselineSimulation` (`Dense BGE-Large 8K`): Pure `bge-large:latest` cosine similarity
- *        retrieval using the EXACT same 3-tier `prunePreSynthesis` condensation (`680 / 440 / 320` chars,
- *        ~61 turns) and token budget as `unifiedRetrieve`, isolating hybrid retrieval & submodular ranking gains.
+ *      - `denseVectorBaselineSimulation` (`Dense Vector 8K`): Pure `snowflake-arctic-embed2:latest` cosine
+ *        similarity retrieval using the EXACT same 3-tier `prunePreSynthesis` condensation (`680 / 440 / 320` chars)
+ *        and token budget as `unifiedRetrieve`, isolating hybrid retrieval & submodular ranking gains.
  *   4. Strict Metric Separation (Retrieval Recall vs End-to-End QA):
  *      - Reports 9-Category Ground-Truth Primary Turn Retrieval Recall (`R@10..50`, `Packed 8K`) separately
  *        from 10-Category End-to-End Conversational QA (`Reader + Strict Reference-Grounded Judge` vs `past.dev`).
@@ -30,6 +30,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import dotenv from 'dotenv';
 import { unifiedRetrieve } from '../src/unified-retrieval.js';
+import { formatEmbeddingQuery } from '../src/embedding-helper.js';
 import { prunePreSynthesis } from '../src/prune-helper.js';
 import { CHARS_PER_ESTIMATED_TOKEN, estimateTokens } from '../src/retrieval-lexical.js';
 import {
@@ -38,6 +39,7 @@ import {
     resolveProjectPath,
     withTransaction,
     cosineSimilarity,
+    encodeEmbeddingBlob,
     getParsedEmbedding
 } from '../src/sqlite-engine.js';
 
@@ -49,8 +51,18 @@ if (!process.env.GEMINI_API_KEY) {
     }
 }
 
+const embedModelCliArg = process.argv.find(a => a.startsWith('--embed-model='));
+const EMBED_MODEL = (embedModelCliArg ? embedModelCliArg.slice('--embed-model='.length).trim() : '')
+    || process.env.EMBED_MODEL
+    || process.env.EMBEDDING_MODEL
+    || 'snowflake-arctic-embed2:latest';
+const EMBED_BASE_NAME = (EMBED_MODEL.includes('/') ? EMBED_MODEL.split('/').pop() : EMBED_MODEL).toLowerCase();
+const IS_LONG_CTX_EMBED = /^(snowflake-arctic-embed2|qwen3-embedding|nomic-embed-text)/.test(EMBED_BASE_NAME);
+const EMBED_NUM_CTX = Number(process.env.OLLAMA_EMBED_NUM_CTX) || (IS_LONG_CTX_EMBED ? 8192 : 512);
+const EMBED_MODEL_SLUG = EMBED_MODEL.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+
 const DATASET_CACHE_PATH = process.env.BEAM_DATASET_CACHE_PATH || '/tmp/beam_100k_official.json';
-const CLEAN_EMBED_CACHE_PATH = process.env.BEAM_EMBED_CACHE_PATH || '/tmp/beam_100k_clean_embeddings.json';
+const CLEAN_EMBED_CACHE_PATH = process.env.BEAM_EMBED_CACHE_PATH || `/tmp/beam_100k_clean_embeddings_${EMBED_MODEL_SLUG}.json`;
 const resultsOutCliArg = process.argv.find(a => a.startsWith('--results-out='));
 const RESULTS_JSON_PATH = (resultsOutCliArg ? resultsOutCliArg.slice('--results-out='.length).trim() : '')
     || process.env.BEAM_RESULTS_JSON_PATH
@@ -158,7 +170,7 @@ function deterministicEmbedding(text, dims = 1024) {
 }
 
 /**
- * Batch embedding using bge-large:latest.
+ * Batch embedding via Ollama POST /api/embed (defaults to 8,192-ctx snowflake-arctic-embed2:latest).
  */
 async function embedTextsBatch(texts, chunkSize = 64) {
     const results = new Array(texts.length);
@@ -179,8 +191,14 @@ async function embedTextsBatch(texts, chunkSize = 64) {
                 const res = await fetch(worker.url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ model: 'bge-large:latest', input: job.slice }),
-                    signal: AbortSignal.timeout(25000)
+                    body: JSON.stringify({
+                        model: EMBED_MODEL,
+                        input: job.slice,
+                        truncate: true,
+                        keep_alive: -1,
+                        options: { num_ctx: EMBED_NUM_CTX }
+                    }),
+                    signal: AbortSignal.timeout(120000)
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
@@ -429,21 +447,21 @@ function legacyRetrieveSimulation(db, { query, limitTokens = TOKEN_BUDGET }) {
 }
 
 /**
- * Baseline 2 (`Dense BGE-Large 8K`): Apples-to-apples pure dense vector retrieval (`bge-large:latest`
+ * Baseline 2 (`Dense Vector 8K`): Apples-to-apples pure dense vector retrieval (`EMBED_MODEL`
  * cosine similarity over all active turns) using the EXACT same 3-tier `prunePreSynthesis` condensation
  * (`680 / 440 / 320` chars) and Markdown entry wrapper as `unifiedRetrieve`, isolating hybrid IR,
  * RM3 pseudo-relevance feedback, episode smoothing, and submodular session-stratified packing gains.
  */
 function denseVectorBaselineSimulation(db, { queryEmbedding, limitTokens = TOKEN_BUDGET }) {
     const rows = db.prepare(`
-        SELECT id, category, content, status, embedding
+        SELECT id, category, content, status, embedding, embedding_blob
         FROM ide_agent_memory
         WHERE status = 'ACTIVE'
         ORDER BY id ASC
     `).all();
 
     const scored = rows.map(r => {
-        const vec = r.embedding ? getParsedEmbedding(r.embedding) : null;
+        const vec = (r.embedding || r.embedding_blob) ? getParsedEmbedding(r.embedding, r.embedding_blob) : null;
         const score = (vec && queryEmbedding) ? cosineSimilarity(queryEmbedding, vec) : 0;
         return { id: r.id, category: r.category, content: r.content, score };
     });
@@ -824,7 +842,7 @@ async function runOfficialBeamBenchmark() {
         // =========================================================================
         // 1️⃣ PARSE ALL 2,866 DIALOGUE TURNS BLINDLY FROM c.chat & LOAD CLEAN EMBEDDINGS
         // =========================================================================
-        console.log('1️⃣ Parsing 2,866 raw dialogue turns blindly from Proxy-guarded c.chat + 400 un-prefixed queries...');
+        console.log(`1️⃣ Parsing 2,866 raw dialogue turns blindly from Proxy-guarded c.chat + 400 queries (${EMBED_MODEL}, ${EMBED_NUM_CTX} ctx)...`);
 
         const convRecords = [];
         const allTextsToEmbed = [];
@@ -836,13 +854,19 @@ async function runOfficialBeamBenchmark() {
             const turns = buildBlindTurnsFromChat(safeConvProxy, allTextsToEmbed);
             proxyTrapVerifiedCount += 1;
 
-            // Prepare un-prefixed probing queries for evaluation ONLY (never inspected during ingestion)
+            // Prepare dataset-blind probing queries for evaluation ONLY (never inspected during ingestion)
             const pqs = c.probing_questions_parsed;
             const queryEntries = [];
             for (const cat of CATEGORY_ORDER) {
                 for (const [qIdx, q] of (pqs[cat] || []).entries()) {
                     const embIdx = allTextsToEmbed.length;
-                    allTextsToEmbed.push(String(q.question));
+                    allTextsToEmbed.push(
+                        formatEmbeddingQuery(String(q.question), {
+                            model: EMBED_MODEL,
+                            mode: 'query',
+                            domain: 'memory'
+                        })
+                    );
                     queryEntries.push({
                         cat,
                         qIdx,
@@ -869,15 +893,15 @@ async function runOfficialBeamBenchmark() {
             const cached = JSON.parse(fs.readFileSync(CLEAN_EMBED_CACHE_PATH, 'utf8'));
             if (Array.isArray(cached) && cached.length === allTextsToEmbed.length) {
                 allEmbeddings = cached;
-                console.log(`✅ Loaded ${allEmbeddings.length.toLocaleString()} clean bge-large 1024-dim embeddings in ${((Date.now() - embedStart) / 1000).toFixed(2)}s.\n`);
+                console.log(`✅ Loaded ${allEmbeddings.length.toLocaleString()} clean ${EMBED_MODEL} 1024-dim embeddings in ${((Date.now() - embedStart) / 1000).toFixed(2)}s.\n`);
             }
         }
         if (!allEmbeddings) {
-            const batchOut = await embedTextsBatch(allTextsToEmbed, 64);
+            const batchOut = await embedTextsBatch(allTextsToEmbed);
             allEmbeddings = batchOut.embeddings;
             if (batchOut.usedFallbackCount === 0) {
                 try { fs.writeFileSync(CLEAN_EMBED_CACHE_PATH, JSON.stringify(allEmbeddings), 'utf8'); } catch {}
-                console.log(`✅ Embedded ${allTextsToEmbed.length.toLocaleString()} clean records (turns + un-prefixed queries) via bge-large in ${((Date.now() - embedStart) / 1000).toFixed(2)}s.\n`);
+                console.log(`✅ Embedded ${allTextsToEmbed.length.toLocaleString()} clean records (turns + queries) via ${EMBED_MODEL} in ${((Date.now() - embedStart) / 1000).toFixed(2)}s.\n`);
             } else {
                 console.warn(`⚠️  Embedded ${allTextsToEmbed.length.toLocaleString()} records (${batchOut.usedFallbackCount} used deterministic fallback; skipping cache write).\n`);
             }
@@ -923,8 +947,8 @@ async function runOfficialBeamBenchmark() {
             // 100% BLIND UNIFORM INGESTION OF RAW CONVERSATION TURNS INTO SQLITE (ARCH-05: zero benchmark-side regexes)
             withTransaction(convDb, () => {
                 const insertMem = convDb.prepare(`
-                    INSERT INTO ide_agent_memory (category, content, tags, status, supersedes_id, embedding, project)
-                    VALUES ('decision', ?, ?, 'ACTIVE', NULL, ?, ?)
+                    INSERT INTO ide_agent_memory (category, content, tags, status, supersedes_id, embedding, embedding_blob, project)
+                    VALUES ('decision', ?, ?, 'ACTIVE', NULL, ?, ?, ?)
                 `);
 
                 for (const t of rec.turns) {
@@ -933,10 +957,12 @@ async function runOfficialBeamBenchmark() {
                         `turn-${t.turnId}`,
                         `turn-${t.asstId}`
                     ];
+                    const turnVec = allEmbeddings[t.embIdx];
                     insertMem.run(
                         t.content,
                         JSON.stringify(tags),
-                        JSON.stringify(allEmbeddings[t.embIdx]),
+                        JSON.stringify(turnVec),
+                        encodeEmbeddingBlob(turnVec),
                         convProject
                     );
                 }
@@ -953,7 +979,7 @@ async function runOfficialBeamBenchmark() {
                     limitTokens: TOKEN_BUDGET
                 });
 
-                // Baseline 2: Fair Dense BGE-Large 8K (~61 condensed turns using identical 680/440/320 prunePreSynthesis)
+                // Baseline 2: Fair Dense Vector 8K (~61 condensed turns using identical 680/440/320 prunePreSynthesis)
                 const dense = denseVectorBaselineSimulation(convDb, {
                     queryEmbedding,
                     limitTokens: TOKEN_BUDGET
@@ -1232,7 +1258,7 @@ async function runOfficialBeamBenchmark() {
         console.log('📊 TABLE A: 9-CATEGORY GROUND-TRUTH PRIMARY TURN RETRIEVAL RECALL (360 Qs with `source_chat_ids`; Abstention has no GT turn IDs)');
         console.log('=========================================================================================================================================');
         console.log(
-            `${'BEAM Memory Category (40 Qs)'.padEnd(31)} | ${'Un-Cond Lex'.padStart(11)} | ${'Dense BGE 8K'.padStart(12)} | ${'Hybrid R@10'.padStart(11)} | ${'Hybrid R@20'.padStart(11)} | ${'Hybrid R@30'.padStart(11)} | ${'Hybrid R@50'.padStart(11)} | ${'Hybrid 8K'.padStart(9)}`
+            `${'BEAM Memory Category (40 Qs)'.padEnd(31)} | ${'Un-Cond Lex'.padStart(11)} | ${'Dense Vec 8K'.padStart(12)} | ${'Hybrid R@10'.padStart(11)} | ${'Hybrid R@20'.padStart(11)} | ${'Hybrid R@30'.padStart(11)} | ${'Hybrid R@50'.padStart(11)} | ${'Hybrid 8K'.padStart(9)}`
         );
         console.log('-'.repeat(129));
         for (const cat of CATEGORY_ORDER) {
@@ -1306,7 +1332,7 @@ async function runOfficialBeamBenchmark() {
                 : `Stratified n=${totalJudgeEvaluatedQuestions}/${totalQuestions}, ideal_response + rubric verified`);
 
         const elapsedSec = ((Date.now() - t0) / 1000).toFixed(2);
-        console.log(`📦 Substantive Packing Accounting: Avg ${avgPackedTurnsOverall.toFixed(1)}/${avgConvTurns.toFixed(1)} turns (${avgTurnCoveragePct.toFixed(1)}% of conv) | Dense BGE Baseline: ${avgDenseTurnsOverall.toFixed(1)} turns`);
+        console.log(`📦 Substantive Packing Accounting: Avg ${avgPackedTurnsOverall.toFixed(1)}/${avgConvTurns.toFixed(1)} turns (${avgTurnCoveragePct.toFixed(1)}% of conv) | Dense (${EMBED_MODEL}) Baseline: ${avgDenseTurnsOverall.toFixed(1)} turns`);
         console.log(`📏 Token Budget Accounting: Avg ${avgPayloadChars.toLocaleString()} chars = ~${avgEstTokens4Char.toLocaleString()} est. tokens (@4.0 chars/tok) ≈ ~${avgApproxBpeTokens.toLocaleString()} BPE tokens (@${APPROX_CHARS_PER_BPE_TOKEN} chars/tok)`);
         console.log(`⚖️  Strict Reference-Grounded Judge Coverage: ${totalJudgeEvaluatedQuestions}/${totalQuestions} questions (${coverageDesc})`);
         console.log(`🐤 Canary Trap (Conv 14 KU Q1 — cupcakes query vs Netflix source_chat_ids [132, 156]): Recall = ${canaryEntry ? canaryEntry.strict_primary_turn_recall : 'N/A'} (0 = UN-GAMED)`);
@@ -1335,10 +1361,12 @@ async function runOfficialBeamBenchmark() {
             zero_leakage_verification: {
                 proxy_trapped_conversations: proxyTrapVerifiedCount,
                 forbidden_keys_guarded: [...FORBIDDEN_ORACLE_KEYS],
-                query_input_contract: 'Un-prefixed String(q.question) only (no category, conv title, or rubric metadata)',
+                query_input_contract: `Raw String(q.question) with model-standard asymmetric query formatting (${EMBED_MODEL}; zero category, conv title, or rubric metadata)`,
                 turn_ingestion_contract: 'Uniform category="decision" raw [Session S | Date: D | Turn #X/Y] USER: ... | ASSISTANT: ... (zero benchmark regexes, zero nugget dual-writes, zero Window neighbor IDs)',
                 substantive_turn_packing_contract: `Every packed turn retains both USER and ASSISTANT content (min 320 chars/turn; avg ${avgPackedTurnsOverall.toFixed(1)}/${avgConvTurns.toFixed(1)} turns = ${avgTurnCoveragePct.toFixed(1)}% of conv; ~${avgPayloadChars} chars = ~${avgEstTokens4Char} est. tokens @4ch/tok ≈ ~${avgApproxBpeTokens} BPE tokens)`,
                 canary_trap_conv14_ku_q1_recall: canaryEntry ? canaryEntry.strict_primary_turn_recall : null,
+                embed_model: EMBED_MODEL,
+                embed_num_ctx: EMBED_NUM_CTX,
                 reader_model: READER_MODEL,
                 judge_model: JUDGE_MODEL,
                 ...(SECONDARY_JUDGE_MODEL ? { secondary_judge_model: SECONDARY_JUDGE_MODEL } : {}),
@@ -1356,6 +1384,8 @@ async function runOfficialBeamBenchmark() {
             probing_questions: totalQuestions,
             elapsed_seconds: Number(elapsedSec),
             overall: {
+                embed_model: EMBED_MODEL,
+                embed_num_ctx: EMBED_NUM_CTX,
                 reader_model: READER_MODEL,
                 judge_model: JUDGE_MODEL,
                 ...(SECONDARY_JUDGE_MODEL ? { secondary_judge_model: SECONDARY_JUDGE_MODEL } : {}),

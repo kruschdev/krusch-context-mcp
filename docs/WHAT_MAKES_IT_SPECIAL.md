@@ -208,14 +208,14 @@ In v1.8.0, **Codebase RAG was decoupled into [krusch-git](https://github.com/kru
 
 To verify retrieval and reasoning performance without self-grading bias, cloud APIs, or benchmark gaming, `krusch-context-mcp` (`v1.9.0`) was evaluated across **all `400/400` probing questions** (`20` multi-session conversations, `~3.06M` corpus tokens) of the official ICLR 2026 **`Mohammadta/BEAM`** (`100K`) benchmark inside a hermetic single-box **96 GB NVIDIA RTX PRO 6000 Blackwell** environment (`127.0.0.1:11434` loopback only, fresh embeddings, zero oracle leakage enforced by [`benchmarks/verify_zero_leakage.js`](../benchmarks/verify_zero_leakage.js)):
 
-| Metric / Evaluation Track | Baseline / Reference | `krusch-context-mcp v1.9.0` |
+| Metric / Evaluation Track | Baseline / Reference | `krusch-context-mcp v1.9.0` (`snowflake-arctic-embed2` `8K` ctx / `bge-large` `512` ctx) |
 | :--- | :---: | :---: |
-| **9-Category Primary-Turn Retrieval Recall (`n = 360`, `~8K` budget)** | `30.74%` Un-Condensed Lex (`~7.5` turns)<br>`91.48%` Condensed Dense `bge-large` (`~75.7` turns) | **`92.97%`** Hybrid `unifiedRetrieve` (`~67.9` turns; `100%` on Temporal Reasoning, Contradiction Resolution & Instruction Following) |
-| **Full `400/400` Closed-System E2E QA (Stock `gpt-oss:120b` Reader)** | `Honcho` (`63.00%`) · `MEMIR` (`48.26%`)<br>`Exabase M-1` (`76.90%`) · `past.dev` (`92.08%`, cloud self-judged) | **`73.53%`** (`hermes3:latest` 8B Judge, `+4.34 pp` vs `v1.8.1`)<br>**`67.19%`** (`qwen2.5:32b` 32B Judge, `+3.27 pp` vs `v1.8.1`) |
-| **Full `40/40` Contradiction Resolution E2E QA** | `past.dev` (`78.13%`) | **`79.69%` / `85.00%`** (Stock `120B`)<br>**`85.31%` / `97.50%`** ([`gpt-oss-120b-sre-lora`](https://huggingface.co/krush420/gpt-oss-120b-sre-lora)) |
+| **9-Category Primary-Turn Retrieval Recall (`n = 360`, `~8K` budget)** | `30.74%` Un-Condensed Lex (`~7.5` turns)<br>`91.48%` Dense `bge-large` · `92.41%` Dense `arctic-embed2` (`~76` turns) | **`57.69%` `R@10`** (`+3.49 pp` vs `bge-large`) · **`70.88%` `R@20`** (`+2.77 pp`)<br>**`92.37%` / `92.97%`** Hybrid `unifiedRetrieve` (`~67.9` turns; `100%` on `TR` & `CR`) |
+| **Full `400/400` Closed-System E2E QA (Stock `gpt-oss:120b` Reader)** | `Honcho` (`63.00%`) · `MEMIR` (`48.26%`)<br>`Exabase M-1` (`76.90%`) · `past.dev` (`92.08%`, cloud self-judged) | **`70.60%` / `73.53%`** (`hermes3:latest` 8B Judge)<br>**`64.26%` / `67.19%`** (`qwen2.5:32b` 32B Judge) |
+| **Full `40/40` Contradiction Resolution E2E QA** | `past.dev` (`78.13%`) | **`85.94%` / `92.50%`** (Stock `120B` + `arctic-embed2`)<br>**`85.00%` / `98.13%`** ([`gpt-oss-120b-sre-lora`](https://huggingface.co/krush420/gpt-oss-120b-sre-lora)) |
 | **Upstream Canary Trap (`Conv 14 KU Q1`)** | `0.00` = Blind / Un-Gamed | **`0.00` (`5/5` integrity checks passed)** |
 
-See the full methodology, SHA-256 digests, Dual Cross-Family Judge breakdown, and Stock vs. QLoRA `120B` ablation in [`benchmarks/BEAM_EMPIRICAL_REPORT.md`](../benchmarks/BEAM_EMPIRICAL_REPORT.md).
+See the full methodology, SHA-256 digests, Dual Cross-Family Judge breakdown, `calibrateQuerySimilarity` calibration analysis, and Stock vs. QLoRA `120B` ablation in [`benchmarks/BEAM_EMPIRICAL_REPORT.md`](../benchmarks/BEAM_EMPIRICAL_REPORT.md).
 
 ---
 

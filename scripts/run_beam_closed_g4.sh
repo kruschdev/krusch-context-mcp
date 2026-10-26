@@ -6,17 +6,16 @@
 # Guarantees:
 #   1. Zero Cloud LLM APIs (GEMINI_API_KEY unset; all endpoints strictly 127.0.0.1:11434).
 #   2. Zero Homelab LAN / Zero Pre-Cached Vectors (downloads Mohammadta/BEAM fresh
-#      from Hugging Face and computes all 3,266 bge-large embeddings from scratch).
+#      from Hugging Face and computes all 3,266 snowflake-arctic-embed2 embeddings from scratch).
 #   3. Zero Self-Grading Bias: Co-locates 4 distinct open-weights models simultaneously
 #      in 97.9 GB Blackwell VRAM (OLLAMA_MAX_LOADED_MODELS=4, 100% GPU):
-#        - Embedder : bge-large:latest (~0.7 GB, BAAI BERT)
+#        - Embedder : snowflake-arctic-embed2:latest (~0.66 GB, 8,192 ctx, 1024d)
 #        - Reader   : gpt-oss:120b (~67 GB, OpenAI 117B MXFP4 MoE)
 #        - Judge 1  : qwen2.5:32b (~21.5 GB, Alibaba Qwen 32B Dense Primary Referee)
 #        - Judge 2  : hermes3:latest (~5.5 GB, Nous Hermes 3 Llama-3.1 8B Continuity)
 #   4. Executes full n=400/400 E2E evaluation on unmodified stock gpt-oss:120b first,
 #      runs 5-stage verify_zero_leakage.js inside the G4 VM, then runs an in-place
-#      GGUF fusion A/B test of krush420/gpt-oss-120b-sre-lora (auto-promoting to
-#      400/400 only if it beats stock gpt-oss:120b on the n=20 stratified gate).
+#      GGUF fusion A/B test of krush420/gpt-oss-120b-sre-lora (400/400 controlled ablation).
 #   5. Guaranteed EXIT trap tears down colab-g4 so zero Compute Units leak.
 # ==============================================================================
 set -euo pipefail
@@ -140,7 +139,7 @@ def run_stream(cmd_args, cwd=None, env=None, shell=False):
         raise RuntimeError(f"Command {cmd_args} exited with code {rc}")
 
 print("=== [Stage 1/4] Provisioning Clean-Room Environment (Node 22 + Ollama Loopback) ===", flush=True)
-run_stream("rm -rf /root/beam-cleanroom /tmp/beam_100k_official.json /tmp/beam_100k_clean_embeddings.json /content/beam_100k_*.json && mkdir -p /root/beam-cleanroom && tar -xzf /content/beam-closed-bundle.tar.gz -C /root/beam-cleanroom", shell=True)
+run_stream("rm -rf /root/beam-cleanroom /tmp/beam_100k_official.json /tmp/beam_100k_clean_embeddings*.json /content/beam_100k_*.json && mkdir -p /root/beam-cleanroom && tar -xzf /content/beam-closed-bundle.tar.gz -C /root/beam-cleanroom", shell=True)
 
 # Ensure Node.js >= 22 is installed
 need_node22 = True
@@ -194,7 +193,7 @@ for _ in range(30):
         time.sleep(1)
 
 print("=== [Stage 2/4] Pulling Open-Weights Models onto Isolated G4 Loopback ===", flush=True)
-for mdl in ["bge-large:latest", "gpt-oss:120b", "qwen2.5:32b", "hermes3:latest"]:
+for mdl in ["snowflake-arctic-embed2:latest", "gpt-oss:120b", "qwen2.5:32b", "hermes3:latest"]:
     print(f"[beam-g4] Pulling {mdl}...", flush=True)
     run_stream(["ollama", "pull", mdl])
 
@@ -204,7 +203,20 @@ model_digests = {m["name"]: m.get("digest", "") for m in ollama_tags.get("models
 print(f"[beam-g4] Hardware: {gpu_info}", flush=True)
 print(f"[beam-g4] Model Digests: {json.dumps(model_digests, indent=2)}", flush=True)
 
-# Warm all 3 generation models into 97.9 GB VRAM simultaneously and verify 100% GPU residency
+# Warm snowflake-arctic-embed2:latest (8,192 ctx) + all 3 generation models into 97.9 GB VRAM simultaneously and verify 100% GPU residency
+embed_warm_req = urllib.request.Request(
+    "http://127.0.0.1:11434/api/embed",
+    data=json.dumps({
+        "model": "snowflake-arctic-embed2:latest",
+        "input": ["query: warm 8k context"],
+        "truncate": True,
+        "keep_alive": -1,
+        "options": {"num_ctx": 8192},
+    }).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+)
+urllib.request.urlopen(embed_warm_req, timeout=120).read()
+
 for mdl, ctx in [("gpt-oss:120b", 16384), ("qwen2.5:32b", 4096), ("hermes3:latest", 4096)]:
     req = urllib.request.Request(
         "http://127.0.0.1:11434/api/generate",
@@ -221,6 +233,8 @@ closed_meta = {
     "gpu_hardware": gpu_info,
     "ollama_bind_host": "127.0.0.1:11434",
     "gemini_api_key_present": False,
+    "embed_model": "snowflake-arctic-embed2:latest",
+    "embed_num_ctx": 8192,
     "ollama_model_sha256_digests": model_digests,
 }
 with open("/tmp/beam_closed_meta.json", "w", encoding="utf-8") as mfh:
@@ -229,6 +243,8 @@ with open("/tmp/beam_closed_meta.json", "w", encoding="utf-8") as mfh:
 bench_env = os.environ.copy()
 bench_env.pop("GEMINI_API_KEY", None)
 bench_env["GEMINI_API_KEY"] = ""
+bench_env["EMBED_MODEL"] = "snowflake-arctic-embed2:latest"
+bench_env["OLLAMA_EMBED_NUM_CTX"] = "8192"
 bench_env["OLLAMA_EMBED_URL"] = "http://127.0.0.1:11434/api/embed"
 bench_env["OLLAMA_READER_URL"] = "http://127.0.0.1:11434/api/chat"
 bench_env["OLLAMA_JUDGE_URL"] = "http://127.0.0.1:11434/api/chat"
@@ -370,6 +386,8 @@ if os.path.exists("/root/beam-cleanroom/lora/adapter.gguf"):
         qlora_env = os.environ.copy()
         qlora_env.pop("GEMINI_API_KEY", None)
         qlora_env["GEMINI_API_KEY"] = ""
+        qlora_env["EMBED_MODEL"] = "snowflake-arctic-embed2:latest"
+        qlora_env["OLLAMA_EMBED_NUM_CTX"] = "8192"
         qlora_env["OLLAMA_EMBED_URL"] = "http://127.0.0.1:11434/api/embed"
         qlora_env["OLLAMA_READER_URL"] = "http://127.0.0.1:11434/api/chat"
         qlora_env["OLLAMA_JUDGE_URL"] = "http://127.0.0.1:11434/api/chat"

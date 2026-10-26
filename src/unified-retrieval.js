@@ -8,7 +8,7 @@
  * 4. Structured Citations Manifest
  */
 
-import { getEmbedding } from './embedding-helper.js';
+import { getEmbedding, calibrateQuerySimilarity } from './embedding-helper.js';
 import { prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from './prune-helper.js';
 import { detectCurrentProject } from './project-helper.js';
 import { compileProjectState, normalizeCategory } from './memory-engine.js';
@@ -673,7 +673,7 @@ export async function unifiedRetrieve({
                                 if (scoreRow.embedding || scoreRow.embedding_blob) {
                                     const vec = getParsedEmbedding(scoreRow.embedding, scoreRow.embedding_blob);
                                     if (vec && !isSyntheticConstantVector(vec)) {
-                                        const sim = cosineSimilarity(embeddingArray, vec);
+                                        const sim = calibrateQuerySimilarity(cosineSimilarity(embeddingArray, vec), { queryVec: embeddingArray });
                                         if (sim > semanticScore) semanticScore = sim;
                                     }
                                 }

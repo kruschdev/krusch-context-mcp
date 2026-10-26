@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { evaluateMemorySpanDrift } from './memory-engine.js';
-import { getEmbedding, isEmbeddingProviderConfigured } from './embedding-helper.js';
+import { getEmbedding, isEmbeddingProviderConfigured, calibrateQuerySimilarity } from './embedding-helper.js';
 import {
     STOP_WORDS,
     GENERIC_INFRA_WORDS,
@@ -398,10 +398,10 @@ export function scoreRuleRelevance(rule, queryCtx, idfMap = new Map()) {
     }
 
     let semanticScore = 0;
-    if (ctx.queryEmbedding && !isSyntheticConstantVector(ctx.queryEmbedding) && rule.embedding) {
-        const ruleVec = getParsedEmbedding(rule.embedding);
+    if (ctx.queryEmbedding && !isSyntheticConstantVector(ctx.queryEmbedding) && (rule.embedding || rule.embedding_blob)) {
+        const ruleVec = getParsedEmbedding(rule.embedding, rule.embedding_blob);
         if (ruleVec && !isSyntheticConstantVector(ruleVec)) {
-            semanticScore = cosineSimilarity(ruleVec, ctx.queryEmbedding);
+            semanticScore = calibrateQuerySimilarity(cosineSimilarity(ruleVec, ctx.queryEmbedding), { queryVec: ctx.queryEmbedding });
         }
     }
 
