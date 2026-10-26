@@ -38,7 +38,9 @@
     "bench:memory": "node scripts/benchmark_memory_eval.js",
     "bench:beam": "node scripts/benchmark_beam_eval.js",
     "bench:beam:official": "node scripts/benchmark_official_beam.js",
-    "bench:beam:verify": "node benchmarks/verify_zero_leakage.js"
+    "bench:beam:verify": "node benchmarks/verify_zero_leakage.js",
+    "bench:beam:long": "node scripts/benchmark_official_beam_long.js",
+    "bench:beam:verify:long": "node benchmarks/verify_zero_leakage_long.js --split=500K && node benchmarks/verify_zero_leakage_long.js --split=1M && node benchmarks/verify_zero_leakage_long.js --split=10M"
   },
   "keywords": [
     "mcp",

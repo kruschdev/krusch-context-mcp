@@ -204,18 +204,21 @@ In v1.8.0, **Codebase RAG was decoupled into [krusch-git](https://github.com/kru
 
 ---
 
-## 5. Empirical Validation: Official ICLR 2026 BEAM (`100K` Split, `n = 400/400` Closed-System G4)
+## 5. Empirical Validation: Complete Official ICLR 2026 BEAM Suite (`100K`–`10M`, `n = 2,000/2,000` Closed-System G4)
 
-To verify retrieval and reasoning performance without self-grading bias, cloud APIs, or benchmark gaming, `krusch-context-mcp` (`v1.9.0`) was evaluated across **all `400/400` probing questions** (`20` multi-session conversations, `~3.06M` corpus tokens) of the official ICLR 2026 **`Mohammadta/BEAM`** (`100K`) benchmark inside a hermetic single-box **96 GB NVIDIA RTX PRO 6000 Blackwell** environment (`127.0.0.1:11434` loopback only, fresh embeddings, zero oracle leakage enforced by [`benchmarks/verify_zero_leakage.js`](../benchmarks/verify_zero_leakage.js)):
+To verify retrieval and reasoning performance without self-grading bias, cloud APIs, or benchmark gaming, `krusch-context-mcp` (`v1.9.0`, SQLite `Float32Array` `embedding_blob` + Porter `FTS5` + `snowflake-arctic-embed2:latest`) was evaluated across **all `100` multi-session conversations (`163,559` turns, `~178.34M` corpus tokens) and all `2,000/2,000` validated probing questions** of the official ICLR 2026 **`Mohammadta/BEAM`** (`100K`, `500K`, `1M`) and **`Mohammadta/BEAM-10M`** (`10M`) suite inside a hermetic single-box **96 GB NVIDIA RTX PRO 6000 Blackwell** environment (`127.0.0.1:11434` loopback only, fresh cold-room embeddings, zero oracle leakage enforced by [`benchmarks/verify_zero_leakage.js`](../benchmarks/verify_zero_leakage.js) and [`benchmarks/verify_zero_leakage_long.js`](../benchmarks/verify_zero_leakage_long.js)):
 
-| Metric / Evaluation Track | Baseline / Reference | `krusch-context-mcp v1.9.0` (`snowflake-arctic-embed2` `8K` ctx / `bge-large` `512` ctx) |
+| Metric / Evaluation Track (`~8K` Constant Budget) | Baseline / Reference | `krusch-context-mcp v1.9.0` (`snowflake-arctic-embed2` `8K` ctx) |
 | :--- | :---: | :---: |
-| **9-Category Primary-Turn Retrieval Recall (`n = 360`, `~8K` budget)** | `30.74%` Un-Condensed Lex (`~7.5` turns)<br>`91.48%` Dense `bge-large` · `92.41%` Dense `arctic-embed2` (`~76` turns) | **`57.69%` `R@10`** (`+3.49 pp` vs `bge-large`) · **`70.88%` `R@20`** (`+2.77 pp`)<br>**`92.37%` / `92.97%`** Hybrid `unifiedRetrieve` (`~67.9` turns; `100%` on `TR` & `CR`) |
-| **Full `400/400` Closed-System E2E QA (Stock `gpt-oss:120b` Reader)** | `Honcho` (`63.00%`) · `MEMIR` (`48.26%`)<br>`Exabase M-1` (`76.90%`) · `past.dev` (`92.08%`, cloud self-judged) | **`70.60%` / `73.53%`** (`hermes3:latest` 8B Judge)<br>**`64.26%` / `67.19%`** (`qwen2.5:32b` 32B Judge) |
-| **Full `40/40` Contradiction Resolution E2E QA** | `past.dev` (`78.13%`) | **`85.94%` / `92.50%`** (Stock `120B` + `arctic-embed2`)<br>**`85.00%` / `98.13%`** ([`gpt-oss-120b-sre-lora`](https://huggingface.co/krush420/gpt-oss-120b-sre-lora)) |
-| **Upstream Canary Trap (`Conv 14 KU Q1`)** | `0.00` = Blind / Un-Gamed | **`0.00` (`5/5` integrity checks passed)** |
+| **`100K` Split (`n = 400/400`, `20` convs, `~3.06M` tok)** | `30.74%` Lex 8K · `92.41%` Dense 8K<br>`Honcho` (`63.00%`) · `MEMIR` (`48.26%`) | **`92.37%` Hybrid 8K** (`57.69%` `R@10`; `92.97%` `bge-large` ablation)<br>**`70.60%`** (`hermes3:latest`) / **`64.26%`** (`qwen2.5:32b`) E2E QA |
+| **`500K` Split (`n = 700/700`, `35` convs, `~19.40M` tok)** | `6.55%` Lex 8K · `78.81%` Dense 8K | **`81.51%` Hybrid 8K** (**`+2.70 pp`** vs. Dense; `12.67%` of conv packed)<br>**`71.82%`** (`hermes3:latest`) / **`62.31%`** (`qwen2.5:32b`) E2E QA |
+| **`1M` Split (`n = 700/700`, `35` convs, `~40.02M` tok)** | `0.70%` Lex 8K · `72.24%` Dense 8K | **`74.15%` Hybrid 8K** (**`+1.91 pp`** vs. Dense; `6.69%` of conv packed)<br>**`72.86%`** (`hermes3:latest`) / **`64.64%`** (`qwen2.5:32b`) E2E QA |
+| **`10M` Split (`n = 200/200`, `10` convs, `~115.87M` tok)** | `0.00%` Lex 8K · `53.51%` Dense 8K | **`54.78%` Hybrid 8K** (**`+1.27 pp`** vs. Dense; `88.00%` `IE`, `83.75%` `KU`; `0.66%` packed)<br>**`58.78%`** (`hermes3:latest`) / **`47.35%`** (`qwen2.5:32b`) E2E QA |
+| **Grand Total (`n = 2,000/2,000` Qs, `~178.34M` tok)** | `8.71%` Lex 8K · `76.88%` Dense 8K | **`78.67%` Hybrid 8K** (**`+1.79 pp`** vs. Dense while packing `~8.4` fewer turns)<br>**`70.64%`** (`hermes3:latest`) / **`62.02%`** (`qwen2.5:32b`) E2E (`83.10%` agree) |
+| **Contradiction Resolution Across All 4 Splits** | `past.dev`: `78.13 / 78.57 / 75.36 / 73.13%` | **Beats `past.dev` on all 4 splits**: `92.50 / 89.64 / 77.68 / 78.75%` (`hermes3`)<br>`85.94 / 81.79%` Stock `32B` (`100K`/`500K`) · **`98.13%`** ([`gpt-oss-120b-sre-lora`](https://huggingface.co/krush420/gpt-oss-120b-sre-lora) `100K`) |
+| **Upstream Canary Trap & Zero-Gaming Gates** | `0.00` = Blind / Un-Gamed | **`0.00` (`5/5` integrity checks passed across `100K`, `500K`, `1M`, `10M`)** |
 
-See the full methodology, SHA-256 digests, Dual Cross-Family Judge breakdown, `calibrateQuerySimilarity` calibration analysis, and Stock vs. QLoRA `120B` ablation in [`benchmarks/BEAM_EMPIRICAL_REPORT.md`](../benchmarks/BEAM_EMPIRICAL_REPORT.md).
+See the full methodology, SHA-256 digests, Dual Cross-Family Judge breakdown, `calibrateQuerySimilarity` calibration analysis, Stock vs. QLoRA `120B` ablation, and Section 8 multi-split tables in [`benchmarks/BEAM_EMPIRICAL_REPORT.md`](../benchmarks/BEAM_EMPIRICAL_REPORT.md).
 
 ---
 

@@ -176,6 +176,37 @@ test('Round 2 Scientific Honesty & Epistemic Regression Suite (BUG-07, BUG-08, A
     }
   });
 
+  await t.test('7. Higher-Context Closed-System Multi-Split Verification: verify_zero_leakage_long.js passes on 500K (700/700), 1M (700/700), and 10M (200/200) audit logs', async (subT) => {
+    const { execFileSync } = await import('node:child_process');
+    const path = await import('node:path');
+    const rootDir = path.resolve(import.meta.dirname, '..');
+    const verifierLong = path.join(rootDir, 'benchmarks', 'verify_zero_leakage_long.js');
+    const splitChecks = [
+      { split: '500K', expectedTag: 'n=700/700', logPath: path.join(rootDir, 'benchmarks', 'beam_500k_audit_log.json') },
+      { split: '1M',   expectedTag: 'n=700/700', logPath: path.join(rootDir, 'benchmarks', 'beam_1m_audit_log.json') },
+      { split: '10M',  expectedTag: 'n=200/200', logPath: path.join(rootDir, 'benchmarks', 'beam_10m_audit_log.json') }
+    ];
+    if (!splitChecks.every(s => fs.existsSync(s.logPath))) {
+      subT.skip('Skipping higher-context audit-log check in pre-benchmark clean-room environment');
+      return;
+    }
+
+    for (const { split, expectedTag, logPath } of splitChecks) {
+      const out = execFileSync(process.execPath, [verifierLong, `--split=${split}`, `--audit-log=${logPath}`], {
+        cwd: rootDir,
+        encoding: 'utf8'
+      });
+      assert.ok(
+        out.includes(`ALL 5 SCIENTIFIC INTEGRITY & ZERO-GAMING AUDITS PASSED FOR BEAM ${split}`),
+        `${split} audit log must pass all 5 zero-leakage checks`
+      );
+      assert.ok(
+        out.includes(expectedTag),
+        `${split} audit log must verify all ${expectedTag} E2E Judge questions`
+      );
+    }
+  });
+
   t.after(async () => {
     closeAllDatabases();
     for (const p of [budgetProject, brokenProject, directiveProject]) {
