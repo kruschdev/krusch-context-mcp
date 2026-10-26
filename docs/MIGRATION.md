@@ -77,6 +77,11 @@ In `v1.9.0`, the default local Ollama embedding model upgrades from `512`-token 
 - **Schema Continuity**: Both models emit `1024`-dimensional vectors (`EMBED_DIMS=1024`), so zero SQLite or `pgvector` column migrations are required.
 - **Vector-Space Consistency**: Because `snowflake-arctic-embed2` and `bge-large` occupy distinct `1024`-d vector spaces, if you upgrade an existing store with pre-`v1.9.0` dense vectors, either pull `ollama pull snowflake-arctic-embed2` and re-embed existing rows (or set `embedding = NULL, embedding_blob = NULL` to trigger automatic backfill), or explicitly set `EMBED_MODEL="bge-large"` in `.env` to retain your legacy vector space.
 
+### 4. Multi-Scale Retrieval Upgrade (`v2.0.0`: Zero Breaking Changes)
+`v2.0.0` preserves the exact 5 canonical verbs, 5 closed categories, and `.agent/context.db` storage layout:
+- **Automatic Lazy DDL**: `ide_episode_rollups` and `ide_episode_rollups_fts` are created automatically on startup/retrieval with zero manual migration steps, remaining a `< 0.05 ms` no-op on stores under `KRUSCH_ROLLUP_MIN_ROWS` (`240` active rows default).
+- **Backward-Compatible Metadata**: `unifiedRetrieve` adds optional `attribute_grounding` and `bridge_expansion` fields to structured metadata while strictly enforcing `limit_tokens`.
+
 ---
 
 ## 🚀 Migrating Your Agent Configuration

@@ -551,3 +551,427 @@ export function detectTemporalUpdates(activeItems = [], domainTerms = []) {
         .map(x => x.entry);
 }
 
+const USER_DIALOGUE_SEGMENT_REGEX = /\buser:\s*([\s\S]*?)(?:\|\s*assistant\b:?|$)/i;
+const USER_DIALOGUE_GLOBAL_REGEX = /\buser:\s*([\s\S]*?)(?:\|\s*assistant\b:?|(?=\[[^\]]*\bsession\b)|$)/gi;
+const SESSION_HEADER_ID_REGEX = /\[[^\]]*\bsession[\s_-]+(\d+)\b/i;
+
+function extractUserSegmentOnly(raw = '') {
+    const str = String(raw || '');
+    if (!str) return '';
+    const segments = [];
+    for (const m of str.matchAll(USER_DIALOGUE_GLOBAL_REGEX)) {
+        if (m[1]) segments.push(m[1].trim());
+    }
+    return segments.length > 0 ? segments.join(' ') : str;
+}
+
+function addTokenizedStems(text = '', targetSet = new Set()) {
+    const lower = String(text || '').toLowerCase();
+    for (const tok of lower.split(/[^a-z0-9_]+/)) {
+        if (tok.length >= 2) {
+            targetSet.add(stemToken(tok));
+        }
+    }
+    return targetSet;
+}
+
+function parseCandidateSessionId(row) {
+    if (!row || typeof row !== 'object') return null;
+    if (row._sessionId !== undefined && row._sessionId !== null && Number.isFinite(Number(row._sessionId))) {
+        return Number(row._sessionId);
+    }
+    const content = String(row.content || '');
+    const match = content.match(SESSION_HEADER_ID_REGEX);
+    if (match) {
+        const parsed = Number(match[1]);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    const rawTags = row.tags ? String(row.tags) : '';
+    if (rawTags) {
+        const tagMatch = rawTags.match(/\bsession[\s_-]*(\d+)\b/i);
+        if (tagMatch) {
+            const parsed = Number(tagMatch[1]);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+    }
+    return null;
+}
+
+function parseCandidateTurnSpan(row) {
+    if (!row || typeof row !== 'object') return null;
+    const content = String(row.content || '');
+    const m = content.match(/\[[^\]]*\bTurn\s*#\s*(\d+)(?:\s*\/\s*(\d+))?\b/i);
+    if (!m) return null;
+    const start = Number(m[1]);
+    if (!Number.isFinite(start)) return null;
+    const second = m[2] !== undefined ? Number(m[2]) : null;
+    // Handle paired USER/ASSISTANT message spans (`Turn #0/1`, `Turn #2/3`) vs single-turn ordinals (`Turn #4/24`)
+    const end = (second !== null && Number.isFinite(second) && second === start + 1)
+        ? second
+        : start;
+    return { start, end };
+}
+
+/**
+ * Vocabulary-free Compositional Attribute Grounding Evaluator (Pillar 3):
+ * Evaluates whether queried attributes are jointly attested with their entity/topic anchors
+ * inside USER statements across +-1 same-session turn windows, without any hardcoded word lists.
+ *
+ * @param {string[]} [distinctiveTerms=[]]
+ * @param {Array<object>} [packedItems=[]]
+ * @param {Array<object>} [allCandidateRows=[]]
+ * @param {{ maxRawCosine?: number, isGenerativeAdvisory?: boolean }} [options={}]
+ * @returns {{
+ *   status: 'GROUNDED' | 'UNATTESTED_ATTRIBUTE' | 'UNSUPPORTED',
+ *   attested_anchors: string[],
+ *   unattested_user_terms: string[],
+ *   unlinked_attribute_terms: string[],
+ *   max_joint_user_coverage: number,
+ *   max_raw_cosine: number
+ * }}
+ */
+export function evaluateAttributeGrounding(
+    distinctiveTerms = [],
+    packedItems = [],
+    allCandidateRows = [],
+    options = {}
+) {
+    const { maxRawCosine = 1.0, isGenerativeAdvisory = false } = options || {};
+    const rawCos = Number.isFinite(maxRawCosine) ? Number(maxRawCosine) : 1.0;
+    const roundedRawCos = Number(rawCos.toFixed(4));
+
+    const seenTerms = new Set();
+    const terms = [];
+    if (Array.isArray(distinctiveTerms)) {
+        for (const raw of distinctiveTerms) {
+            if (typeof raw !== 'string') continue;
+            const t = raw.trim().toLowerCase();
+            if (t && t.length >= 3 && !/^\d+$/.test(t) && !seenTerms.has(t)) {
+                seenTerms.add(t);
+                terms.push(t);
+            }
+        }
+    }
+
+    const compoundQueryTerms = [];
+    const queryStemSet = new Set();
+    for (const t of terms) {
+        const stem = stemToken(t);
+        if (stem) {
+            queryStemSet.add(stem);
+            if (/[._-]/.test(t)) {
+                compoundQueryTerms.push({ term: t, stem });
+            }
+        }
+    }
+
+    if (
+        isGenerativeAdvisory ||
+        terms.length < 2 ||
+        queryStemSet.size < 2 ||
+        !Array.isArray(allCandidateRows) ||
+        allCandidateRows.length === 0
+    ) {
+        return {
+            status: 'GROUNDED',
+            attested_anchors: [],
+            unattested_user_terms: [],
+            unlinked_attribute_terms: [],
+            max_joint_user_coverage: 1,
+            max_raw_cosine: roundedRawCos
+        };
+    }
+
+    const getUserStemsForRow = (r) => {
+        if (!r || typeof r !== 'object') return new Set();
+        const structuredChain = (Array.isArray(r.lineage) && r.lineage.length > 1)
+            ? r.lineage
+            : ((Array.isArray(r._lineageChain) && r._lineageChain.length > 1) ? r._lineageChain : null);
+        const lineageUserLower = structuredChain
+            ? structuredChain.map(s => extractUserSegmentOnly(s?.content || '')).join(' ').toLowerCase()
+            : ((r._lineageText || r.lineageText)
+                ? extractUserSegmentOnly(r._lineageText || r.lineageText).toLowerCase()
+                : '');
+        const tagsLower = r.tags ? String(r.tags).toLowerCase() : '';
+
+        if (r._userStems instanceof Set && r._userStems.size > 0) {
+            const needCompoundCheck = compoundQueryTerms.length > 0;
+            const userText = needCompoundCheck
+                ? `${r._userRaw || extractUserSegmentOnly(r.content || '').toLowerCase()} ${tagsLower} ${lineageUserLower}`
+                : '';
+            const matchedCompounds = needCompoundCheck
+                ? compoundQueryTerms.filter(ct => userText.includes(ct.term))
+                : [];
+            if (!lineageUserLower && !tagsLower && matchedCompounds.length === 0) {
+                return r._userStems;
+            }
+            const merged = new Set(r._userStems);
+            if (tagsLower) addTokenizedStems(tagsLower, merged);
+            if (lineageUserLower) addTokenizedStems(lineageUserLower, merged);
+            for (const ct of matchedCompounds) merged.add(ct.stem);
+            return merged;
+        }
+
+        const rawContent = String(r.content || '');
+        const userMatch = rawContent.match(USER_DIALOGUE_SEGMENT_REGEX);
+        const baseText = userMatch ? userMatch[1] : rawContent;
+        const userText = `${baseText} ${tagsLower} ${lineageUserLower}`.toLowerCase();
+        const stems = addTokenizedStems(userText, new Set());
+        if (compoundQueryTerms.length > 0) {
+            for (const ct of compoundQueryTerms) {
+                if (userText.includes(ct.term)) stems.add(ct.stem);
+            }
+        }
+        return stems;
+    };
+
+    const annotatedRows = allCandidateRows.map((r, origIdx) => {
+        const id = Number(r?.id || 0);
+        const sessionId = parseCandidateSessionId(r);
+        const turnSpan = parseCandidateTurnSpan(r);
+        return { r, origIdx, id, sessionId, turnSpan };
+    });
+
+    // Map row id -> sessionId before sorting so tag-only session rows separated only by interleaved other-session/atomic IDs remain adjacent
+    const sessionByRowId = new Map();
+    for (let i = 0; i < annotatedRows.length; i++) {
+        const item = annotatedRows[i];
+        if (Number.isFinite(item.id) && item.id > 0) {
+            sessionByRowId.set(item.id, item.sessionId);
+        }
+    }
+
+    annotatedRows.sort((a, b) => {
+        const aNull = a.sessionId === null ? 1 : 0;
+        const bNull = b.sessionId === null ? 1 : 0;
+        if (aNull !== bNull) return aNull - bNull;
+        if (a.sessionId !== b.sessionId) return (a.sessionId || 0) - (b.sessionId || 0);
+        const aOrder = a.turnSpan !== null ? a.turnSpan.start : a.id;
+        const bOrder = b.turnSpan !== null ? b.turnSpan.start : b.id;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        if (a.id !== b.id) return a.id - b.id;
+        return a.origIdx - b.origIdx;
+    });
+
+    const corpusN = annotatedRows.length;
+    const dfByStem = new Map();
+    for (const s of queryStemSet) dfByStem.set(s, 0);
+
+    const rowQueryStems = new Array(corpusN);
+    const rowSessionIds = new Array(corpusN);
+    const rowIds = new Array(corpusN);
+    const rowTurnSpans = new Array(corpusN);
+
+    for (let i = 0; i < corpusN; i++) {
+        const entry = annotatedRows[i];
+        rowIds[i] = entry.id;
+        rowSessionIds[i] = entry.sessionId;
+        rowTurnSpans[i] = entry.turnSpan;
+        const uStems = getUserStemsForRow(entry.r);
+        let matched = null;
+        for (const s of queryStemSet) {
+            if (uStems.has(s)) {
+                dfByStem.set(s, (dfByStem.get(s) || 0) + 1);
+                if (!matched) matched = new Set();
+                matched.add(s);
+            }
+        }
+        rowQueryStems[i] = matched;
+    }
+
+    const areAdjacentSameSessionTurns = (idxA, idxB) => {
+        if (idxB < 0 || idxB >= corpusN) return false;
+        const sessA = rowSessionIds[idxA];
+        if (sessA === null || rowSessionIds[idxB] !== sessA) return false;
+        const spA = rowTurnSpans[idxA];
+        const spB = rowTurnSpans[idxB];
+        if (spA !== null && spB !== null) {
+            return Math.max(spA.start, spB.start) - Math.min(spA.end, spB.end) <= 1;
+        }
+        const idA = rowIds[idxA];
+        const idB = rowIds[idxB];
+        if (Number.isFinite(idA) && Number.isFinite(idB) && idA > 0 && idB > 0) {
+            const delta = Math.abs(idB - idA);
+            if (delta <= 1) return true;
+            if (delta <= 8) {
+                const lo = Math.min(idA, idB);
+                const hi = Math.max(idA, idB);
+                for (let mid = lo + 1; mid < hi; mid++) {
+                    if (!sessionByRowId.has(mid) || sessionByRowId.get(mid) === sessA) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const packedUserStems = new Set();
+    const firstPackedIdxByStem = new Map();
+    if (Array.isArray(packedItems)) {
+        let memRank = 0;
+        for (const it of packedItems) {
+            if (!it || (it.type !== undefined && it.type !== 'memory')) continue;
+            const itStems = getUserStemsForRow(it);
+            for (const s of queryStemSet) {
+                if (itStems.has(s)) {
+                    packedUserStems.add(s);
+                    if (!firstPackedIdxByStem.has(s)) {
+                        firstPackedIdxByStem.set(s, memRank);
+                    }
+                }
+            }
+            memRank++;
+        }
+    }
+
+    const termEntries = terms.map(t => {
+        const stem = stemToken(t);
+        return {
+            term: t,
+            stem,
+            dfUser: dfByStem.get(stem) || 0
+        };
+    });
+
+    const windows = new Array(corpusN);
+    let maxJointCoverage = 0;
+    for (let k = 0; k < corpusN; k++) {
+        const currSet = rowQueryStems[k];
+        const prevSet = areAdjacentSameSessionTurns(k, k - 1)
+            ? rowQueryStems[k - 1]
+            : null;
+        const nextSet = areAdjacentSameSessionTurns(k, k + 1)
+            ? rowQueryStems[k + 1]
+            : null;
+
+        let wk = null;
+        if (currSet && !prevSet && !nextSet) {
+            wk = currSet;
+        } else if (currSet || prevSet || nextSet) {
+            wk = new Set();
+            if (prevSet) for (const s of prevSet) wk.add(s);
+            if (currSet) for (const s of currSet) wk.add(s);
+            if (nextSet) for (const s of nextSet) wk.add(s);
+        }
+        windows[k] = wk;
+
+        if (wk && wk.size > 0) {
+            const cov = wk.size / queryStemSet.size;
+            if (cov > maxJointCoverage) maxJointCoverage = cov;
+        }
+    }
+
+    const anchorEntries = termEntries
+        .filter(e => e.dfUser >= 1 && packedUserStems.has(e.stem))
+        .slice()
+        .sort((a, b) => {
+            if (a.dfUser !== b.dfUser) return a.dfUser - b.dfUser;
+            const rankA = firstPackedIdxByStem.get(a.stem) ?? Infinity;
+            const rankB = firstPackedIdxByStem.get(b.stem) ?? Infinity;
+            if (rankA !== rankB) return rankA - rankB;
+            return b.term.length - a.term.length;
+        });
+
+    const attested_anchors = anchorEntries.map(e => e.term);
+    const uniqueAnchorStemCount = new Set(anchorEntries.map(e => e.stem)).size;
+
+    const unattestedEntries = termEntries.filter(e => e.term.length >= 4 && e.dfUser === 0);
+    const unattested_user_terms = unattestedEntries.map(e => e.term);
+    const uniqueUnattestedStemCount = new Set(unattestedEntries.map(e => e.stem)).size;
+
+    const sharesWindow = (stemA, stemB) => {
+        if (stemA === stemB) return true;
+        for (let k = 0; k < corpusN; k++) {
+            const wk = windows[k];
+            if (wk && wk.has(stemA) && wk.has(stemB)) return true;
+        }
+        return false;
+    };
+
+    const unlinked_attribute_terms = [];
+    const unlinkedStemSet = new Set();
+    if (anchorEntries.length >= 1) {
+        const ubiquitousCeiling = Math.max(3, corpusN * 0.40);
+        const nonUbiquitous = anchorEntries.filter(e => e.dfUser <= ubiquitousCeiling);
+        const anchorPool = nonUbiquitous.length > 0 ? nonUbiquitous : anchorEntries;
+
+        let primaryFirst = anchorPool[0];
+        if ((firstPackedIdxByStem.get(primaryFirst.stem) ?? Infinity) > 0) {
+            const topPackedAnchor = anchorPool.find(e => firstPackedIdxByStem.get(e.stem) === 0);
+            if (topPackedAnchor && !sharesWindow(primaryFirst.stem, topPackedAnchor.stem)) {
+                primaryFirst = topPackedAnchor;
+            }
+        }
+
+        const primaryAnchorStems = new Set([primaryFirst.stem]);
+        if (queryStemSet.size >= 3 && anchorPool.length >= 2) {
+            const secondCandidate = anchorPool.find(
+                e => e.stem !== primaryFirst.stem &&
+                     (nonUbiquitous.length === 0 || e.dfUser <= ubiquitousCeiling) &&
+                     sharesWindow(primaryFirst.stem, e.stem)
+            );
+            if (secondCandidate) {
+                primaryAnchorStems.add(secondCandidate.stem);
+            }
+        }
+
+        for (const entry of termEntries) {
+            if (entry.term.length < 4 || entry.dfUser < 1 || primaryAnchorStems.has(entry.stem)) {
+                continue;
+            }
+            let linked = false;
+            for (let k = 0; k < corpusN; k++) {
+                const wk = windows[k];
+                if (!wk || !wk.has(entry.stem)) continue;
+                for (const anchorStem of primaryAnchorStems) {
+                    if (wk.has(anchorStem)) {
+                        linked = true;
+                        break;
+                    }
+                }
+                if (linked) break;
+            }
+            if (!linked) {
+                unlinked_attribute_terms.push(entry.term);
+                unlinkedStemSet.add(entry.stem);
+            }
+        }
+    }
+
+    // Extreme-value cosine scaling for large episodic stores (max of N isotropic unit-sphere draws grows with log(N))
+    const extremeLogScale = corpusN >= 50
+        ? Math.min(3.5, Math.log10(corpusN / 25))
+        : 0;
+    const unsupportedCosCeiling = 0.42 + 0.032 * extremeLogScale;
+    const unattestedAttrCosCeiling = 0.50 + 0.045 * extremeLogScale;
+
+    let status = 'GROUNDED';
+    if (
+        queryStemSet.size >= 3 &&
+        rawCos < unsupportedCosCeiling &&
+        (
+            (uniqueAnchorStemCount === 0 && maxJointCoverage <= 0.25) ||
+            (uniqueUnattestedStemCount >= 2 && maxJointCoverage <= 0.34)
+        )
+    ) {
+        status = 'UNSUPPORTED';
+    } else if (
+        uniqueAnchorStemCount >= 1 &&
+        rawCos < unattestedAttrCosCeiling &&
+        maxJointCoverage < 0.65 &&
+        (uniqueUnattestedStemCount >= 1 || unlinkedStemSet.size >= 1)
+    ) {
+        status = 'UNATTESTED_ATTRIBUTE';
+    }
+
+    return {
+        status,
+        attested_anchors,
+        unattested_user_terms,
+        unlinked_attribute_terms,
+        max_joint_user_coverage: Number(maxJointCoverage.toFixed(4)),
+        max_raw_cosine: roundedRawCos
+    };
+}

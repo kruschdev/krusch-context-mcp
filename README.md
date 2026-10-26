@@ -133,7 +133,7 @@ To prevent memory hallucination and database pollution:
                ┌───────────────┴───────────────┐
                ▼                               ▼
 ┌─────────────────────────────┐ ┌─────────────────────────────┐
-│  krusch-context-mcp (v1.9)  │ │   krusch-git (External)     │
+│  krusch-context-mcp (v2.0)  │ │   krusch-git (External)     │
 │   Project Memory & Steering │ │   Codebase RAG & AST Search │
 │       (5 Canonical Verbs)   │ │      (7 Specialized Tools)  │
 └──────────────┬──────────────┘ └─────────────────────────────┘
@@ -185,12 +185,12 @@ claude mcp add krusch-context -- npx -y krusch-context-mcp
 ## 📚 Documentation & Specifications
 
 * **[Canonical Tool Reference](docs/TOOL_REFERENCE.md)**: Generated directly from live schemas (`npm run docs:generate`).
-* **[Architecture & Failure Modes](docs/ARCHITECTURE.md)**: 2-page specification covering schemas, indexes, and invariants.
+* **[Architecture & Failure Modes](docs/ARCHITECTURE.md)**: 2-page specification covering schemas, indexes, and `v2.0.0` multi-scale retrieval invariants.
 * **[Setup & Operations Guide](docs/SETUP.md)**: Zero-Docker setup and optional configurations.
-* **[Migration Guide](docs/MIGRATION.md)**: Step-by-step v1.5 → v1.6 → v1.7 → v1.8 → v1.9.0 mapping.
+* **[Migration Guide](docs/MIGRATION.md)**: Step-by-step v1.5 → v1.6 → v1.7 → v1.8 → v1.9.0 → v2.0.0 mapping.
 * **[Episodic Memory Guide](docs/EPISODIC_MEMORY.md)**: Deep dive into the closed taxonomy and lifecycle.
 * **[Changelog](CHANGELOG.md)**: Version release notes.
-* **[Official ICLR 2026 BEAM Empirical Report](benchmarks/BEAM_EMPIRICAL_REPORT.md)**: Closed-system full-suite evaluation across all **`100` conversations (`~178.34M` tokens) and `2,000/2,000` questions** (`100K`, `500K`, `1M`, `10M` splits) on 96 GB Blackwell G4 (`snowflake-arctic-embed2` 8K ctx on SQLite: **`78.67%` Hybrid 8K** vs. `76.88%` Pure Dense 8K [`+1.79 pp`] & `8.71%` Lex 8K; **`70.64%` / `62.02%` Stock `gpt-oss:120b` E2E QA** across all `2,000` Qs with zero degradation from `100K` → `500K` → `1M` [`70.60%` → `71.82%` → `72.86%`]; beats cloud `past.dev` on Contradiction Resolution across all 4 splits) and `5/5` zero-leakage verification.
+* **[Official ICLR 2026 BEAM Empirical Report](benchmarks/BEAM_EMPIRICAL_REPORT.md)**: Closed-system full-suite evaluation across all **`100` conversations (`~178.34M` tokens) and `2,000/2,000` questions** (`100K`, `500K`, `1M`, `10M` splits) on 96 GB Blackwell G4 (`snowflake-arctic-embed2` 8K ctx on SQLite: `v2.0.0` reaches **`92.58%` Hybrid 8K** at `100K`, **`42.23%` `R@10`** at `1M`, and **`55.54%` Hybrid 8K** [`93.00%` IE] + **`48.18%` / `58.71%` E2E QA** at `10M`, beating cloud `past.dev` on Contradiction Resolution across all 4 splits and on `10M` Multi-Session Reasoning across both Referees [`29.54%` / `38.33%` vs. `28.17%`]) with `5/5` zero-leakage verification.
 * **[Evaluation Baseline Notes](evals/README.md)**: Preliminary benchmark fixtures and token-budget metrics.
 
 ---

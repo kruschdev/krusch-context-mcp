@@ -422,6 +422,18 @@ async function _initProjectDb(projectName) {
         // Gracefully degrade to LIKE scan if runtime SQLite lacks FTS5 support
     }
 
+    // Two-Level Hierarchical Episode Rollups schema & Porter FTS5 index (v2.0 — lazy on stores < minRollupRows per INV-V2-05)
+    try {
+        const minRollupRows = Math.max(20, Number(process.env.KRUSCH_ROLLUP_MIN_ROWS) || 240);
+        const activeCnt = db.prepare(`SELECT COUNT(*) AS c FROM ide_agent_memory WHERE status = 'ACTIVE'`).get()?.c || 0;
+        if (activeCnt >= minRollupRows) {
+            const { ensureRollupSchema } = await import('./episode-rollup.js');
+            ensureRollupSchema(db);
+        }
+    } catch {
+        // Rollup schema also initializes lazily on demand in ensureEpisodeRollups
+    }
+
     // Lazily populate compact binary Float32Array embedding_blob for existing JSON-embedded rows
     try {
         const legacyVecRows = db.prepare(`

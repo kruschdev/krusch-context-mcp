@@ -1,6 +1,6 @@
 {
   "name": "krusch-context-mcp",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "Local MCP server: five tools to store, retrieve, and retire project decisions. SQLite by default.",
   "main": "src/index.js",

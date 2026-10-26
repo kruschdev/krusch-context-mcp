@@ -21,6 +21,7 @@ import { getProjectDb, cosineSimilarity, getParsedEmbedding, encodeEmbeddingBlob
 import { checkNearDuplicateMemory, getStorageMode } from './storage-adapter.js';
 import { generateTagsFromLLM, extractHeuristicTags } from './llm-tags.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
+import { ensureEpisodeRollups } from './episode-rollup.js';
 
 export const CLOSED_CATEGORIES = new Set(['decision', 'bug', 'invariant', 'lesson', 'blocker']);
 const DECAY_RATE = 0.01;
@@ -1273,6 +1274,7 @@ export async function getHealthStats({ project } = {}) {
     let supersededCount = 0;
     let invalidatedCount = 0;
     let nuggetCount = 0;
+    let rollupCount = 0;
     let anchoredCount = 0;
     let driftedCount = 0;
     let staleCount = 0;
@@ -1302,6 +1304,11 @@ export async function getHealthStats({ project } = {}) {
         }
         const nugRow = db.prepare(`SELECT count(*) as count FROM ide_agent_nuggets`).get();
         nuggetCount = nugRow ? nugRow.count : 0;
+
+        try {
+            const rollupRow = db.prepare(`SELECT count(*) as count FROM ide_episode_rollups`).get();
+            rollupCount = rollupRow ? rollupRow.count : 0;
+        } catch {}
 
         const hasLastAcc = hasMemoryColumn(db, 'last_accessed_at');
         const tsExpr = hasLastAcc
@@ -1333,6 +1340,9 @@ export async function getHealthStats({ project } = {}) {
     output += `* **Superseded Lineage**: ${supersededCount}\n`;
     output += `* **Invalidated Records**: ${invalidatedCount}\n`;
     output += `* **Steering Nuggets**: ${nuggetCount}\n`;
+    if (rollupCount > 0) {
+        output += `* **Episode Rollups**: ${rollupCount}\n`;
+    }
     if (staleCount > 0) {
         output += `* **Decay Review**: ⏳ ${staleCount} memories have not been referenced in >30 days.\n`;
     } else {
@@ -1351,6 +1361,7 @@ export async function getHealthStats({ project } = {}) {
             supersededCount,
             invalidatedCount,
             nuggetCount,
+            rollupCount,
             staleCount
         }
     };
@@ -1467,11 +1478,25 @@ export async function consolidateMemories({ category, project, active_project, t
     }
 
     let mergedCount = 0;
-    for (const p of pairs) {
-        // Mark the newer one as superseded by the older one
-        db.prepare(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(p.a.id, p.b.id);
-        mergedCount++;
-    }
+    const updStmt = db.prepare(`UPDATE ide_agent_memory SET status = 'SUPERSEDED', superseded_by = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`);
+    withTransaction(db, () => {
+        for (const p of pairs) {
+            // Mark the newer one as superseded by the older one
+            updStmt.run(p.a.id, p.b.id);
+            mergedCount++;
+        }
+    });
+
+    try {
+        const existingRollups = db.prepare(`SELECT count(*) as count FROM ide_episode_rollups`).get()?.count || 0;
+        if (existingRollups > 0) {
+            const rebuilt = ensureEpisodeRollups(db, { project: targetProject, forceRebuild: true });
+            if (!rebuilt.active) {
+                db.prepare(`DELETE FROM ide_episode_rollups`).run();
+            }
+        }
+    } catch {}
+
     pushProjectMemory(targetProject, db).catch(() => {});
 
     return { content: [{ type: "text", text: `🔗 Consolidated ${mergedCount} duplicate pairs in category '${normCat}'.` }] };
