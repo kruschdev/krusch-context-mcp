@@ -22,7 +22,7 @@ It enforces a strict **5-verb public contract** (~350 prompt tokens):
 Do **not** submit PRs that add the following to this repository:
 
 * **Codebase AST & Git DAG Indexing**: Symbol graphs, call trees, and Git object traversal belong in [**`krusch-git`**](https://github.com/kruschdev/krusch-git).
-* **Execution & Sandboxing**: Two-phase commit journals, Bubblewrap sandboxing, and diff application belong in [**`krusch`**](https://github.com/kruschdev/krusch).
+* **Execution & Sandboxing**: Two-phase commit journals, Bubblewrap sandboxing, and diff application belong in [**`krusch-coding-harness`**](https://github.com/kruschdev/krusch-coding-harness).
 * **Document Ingestion**: PDF layout-true parsing and bounding-box locators belong in [**`krusch-nexus`**](https://github.com/kruschdev/krusch-nexus).
 * **Statutory Law**: Legal authority grounding belongs in [**`krusch-law`**](https://github.com/kruschdev/krusch-law).
 
