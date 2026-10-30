@@ -635,10 +635,17 @@ export async function handleProactiveNudge({
         const prov = rule.provenance;
         if (!prov) continue;
         const provFile = (prov.file || '').toLowerCase();
+        const movedProvFile = (prov.moved_candidate?.file || '').toLowerCase();
         const quotedSpan = (prov.quoted_sentence || '').toLowerCase();
-        const fileMatched = provFile && (
-            matchesFilePathBoundary(lowerFilePath, provFile) ||
-            lowerQuery.includes(provFile)
+        const fileMatched = Boolean(
+            (provFile && (
+                matchesFilePathBoundary(lowerFilePath, provFile) ||
+                lowerQuery.includes(provFile)
+            )) ||
+            (movedProvFile && (
+                matchesFilePathBoundary(lowerFilePath, movedProvFile) ||
+                lowerQuery.includes(movedProvFile)
+            ))
         );
         const quoteMatched = quotedSpan && lowerQuery.includes(quotedSpan);
         if (fileMatched || quoteMatched) {
@@ -718,8 +725,12 @@ export async function handleProactiveNudge({
 
     for (const v of activeViolations) {
         const cit = v.provenance?.citation || v.provenance?.file;
+        const movedCit = v.provenance?.moved_candidate?.citation;
+        const driftedBadge = movedCit
+            ? ` ⚠️ *[DRIFTED: ${cit} -> moved_candidate: ${movedCit}]*`
+            : ` ⚠️ *[DRIFTED: ${cit}]*`;
         const badge = cit
-            ? (v.is_drifted ? ` ⚠️ *[DRIFTED: ${cit}]*` : ` *[Anchor: ${cit}]*`)
+            ? (v.is_drifted ? driftedBadge : ` *[Anchor: ${cit}]*`)
             : '';
         output += `* **Rule #${v.id}** [${v.category}]${badge}: ${v.content}\n`;
     }
@@ -729,3 +740,5 @@ export async function handleProactiveNudge({
         content: [{ type: "text", text: output }]
     };
 }
+
+export const runProactiveNudge = handleProactiveNudge;

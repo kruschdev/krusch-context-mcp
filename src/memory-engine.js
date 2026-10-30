@@ -38,14 +38,34 @@ const SECRET_PATTERNS = [
     { label: 'Private Key Block', regex: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/ }
 ];
 
+const RELOC_IGNORED_DIRS = new Set([
+    '.git',
+    'node_modules',
+    '.agent',
+    '.krusch-stack',
+    'dist',
+    'build',
+    'coverage',
+    '__pycache__',
+    '.venv',
+    'venv',
+    '.next',
+    'benchmarks'
+]);
+
+const MAX_RELOC_SCAN_FILES = 250;
+const MAX_RELOC_FILE_BYTES = 512 * 1024;
+
 /**
  * Checks whether a candidate file path points to a sensitive secret dotfile or key file.
  */
 function isSensitiveAnchorFile(filePath) {
     if (!filePath || typeof filePath !== 'string') return true;
     const base = path.basename(filePath).toLowerCase();
-    if (base === '.env' || base.startsWith('.env.')) return true;
-    if (base === 'id_rsa' || base === 'id_ed25519' || base === 'id_ecdsa' || base === 'id_dsa') return true;
+    if (base === '.env') return true;
+    if (base.startsWith('.env.') && !/\.(?:example|sample|template|schema|dist)$/i.test(base)) return true;
+    if (base.startsWith('id_rsa') || base === 'id_ed25519' || base === 'id_ecdsa' || base === 'id_dsa') return true;
+    if (base === 'credentials.json') return true;
     if (base.endsWith('.pem') || base.endsWith('.key')) return true;
     return false;
 }
@@ -75,7 +95,7 @@ export function computeNormalizedSpanHash(text) {
  * Asynchronous writes/reads acquire anchoredCacheMutex to prevent interleaved state corruption.
  */
 const anchoredFileCache = new Map();
-const MAX_ANCHORED_FILE_CACHE = 128;
+const MAX_ANCHORED_FILE_CACHE = 300;
 let _anchoredCacheLock = Promise.resolve();
 
 export async function withAnchoredCacheLock(fn) {
@@ -306,6 +326,294 @@ export function anchorProvenanceToFile(provenance, targetProject) {
     return base;
 }
 
+function hasIgnoredPathSegment(relPosixPath) {
+    if (!relPosixPath) return false;
+    const parts = relPosixPath.split('/');
+    for (const part of parts) {
+        if (part && RELOC_IGNORED_DIRS.has(part)) return true;
+    }
+    return false;
+}
+
+function resolveRelocationRoot(targetProject, projectRoot) {
+    if (projectRoot && fs.existsSync(projectRoot)) {
+        try {
+            if (fs.statSync(projectRoot).isDirectory()) {
+                return fs.realpathSync(projectRoot);
+            }
+        } catch {
+            // Unreachable or broken root symlink
+        }
+    }
+    if (typeof targetProject === 'string' && path.isAbsolute(targetProject.trim())) {
+        try {
+            const direct = path.resolve(targetProject.trim());
+            if (fs.existsSync(direct) && fs.statSync(direct).isDirectory()) {
+                return fs.realpathSync(direct);
+            }
+        } catch {
+            // Unreachable direct workspace path
+        }
+    }
+    return null;
+}
+
+function normalizeOriginalRelPath(originalFile, projectRoot, realRoot) {
+    if (originalFile === null || originalFile === undefined || originalFile === '') {
+        return '';
+    }
+    if (typeof originalFile !== 'string') return null;
+    const cleaned = originalFile.trim();
+    if (!cleaned) return '';
+    if (cleaned.includes('\0') || cleaned.includes('..')) return null;
+
+    if (path.isAbsolute(cleaned)) {
+        const resolved = path.resolve(cleaned);
+        for (const rootCandidate of [realRoot, projectRoot].filter(Boolean)) {
+            const rel = path.relative(rootCandidate, resolved);
+            if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+                return rel.replace(/\\/g, '/');
+            }
+        }
+        return null;
+    }
+
+    const rawPosix = cleaned.replace(/\\/g, '/').replace(/^(?:\.\/|\/)+/, '');
+    if (!rawPosix) return '';
+    const normPosix = path.posix.normalize(rawPosix);
+    if (!normPosix || normPosix === '.' || normPosix === '..' || normPosix.startsWith('../')) {
+        return null;
+    }
+    return normPosix;
+}
+
+function countSharedDirSegments(dirPartsA, dirPartsB) {
+    const limit = Math.min(dirPartsA.length, dirPartsB.length);
+    let shared = 0;
+    for (let i = 0; i < limit; i++) {
+        if (dirPartsA[i] !== dirPartsB[i]) break;
+        shared += 1;
+    }
+    return shared;
+}
+
+/**
+ * Deterministic zero-LLM cross-file relocation hint scanner (INV-RELOC-02 & INV-RELOC-03).
+ * Scans the original file's sibling directory first, then walks projectRoot up to 250 eligible files (<= 512 KB).
+ */
+export function findRelocatedSpanCandidate(quotedSentence, originalFile, targetProject) {
+    if (!quotedSentence || typeof quotedSentence !== 'string') return null;
+    const normalizedQuote = quotedSentence.replace(/\r\n?/g, '\n').trim();
+    if (normalizedQuote.replace(/\s+/g, '').length < 10) return null;
+
+    const projectRoot = resolveProjectPath(targetProject);
+    const realRoot = resolveRelocationRoot(targetProject, projectRoot);
+    if (!realRoot) return null;
+
+    const origRel = normalizeOriginalRelPath(originalFile, projectRoot, realRoot);
+    if (origRel === null) return null;
+
+    let origRealRel = origRel;
+    if (origRel) {
+        try {
+            const origAbs = path.resolve(realRoot, origRel);
+            const origRealAbs = fs.realpathSync(origAbs);
+            const rel = path.relative(realRoot, origRealAbs).replace(/\\/g, '/');
+            if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+                origRealRel = rel;
+            }
+        } catch {
+            // Original file may be deleted (file_missing); keep origRealRel = origRel
+        }
+    }
+
+    const origDirPosix = origRel && origRel.includes('/') ? path.posix.dirname(origRel) : '';
+    const origDirParts = origDirPosix ? origDirPosix.split('/').filter(Boolean) : [];
+
+    const visitedDirs = new Set();
+    const seenRealFiles = new Set();
+    const matches = [];
+    let eligibleScanned = 0;
+    let totalReads = 0;
+    let abortedAmbiguous = false;
+
+    const inspectFile = (entryAbs) => {
+        if (abortedAmbiguous || eligibleScanned >= MAX_RELOC_SCAN_FILES || totalReads >= MAX_RELOC_SCAN_FILES * 4) {
+            return;
+        }
+        const relPathRaw = path.relative(realRoot, entryAbs).replace(/\\/g, '/');
+        if (!relPathRaw || relPathRaw.startsWith('..') || path.isAbsolute(relPathRaw)) return;
+        if (hasIgnoredPathSegment(relPathRaw) || isSensitiveAnchorFile(relPathRaw)) return;
+        if (origRel && (relPathRaw === origRel || relPathRaw === origRealRel)) return;
+
+        let realFile;
+        let realRel;
+        let st;
+        try {
+            realFile = fs.realpathSync(entryAbs);
+            realRel = path.relative(realRoot, realFile).replace(/\\/g, '/');
+            if (!realRel || realRel.startsWith('..') || path.isAbsolute(realRel)) return;
+            if (hasIgnoredPathSegment(realRel) || isSensitiveAnchorFile(realFile)) return;
+            if (origRel && (realRel === origRel || realRel === origRealRel)) return;
+            if (seenRealFiles.has(realFile)) return;
+            st = fs.statSync(realFile);
+        } catch {
+            return;
+        }
+
+        if (!st.isFile() || st.size === 0 || st.size > MAX_RELOC_FILE_BYTES) return;
+        seenRealFiles.add(realFile);
+
+        let cached;
+        try {
+            totalReads += 1;
+            cached = readAnchoredFileCached(realFile);
+        } catch {
+            return;
+        }
+        if (!cached || typeof cached.fileText !== 'string') return;
+        if (cached.fileText.includes('\0')) return;
+
+        eligibleScanned += 1;
+        const normalizedFileText = cached.fileText.replace(/\r\n?/g, '\n');
+        const pos = normalizedFileText.indexOf(normalizedQuote);
+        if (pos !== -1) {
+            const { startLine, endLine } = getSpanLineRange(
+                normalizedFileText,
+                pos,
+                pos + normalizedQuote.length
+            );
+            matches.push({ relPath: realRel, startLine, endLine });
+            if (matches.length > 5) {
+                abortedAmbiguous = true;
+            }
+        }
+    };
+
+    const walkDir = (dirAbs) => {
+        if (abortedAmbiguous || eligibleScanned >= MAX_RELOC_SCAN_FILES || totalReads >= MAX_RELOC_SCAN_FILES * 4) {
+            return;
+        }
+        let realDir;
+        try {
+            realDir = fs.realpathSync(dirAbs);
+        } catch {
+            return;
+        }
+        if (realDir !== realRoot) {
+            const relDir = path.relative(realRoot, realDir).replace(/\\/g, '/');
+            if (!relDir || relDir.startsWith('..') || path.isAbsolute(relDir)) return;
+            if (hasIgnoredPathSegment(relDir)) return;
+        }
+        if (visitedDirs.has(realDir)) return;
+        visitedDirs.add(realDir);
+
+        let entries;
+        try {
+            entries = fs.readdirSync(realDir, { withFileTypes: true });
+        } catch {
+            return;
+        }
+        entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
+        const subDirs = [];
+        for (const entry of entries) {
+            if (abortedAmbiguous || eligibleScanned >= MAX_RELOC_SCAN_FILES || totalReads >= MAX_RELOC_SCAN_FILES * 4) {
+                return;
+            }
+            if (!entry.name || RELOC_IGNORED_DIRS.has(entry.name)) continue;
+            const childAbs = path.join(realDir, entry.name);
+            if (entry.isDirectory()) {
+                subDirs.push(childAbs);
+            } else if (entry.isFile()) {
+                inspectFile(childAbs);
+            } else if (entry.isSymbolicLink()) {
+                let realChild;
+                let childStat;
+                try {
+                    realChild = fs.realpathSync(childAbs);
+                    const relChild = path.relative(realRoot, realChild).replace(/\\/g, '/');
+                    if (!relChild || relChild.startsWith('..') || path.isAbsolute(relChild)) continue;
+                    if (hasIgnoredPathSegment(relChild)) continue;
+                    childStat = fs.statSync(realChild);
+                } catch {
+                    continue;
+                }
+                if (childStat.isDirectory()) {
+                    subDirs.push(childAbs);
+                } else if (childStat.isFile()) {
+                    inspectFile(childAbs);
+                }
+            }
+        }
+
+        for (const subDir of subDirs) {
+            if (abortedAmbiguous || eligibleScanned >= MAX_RELOC_SCAN_FILES || totalReads >= MAX_RELOC_SCAN_FILES * 4) {
+                return;
+            }
+            walkDir(subDir);
+        }
+    };
+
+    if (origDirPosix) {
+        let curRel = origDirPosix;
+        while (curRel && curRel !== '.') {
+            if (!hasIgnoredPathSegment(curRel)) {
+                const candidateDir = path.resolve(realRoot, curRel);
+                const relCheck = path.relative(realRoot, candidateDir).replace(/\\/g, '/');
+                if (relCheck && !relCheck.startsWith('..') && !path.isAbsolute(relCheck) && fs.existsSync(candidateDir)) {
+                    walkDir(candidateDir);
+                }
+            }
+            const parentRel = path.posix.dirname(curRel);
+            if (!parentRel || parentRel === '.' || parentRel === curRel) break;
+            curRel = parentRel;
+        }
+    }
+
+    walkDir(realRoot);
+
+    if (abortedAmbiguous || matches.length === 0 || matches.length > 5) {
+        return null;
+    }
+
+    matches.sort((a, b) => {
+        const aDir = a.relPath.includes('/') ? path.posix.dirname(a.relPath) : '';
+        const bDir = b.relPath.includes('/') ? path.posix.dirname(b.relPath) : '';
+        const aSameDir = aDir === origDirPosix ? 1 : 0;
+        const bSameDir = bDir === origDirPosix ? 1 : 0;
+        if (bSameDir !== aSameDir) return bSameDir - aSameDir;
+
+        const aParts = aDir ? aDir.split('/').filter(Boolean) : [];
+        const bParts = bDir ? bDir.split('/').filter(Boolean) : [];
+        const aShared = countSharedDirSegments(origDirParts, aParts);
+        const bShared = countSharedDirSegments(origDirParts, bParts);
+        if (bShared !== aShared) return bShared - aShared;
+
+        const aDist = (origDirParts.length - aShared) + (aParts.length - aShared);
+        const bDist = (origDirParts.length - bShared) + (bParts.length - bShared);
+        if (aDist !== bDist) return aDist - bDist;
+
+        return a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0;
+    });
+
+    const best = matches[0];
+    const locator = best.startLine === best.endLine
+        ? `L${best.startLine}`
+        : `L${best.startLine}-L${best.endLine}`;
+    const citation = `${best.relPath}#L${best.startLine}${best.endLine !== best.startLine ? `-L${best.endLine}` : ''}`;
+
+    return {
+        file: best.relPath,
+        locator,
+        start_line: best.startLine,
+        end_line: best.endLine,
+        citation,
+        match_kind: 'workspace_exact_quote',
+        candidate_count: matches.length
+    };
+}
+
 /**
  * Evaluates live KruschNexus INV-12 span drift for a memory record.
  * - If the file hash matches anchor_hash -> VALID (is_drifted = false).
@@ -327,10 +635,27 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
         return { anchored: false, is_drifted: false, provenance: prov };
     }
 
+    const canSearchRelocation =
+        Boolean(prov.quoted_sentence && typeof prov.quoted_sentence === 'string') &&
+        Boolean(prov.file && typeof prov.file === 'string') &&
+        !prov.file.includes('..') &&
+        !prov.file.includes('\0') &&
+        !isSensitiveAnchorFile(prov.file);
+
     const absPath = resolveAnchoredFilePath(prov.file, targetProject);
     if (!absPath || !fs.existsSync(absPath)) {
-        const driftedProv = { ...prov, is_drifted: true, drift_reason: 'file_missing' };
-        if (db && row.id && !prov.is_drifted) {
+        const movedCandidate = canSearchRelocation
+            ? findRelocatedSpanCandidate(prov.quoted_sentence, prov.file, targetProject)
+            : null;
+        const driftedProv = {
+            ...prov,
+            is_drifted: true,
+            drift_reason: 'file_missing',
+            moved_candidate: movedCandidate
+        };
+        const prevMovedCit = prov.moved_candidate?.citation || null;
+        const nextMovedCit = movedCandidate?.citation || null;
+        if (db && row.id && (!prov.is_drifted || prevMovedCit !== nextMovedCit || prov.drift_reason !== 'file_missing')) {
             try {
                 db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
             } catch (err) {
@@ -338,7 +663,13 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
                 throw err;
             }
         }
-        return { anchored: true, is_drifted: true, drift_reason: 'file_missing', provenance: driftedProv };
+        return {
+            anchored: true,
+            is_drifted: true,
+            drift_reason: 'file_missing',
+            moved_candidate: movedCandidate,
+            provenance: driftedProv
+        };
     }
 
     const cachedFile = readAnchoredFileCached(absPath);
@@ -371,7 +702,8 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
                 citation: `${prov.file}${lineSuffix}${locSuffix}`,
                 anchor_hash: currentHash,
                 is_drifted: false,
-                drift_reason: null
+                drift_reason: null,
+                moved_candidate: null
             };
             if (db && row.id) {
                 try {
@@ -384,13 +716,19 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
             return { anchored: true, is_drifted: false, healed: true, current_hash: currentHash, provenance: healedProv };
         } else {
             const reason = prov.drift_reason === 'quoted_span_not_found' ? 'quoted_span_not_found' : 'quoted_span_mutated';
+            const movedCandidate = canSearchRelocation
+                ? findRelocatedSpanCandidate(prov.quoted_sentence, prov.file, targetProject)
+                : null;
             const driftedProv = {
                 ...prov,
                 current_hash: currentHash,
                 is_drifted: true,
-                drift_reason: reason
+                drift_reason: reason,
+                moved_candidate: movedCandidate
             };
-            if (db && row.id && !prov.is_drifted) {
+            const prevMovedCit = prov.moved_candidate?.citation || null;
+            const nextMovedCit = movedCandidate?.citation || null;
+            if (db && row.id && (!prov.is_drifted || prevMovedCit !== nextMovedCit)) {
                 try {
                     db.prepare(`UPDATE ide_agent_memory SET provenance = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(JSON.stringify(driftedProv), row.id);
                 } catch (err) {
@@ -398,7 +736,14 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
                     throw err;
                 }
             }
-            return { anchored: true, is_drifted: true, drift_reason: reason, current_hash: currentHash, provenance: driftedProv };
+            return {
+                anchored: true,
+                is_drifted: true,
+                drift_reason: reason,
+                moved_candidate: movedCandidate,
+                current_hash: currentHash,
+                provenance: driftedProv
+            };
         }
     }
 
@@ -426,7 +771,8 @@ export function evaluateMemorySpanDrift(row, targetProject, db = null) {
             ...prov,
             anchor_hash: prov.anchor_hash || currentHash,
             is_drifted: false,
-            drift_reason: null
+            drift_reason: null,
+            moved_candidate: null
         };
         if (db && row.id) {
             try {
@@ -1112,7 +1458,13 @@ export async function compileProjectState({ project, active_project, max_tokens 
     const formatSpanBadge = (r) => {
         if (!r._drift?.anchored) return '';
         const cit = r._drift.provenance?.citation || r._drift.provenance?.file || 'file';
-        return r._drift.is_drifted ? ` ⚠️ *[DRIFTED: ${cit}]*` : ` *[Anchor: ${cit}]*`;
+        if (!r._drift.is_drifted) {
+            return ` *[Anchor: ${cit}]*`;
+        }
+        const movedCit = r._drift.provenance?.moved_candidate?.citation;
+        return movedCit
+            ? ` ⚠️ *[DRIFTED: ${cit} -> moved_candidate: ${movedCit}]*`
+            : ` ⚠️ *[DRIFTED: ${cit}]*`;
     };
 
     const renderState = (cfg = null) => {
@@ -1183,7 +1535,10 @@ export async function compileProjectState({ project, active_project, max_tokens 
             out += `## ⚠️ Span-Grounded Drift Review (${drifted.length} drifted)\n`;
             for (const dr of driftSlice) {
                 const cit = dr.provenance?.citation || dr.provenance?.file || 'anchored file';
-                out += `- Memory #${dr.id} [${dr.category}] (${cit} — ${dr.drift_reason}): "${dr.content.substring(0, 80)}..."\n`;
+                const movedSuffix = dr.provenance?.moved_candidate?.citation
+                    ? ` -> moved_candidate: ${dr.provenance.moved_candidate.citation}`
+                    : '';
+                out += `- Memory #${dr.id} [${dr.category}] (${cit}${movedSuffix} — ${dr.drift_reason}): "${dr.content.substring(0, 80)}..."\n`;
             }
             out += `\n`;
         }
