@@ -13,6 +13,7 @@ import {
 } from './retrieval-lexical.js';
 import { getProjectDb, getParsedEmbedding, cosineSimilarity } from './sqlite-engine.js';
 import { detectCurrentProject } from './project-helper.js';
+import { detectHandRolledBoilerplate } from './lego-boilerplate-guard.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '..', '.env'), quiet: true });
@@ -113,7 +114,7 @@ function extractQueryIdentifiers(queryText) {
     const identifiers = new Set();
     if (!queryText || typeof queryText !== 'string') return identifiers;
 
-    const compoundMatches = queryText.match(/(?:@[A-Za-z0-9_-]+\/[A-Za-z0-9_./-]+|--[A-Za-z0-9][A-Za-z0-9_-]*|[A-Za-z0-9_]+(?:[:./-][A-Za-z0-9_]+)+)/g);
+    const compoundMatches = queryText.match(/(?:(?<![A-Za-z0-9_-])@[A-Za-z0-9_-]+\/[A-Za-z0-9_./-]+|(?<![A-Za-z0-9_-])--[A-Za-z0-9][A-Za-z0-9_-]*|(?<![A-Za-z0-9_])[A-Za-z0-9_]+(?:[:./-][A-Za-z0-9_]+)+)/g);
     if (compoundMatches) {
         for (const raw of compoundMatches) {
             const cleaned = raw.replace(/^[./:]+|[./:]+$/g, '').toLowerCase();
@@ -210,7 +211,7 @@ function extractTechnicalSymbolsFromSource(text, symbolSet, { allowBackticks = f
     }
 
     // Colon-namespaced modules / models (e.g. node:sqlite, gemma4:e4b)
-    const colonMatches = text.match(/\b[A-Za-z0-9_-]+:[A-Za-z0-9_.-]+\b/g);
+    const colonMatches = text.match(/(?<![A-Za-z0-9_-])[A-Za-z0-9_-]+:[A-Za-z0-9_.-]+\b/g);
     if (colonMatches) {
         for (const raw of colonMatches) {
             const lower = raw.toLowerCase();
@@ -229,7 +230,7 @@ function extractTechnicalSymbolsFromSource(text, symbolSet, { allowBackticks = f
     }
 
     // Explicit source/config filenames with known code extensions (.js, .py, .sql, .ts, etc.)
-    const fileExtMatches = text.match(/\b[A-Za-z0-9_./-]+\.(?:js|mjs|cjs|ts|tsx|jsx|py|sql|sh|json|ya?ml|toml|env|html|css|vue|svelte|graphql|proto)\b/gi);
+    const fileExtMatches = text.match(/(?<![A-Za-z0-9_./-])[A-Za-z0-9_./-]+\.(?:js|mjs|cjs|ts|tsx|jsx|py|sql|sh|json|ya?ml|toml|env|html|css|vue|svelte|graphql|proto)\b/gi);
     if (fileExtMatches) {
         for (const raw of fileExtMatches) {
             addCleanSymbol(symbolSet, raw);
@@ -237,7 +238,7 @@ function extractTechnicalSymbolsFromSource(text, symbolSet, { allowBackticks = f
     }
 
     // Scoped npm packages & multi-segment or code-directory slash paths
-    const pathMatches = text.match(/@[A-Za-z0-9_-]+\/[A-Za-z0-9_./-]+|(?:^|[\s('"\[])((?:\/(?:etc|mnt|var|opt|usr)\/[A-Za-z0-9_./-]+|(?:src|lib|bin|db|tests?|scripts|client|server|packages|assert|fs)\/[A-Za-z0-9_./-]+))/g);
+    const pathMatches = text.match(/(?<![A-Za-z0-9_-])@[A-Za-z0-9_-]+\/[A-Za-z0-9_./-]+|(?:^|[\s('"\[])((?:\/(?:etc|mnt|var|opt|usr)\/[A-Za-z0-9_./-]+|(?:src|lib|bin|db|tests?|scripts|client|server|packages|assert|fs)\/[A-Za-z0-9_./-]+))/g);
     if (pathMatches) {
         for (const raw of pathMatches) {
             const cleaned = raw.trim().replace(/^['"(\[]+/, '');
@@ -246,7 +247,7 @@ function extractTechnicalSymbolsFromSource(text, symbolSet, { allowBackticks = f
     }
 
     // Hyphenated package/service identifiers (excluding common English compound modifiers and numeric ranges)
-    const hyphenMatches = text.match(/\b[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b/g);
+    const hyphenMatches = text.match(/(?<![A-Za-z0-9_-])[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b/g);
     if (hyphenMatches) {
         for (const raw of hyphenMatches) {
             const lower = raw.toLowerCase();
@@ -621,17 +622,29 @@ export async function handleProactiveNudge({
         }
     }
 
-    if (candidateRules.length === 0) {
+    // 3b. Deterministic Lego Toolkit boilerplate-reinvention guard (INV-LEGO-01)
+    const legoFindings = detectHandRolledBoilerplate(queryText, file_path || '').filter((finding) => {
+        const w = ruleWeights.has(String(finding.id)) ? ruleWeights.get(String(finding.id)) : 1.0;
+        return w > 0.2;
+    });
+
+    if (candidateRules.length === 0 && legoFindings.length === 0) {
         return { content: [{ type: "text", text: "NO_NUDGES_REQUIRED" }] };
     }
 
     // 4. Deterministic KruschNexus span/file matching first, then hybrid IDF-stem + symbol + embedding scorer
     const activeViolations = [];
     const seenIds = new Set();
+    for (const lf of legoFindings) {
+        if (activeViolations.length >= 3) break;
+        activeViolations.push({ ...lf, is_drifted: false });
+        seenIds.add(lf.id);
+    }
     const lowerQuery = queryText.toLowerCase();
     const lowerFilePath = (file_path || '').toLowerCase();
 
     for (const rule of candidateRules) {
+        if (activeViolations.length >= 3) break;
         const prov = rule.provenance;
         if (!prov) continue;
         const provFile = (prov.file || '').toLowerCase();
