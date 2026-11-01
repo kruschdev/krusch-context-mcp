@@ -8,10 +8,43 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync as NodeSqliteDriver } from 'node:sqlite';
 import { pool, query } from '../db/pool.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
 import { getProjectDb, cosineSimilarity as engineCosineSimilarity, getParsedEmbedding } from './sqlite-engine.js';
+
+let openSqliteDb = null;
+try {
+    const siblingSqliteUrl = new URL('../../../lib/sqlite.js', import.meta.url);
+    if (fs.existsSync(siblingSqliteUrl)) {
+        ({ openSqliteDb } = await import(siblingSqliteUrl.href));
+    } else {
+        ({ openSqliteDb } = await import('@krusch/toolkit/sqlite'));
+    }
+} catch {
+    openSqliteDb = null;
+}
+
+function openAdapterSqlite(dbPath) {
+    if (typeof openSqliteDb === 'function') {
+        return openSqliteDb(dbPath, {
+            wal: true,
+            busyTimeout: 5000,
+            synchronous: 'NORMAL'
+        }).db;
+    }
+    const db = new NodeSqliteDriver(dbPath);
+    try {
+        db.exec('PRAGMA busy_timeout = 5000;');
+        db.exec('PRAGMA journal_mode = WAL;');
+        db.exec('PRAGMA synchronous = NORMAL;');
+        db.exec('PRAGMA foreign_keys = ON;');
+        return db;
+    } catch (err) {
+        try { db.close(); } catch {}
+        throw err;
+    }
+}
 
 let activeStorageMode = null; // 'sqlite' | 'postgres'
 
@@ -41,7 +74,7 @@ export function setStorageMode(mode) {
 /**
  * Resolves or creates the local SQLite database in the active workspace's .agent directory.
  * @param {string} [workspaceDir]
- * @returns {DatabaseSync}
+ * @returns {NodeSqliteDriver}
  */
 export function getSqliteDb(workspaceDir = process.cwd()) {
     if (sqliteInstance) return sqliteInstance;
@@ -67,11 +100,7 @@ export function getSqliteDb(workspaceDir = process.cwd()) {
     }
 
     const dbPath = path.join(targetAgentDir, 'context.db');
-    const db = new DatabaseSync(dbPath);
-    db.exec('PRAGMA journal_mode = WAL;');
-    db.exec('PRAGMA busy_timeout = 5000;');
-    db.exec('PRAGMA synchronous = NORMAL;');
-    db.exec('PRAGMA foreign_keys = ON;');
+    const db = openAdapterSqlite(dbPath);
 
     // Initialize unified schema matching sqlite-engine.js
     db.exec(`

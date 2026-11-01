@@ -12,6 +12,7 @@
  */
 
 import dotenv from 'dotenv';
+import { existsSync, realpathSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -19,8 +20,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '..', '.env'), quiet: true });
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -52,6 +52,159 @@ import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
 import { getStorageMode, setStorageMode, getSqliteDb, closeSqliteDb } from './storage-adapter.js';
 import { getProjectDb, closeAllDatabases } from './sqlite-engine.js';
 
+const toolkitMcpUrl = new URL('../../../lib/mcp-server.js', import.meta.url);
+
+async function loadMcpToolkit() {
+  try {
+    if (existsSync(toolkitMcpUrl)) {
+      return await import(toolkitMcpUrl.href);
+    }
+  } catch {
+    // Fall through when sibling lib/ exists without transitive dependencies installed
+  }
+  try {
+    return await import('@krusch/toolkit/mcp');
+  } catch {
+    const fallbackToolkit = {
+      defineMcpTool({
+        name,
+        title,
+        description = '',
+        inputSchema = { type: 'object', properties: {} },
+        annotations = {},
+        readOnlyHint,
+        destructiveHint,
+        idempotentHint,
+        openWorldHint,
+        ...rest
+      } = {}) {
+        if (typeof name !== 'string' || name.trim().length === 0) {
+          throw new Error('[defineMcpTool] Tool "name" must be a non-empty string.');
+        }
+        const cleanName = name.trim();
+        const rawAnnotations = annotations && typeof annotations === 'object' ? annotations : {};
+        const normalizedSchema =
+          inputSchema && typeof inputSchema === 'object' && !Array.isArray(inputSchema)
+            ? {
+                ...inputSchema,
+                type: inputSchema.type || 'object',
+                properties:
+                  inputSchema.properties && typeof inputSchema.properties === 'object'
+                    ? inputSchema.properties
+                    : {},
+              }
+            : { type: 'object', properties: {} };
+
+        return {
+          ...rest,
+          name: cleanName,
+          description: String(description ?? ''),
+          inputSchema: normalizedSchema,
+          annotations: {
+            ...rawAnnotations,
+            title: String(rawAnnotations.title || title || cleanName),
+            readOnlyHint: Boolean(readOnlyHint ?? rawAnnotations.readOnlyHint ?? true),
+            destructiveHint: Boolean(destructiveHint ?? rawAnnotations.destructiveHint ?? false),
+            idempotentHint: Boolean(idempotentHint ?? rawAnnotations.idempotentHint ?? true),
+            openWorldHint: Boolean(openWorldHint ?? rawAnnotations.openWorldHint ?? false),
+          },
+        };
+      },
+      registerMcpHandlers(targetServer, tools = [], toolHandler, options = {}) {
+        const normalizedTools = Array.isArray(tools)
+          ? tools.map((tool) => fallbackToolkit.defineMcpTool(tool))
+          : [];
+        const fallbackServerName = String(options.serverName || 'mcp-server');
+
+        const listToolsHandler = async () => ({ tools: normalizedTools });
+        const callToolHandler = async (request) => {
+          const toolName = String(request?.params?.name ?? '');
+          const toolArgs = request?.params?.arguments ?? {};
+          try {
+            const result = await toolHandler(toolName, toolArgs, request);
+            if (result && typeof result === 'object' && Array.isArray(result.content)) {
+              return result;
+            }
+            if (result && typeof result === 'object') {
+              return {
+                content: [{ type: 'text', text: JSON.stringify(result) }],
+                ...(result.ok === false ? { isError: true } : {}),
+              };
+            }
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  ok: true,
+                  tool: toolName,
+                  summary: 'Completed',
+                  data: { result: result ?? null },
+                }),
+              }],
+            };
+          } catch (error) {
+            if (
+              options.rethrowMcpError === true &&
+              error &&
+              typeof error === 'object' &&
+              (error instanceof McpError ||
+                error.name === 'McpError' ||
+                (typeof error.code === 'number' && error.code <= -32000))
+            ) {
+              throw error;
+            }
+            const code = error?.code ? String(error.code) : 'TOOL_ERROR';
+            const msg = error instanceof Error ? error.message : String(error);
+            return {
+              isError: true,
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  ok: false,
+                  tool: toolName || fallbackServerName,
+                  summary: `Error executing tool: ${msg}`,
+                  error: { code, message: `Error executing tool: ${msg}` },
+                }),
+              }],
+            };
+          }
+        };
+
+        targetServer.setRequestHandler(ListToolsRequestSchema, listToolsHandler);
+        targetServer.setRequestHandler(CallToolRequestSchema, callToolHandler);
+
+        return {
+          server: targetServer,
+          normalizedTools,
+          listTools: listToolsHandler,
+          callTool: callToolHandler,
+        };
+      },
+      async createMcpServer(name, version, tools = [], toolHandler, options = {}) {
+        const host = options.server || new McpServer(
+          { name, version },
+          { capabilities: options.capabilities || { tools: {} } }
+        );
+        const handle = fallbackToolkit.registerMcpHandlers(host, tools, toolHandler, {
+          ...options,
+          serverName: name,
+        });
+        if (options.connect === false) {
+          return handle;
+        }
+        const { StdioServerTransport: McpTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
+        const transport = options.transport || new McpTransport();
+        await host.connect(transport);
+        console.error(`[${name}] MCP Server started on stdio.`);
+        return host;
+      },
+    };
+    return fallbackToolkit;
+  }
+}
+
+const { defineMcpTool, registerMcpHandlers, createMcpServer } = await loadMcpToolkit();
+
 // Verify storage initialization (SQLite default, Postgres fallback)
 async function verifyDatabase() {
     const mode = getStorageMode();
@@ -69,7 +222,10 @@ async function verifyDatabase() {
 }
 
 export const VERSION = "2.0.0";
-const server = new Server({ name: "krusch-context-mcp", version: VERSION }, { capabilities: { tools: {}, prompts: {} } });
+export const server = new McpServer(
+  { name: "krusch-context-mcp", version: VERSION },
+  { capabilities: { tools: {}, prompts: {} } }
+);
 
 // Core 5 Verbs
 export const CORE_TOOLS = new Set([
@@ -81,7 +237,7 @@ export const CORE_TOOLS = new Set([
 ]);
 
 // 5 Core Tool Definitions
-export const CORE_TOOL_DEFINITIONS = [
+const RAW_CORE_TOOL_DEFINITIONS = [
   {
     name: "krusch_context_retrieve",
     description: "Universal context retrieval tool. Pulls active project memories, steering rules, and state briefings respecting token budget limits.",
@@ -210,6 +366,8 @@ export const CORE_TOOL_DEFINITIONS = [
   }
 ];
 
+export const CORE_TOOL_DEFINITIONS = RAW_CORE_TOOL_DEFINITIONS.map((tool) => defineMcpTool(tool));
+
 // MCP Prompts
 export const CORE_PROMPTS = [
   {
@@ -246,11 +404,6 @@ export const CORE_PROMPTS = [
   }
 ];
 
-// MCP Tool Listing Handler - Strictly the 5 canonical verbs
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools: CORE_TOOL_DEFINITIONS };
-});
-
 // MCP Prompt Listing Handlers
 server.setRequestHandler(ListPromptsRequestSchema, async () => {
   return {
@@ -274,13 +427,13 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
   };
 });
 
-// MCP Tool Execution Handler
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: rawArgs = {} } = request.params;
+// MCP Tool Execution Dispatcher
+export async function dispatchContextTool(name, rawArgs = {}, _request = null) {
+  const safeRawArgs = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
   const connectedClient = server.getClientVersion?.()?.name || null;
-  const args = (connectedClient && !rawArgs?.provenance?.client)
-    ? { ...rawArgs, provenance: { ...(rawArgs.provenance || {}), client: connectedClient } }
-    : rawArgs;
+  const args = (connectedClient && !safeRawArgs?.provenance?.client)
+    ? { ...safeRawArgs, provenance: { ...(safeRawArgs.provenance || {}), client: connectedClient } }
+    : safeRawArgs;
 
   try {
     // 1. krusch_context_retrieve (alias: retrieve)
@@ -370,8 +523,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return await nuggetNudges(args);
     }
 
-    // 5. krusch_context_health (alias: health, krusch_context_health_check)
-    if (name === "krusch_context_health" || name === "health" || name === "krusch_context_health_check") {
+    // 5. krusch_context_health (alias: health, status, krusch_context_health_check)
+    if (name === "krusch_context_health" || name === "health" || name === "status" || name === "krusch_context_health_check") {
       return await getHealthStats(args);
     }
 
@@ -399,13 +552,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     throw new McpError(ErrorCode.MethodNotFound, `Tool '${name}' not recognized.`);
   } catch (err) {
-    if (err instanceof McpError) throw err;
+    if (
+      err instanceof McpError ||
+      err?.name === 'McpError' ||
+      (typeof err?.code === 'number' && err.code <= -32000)
+    ) {
+      throw err;
+    }
     console.error(`[krusch-context-mcp] Tool error (${name}):`, err);
     return {
       content: [{ type: "text", text: `[krusch-context] ❌ Error executing ${name}: ${err.message}` }],
       isError: true
     };
   }
+}
+
+// Register canonical MCP tool listing & execution handlers synchronously on server
+registerMcpHandlers(server, CORE_TOOL_DEFINITIONS, dispatchContextTool, {
+  validateArgs: false,
+  rethrowMcpError: true,
+  serverName: 'krusch-context-mcp',
 });
 
 let isShuttingDown = false;
@@ -430,17 +596,41 @@ process.on('unhandledRejection', (reason) => {
 
 export async function runServer() {
   await verifyDatabase();
-  const transport = new StdioServerTransport();
   process.stdin.on('end', () => {
     shutdown().catch(() => process.exit(0));
   });
-  await server.connect(transport);
+  await createMcpServer(
+    'krusch-context-mcp',
+    VERSION,
+    CORE_TOOL_DEFINITIONS,
+    dispatchContextTool,
+    {
+      server,
+      validateArgs: false,
+      rethrowMcpError: true,
+      capabilities: { tools: {}, prompts: {} },
+    }
+  );
   const mode = getStorageMode();
   console.error(`[krusch-context-mcp] v${VERSION} running on stdio (${CORE_TOOLS.size} core tools, storage: ${mode})`);
 }
 
+function resolveEntryRealPath(targetPath) {
+  try {
+    return realpathSync(targetPath);
+  } catch {
+    return path.resolve(targetPath);
+  }
+}
+
 // Auto-run if executed directly as script
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isDirectRun = Boolean(
+  process.argv[1] &&
+  (import.meta.url === `file://${process.argv[1]}` ||
+    resolveEntryRealPath(__filename) === resolveEntryRealPath(process.argv[1]))
+);
+
+if (isDirectRun) {
   runServer().catch(err => {
     console.error("[krusch-context-mcp] Fatal error starting server:", err);
     process.exit(1);

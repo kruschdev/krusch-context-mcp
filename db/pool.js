@@ -1,21 +1,71 @@
-import { createRequire } from 'module';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '..', '.env'), quiet: true });
 
 const require = createRequire(import.meta.url);
 
+let canResolvePg = false;
+try {
+    require.resolve('pg');
+    canResolvePg = true;
+} catch {
+    canResolvePg = false;
+}
+
+let createPgPool = null;
+if (canResolvePg) {
+    try {
+        const siblingPgUrl = new URL('../../../lib/pg.js', import.meta.url);
+        if (fs.existsSync(siblingPgUrl)) {
+            ({ createPgPool } = await import(siblingPgUrl.href));
+        } else {
+            ({ createPgPool } = await import('@krusch/toolkit/pg'));
+        }
+    } catch {
+        createPgPool = null;
+    }
+}
+
+export function resolvePoolConfig(env = process.env) {
+    const parsedMax = parseInt(env.DB_POOL_SIZE || '15', 10);
+    const max = Number.isInteger(parsedMax) && parsedMax > 0 ? parsedMax : 15;
+    const connStr = env.DATABASE_URL || env.DBOS_DATABASE_URL;
+    if (connStr) {
+        return {
+            connectionString: connStr,
+            max,
+            connectionTimeoutMillis: 5000,
+            idleTimeoutMillis: 30000,
+            allowExitOnIdle: true
+        };
+    }
+    const parsedPort = parseInt(env.DB_PORT || '5432', 10);
+    return {
+        host: env.DB_HOST || 'localhost',
+        port: Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5432,
+        database: env.DB_NAME || 'kdcode',
+        user: env.DB_USER || 'kdcode',
+        password: env.DB_PASSWORD || 'password',
+        max,
+        connectionTimeoutMillis: 5000,
+        idleTimeoutMillis: 30000,
+        allowExitOnIdle: true
+    };
+}
+
 let _pool = null;
 
 function getPoolInstance() {
     if (_pool) return _pool;
 
-    let pg;
+    let pgModule;
     try {
-        pg = require('pg');
+        pgModule = require('pg');
     } catch {
         throw new Error(
             "[krusch-context-mcp] PostgreSQL client 'pg' is not installed. " +
@@ -23,30 +73,35 @@ function getPoolInstance() {
         );
     }
 
-    const { Pool } = pg;
-    const connStr = process.env.DATABASE_URL || process.env.DBOS_DATABASE_URL;
-    _pool = new Pool(connStr ? {
-        connectionString: connStr,
-        max: parseInt(process.env.DB_POOL_SIZE || '15', 10),
-        connectionTimeoutMillis: 5000,
-        idleTimeoutMillis: 30000,
-        allowExitOnIdle: true
-    } : {
-        host: process.env.DB_HOST || 'localhost',
-        port: parseInt(process.env.DB_PORT || '5432', 10),
-        database: process.env.DB_NAME || 'kdcode',
-        user: process.env.DB_USER || 'kdcode',
-        password: process.env.DB_PASSWORD || 'password',
-        max: parseInt(process.env.DB_POOL_SIZE || '15', 10),
-        connectionTimeoutMillis: 5000,
-        idleTimeoutMillis: 30000,
-        allowExitOnIdle: true
-    });
+    const PgDriver = pgModule.Pool || pgModule.default?.Pool;
+    const resolvedPoolConfig = resolvePoolConfig(process.env);
 
-    // Guard against uncaught idle client crashes (e.g. Postgres restart or network drops)
-    _pool.on('error', (err) => {
-        console.error('[krusch-context-mcp] PostgreSQL pool idle client error:', err.message);
-    });
+    if (typeof createPgPool === 'function') {
+        function IdleExitPgDriver(opts) {
+            return new PgDriver({ ...opts, allowExitOnIdle: true });
+        }
+        _pool = createPgPool(resolvedPoolConfig, {
+            serviceName: 'krusch-context-mcp',
+            max: resolvedPoolConfig.max,
+            connectionTimeoutMillis: resolvedPoolConfig.connectionTimeoutMillis,
+            idleTimeoutMillis: resolvedPoolConfig.idleTimeoutMillis,
+            PoolClass: IdleExitPgDriver,
+            logger: {
+                info() {},
+                debug() {},
+                warn() {},
+                error(_msg, err) {
+                    console.error('[krusch-context-mcp] PostgreSQL pool idle client error:', err?.message || err);
+                }
+            }
+        }).pool;
+    } else {
+        _pool = new PgDriver(resolvedPoolConfig);
+        // Guard against uncaught idle client crashes (e.g. Postgres restart or network drops)
+        _pool.on('error', (err) => {
+            console.error('[krusch-context-mcp] PostgreSQL pool idle client error:', err.message);
+        });
+    }
 
     return _pool;
 }

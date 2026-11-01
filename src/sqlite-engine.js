@@ -1,10 +1,43 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync as NodeSqliteDriver } from 'node:sqlite';
 import { pool } from '../db/pool.js';
 import { detectCurrentProject } from './project-helper.js';
 
 import { fileURLToPath } from 'node:url';
+
+let openSqliteDb = null;
+try {
+    const siblingSqliteUrl = new URL('../../../lib/sqlite.js', import.meta.url);
+    if (fs.existsSync(siblingSqliteUrl)) {
+        ({ openSqliteDb } = await import(siblingSqliteUrl.href));
+    } else {
+        ({ openSqliteDb } = await import('@krusch/toolkit/sqlite'));
+    }
+} catch {
+    openSqliteDb = null;
+}
+
+function openEngineSqlite(dbPath) {
+    if (typeof openSqliteDb === 'function') {
+        return openSqliteDb(dbPath, {
+            wal: true,
+            busyTimeout: 5000,
+            synchronous: 'NORMAL'
+        }).db;
+    }
+    const db = new NodeSqliteDriver(dbPath);
+    try {
+        db.exec('PRAGMA busy_timeout = 5000;');
+        db.exec('PRAGMA journal_mode = WAL;');
+        db.exec('PRAGMA synchronous = NORMAL;');
+        db.exec('PRAGMA foreign_keys = ON;');
+        return db;
+    } catch (err) {
+        try { db.close(); } catch {}
+        throw err;
+    }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,7 +46,7 @@ const dbCache = new Map();
 const dbMetaCache = new Map();
 
 /**
- * Execute a transaction on DatabaseSync.
+ * Execute a transaction on SQLite handle.
  */
 export function withTransaction(db, fn) {
     db.exec('BEGIN');
@@ -267,30 +300,25 @@ async function _initProjectDb(projectName) {
     }
     
     const dbPath = path.join(agentDir, 'context.db');
-    let db = new DatabaseSync(dbPath);
+    let db = null;
     try {
-        db.exec('PRAGMA journal_mode = WAL;');
-        db.exec('PRAGMA busy_timeout = 5000;');
-        db.exec('PRAGMA synchronous = NORMAL;');
-        db.exec('PRAGMA foreign_keys = ON;');
+        db = openEngineSqlite(dbPath);
         const check = db.prepare('PRAGMA quick_check;').get();
         if (check && check.quick_check && check.quick_check !== 'ok') {
             throw new Error(`SQLite quick_check failed: ${check.quick_check}`);
         }
     } catch (corruptErr) {
         console.error(`[krusch-context-mcp] Corrupted SQLite cache at ${dbPath} (${corruptErr.message}) — rotating and rebuilding from PostgreSQL...`);
-        try { db.close(); } catch {}
+        if (db) {
+            try { db.close(); } catch {}
+        }
         const backupSuffix = `.corrupt.${Date.now()}`;
         for (const ext of ['', '-wal', '-shm']) {
             if (fs.existsSync(`${dbPath}${ext}`)) {
                 try { fs.renameSync(`${dbPath}${ext}`, `${dbPath}${ext}${backupSuffix}`); } catch {}
             }
         }
-        db = new DatabaseSync(dbPath);
-        db.exec('PRAGMA journal_mode = WAL;');
-        db.exec('PRAGMA busy_timeout = 5000;');
-        db.exec('PRAGMA synchronous = NORMAL;');
-        db.exec('PRAGMA foreign_keys = ON;');
+        db = openEngineSqlite(dbPath);
     }
 
     
