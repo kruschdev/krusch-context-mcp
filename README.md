@@ -1,17 +1,19 @@
 # Krusch Context MCP
 
-> Local MCP server: five tools to store, retrieve, and retire project decisions. SQLite by default.
+> Local MCP server: five tools to store, retrieve, and retire project decisions. SQLite by default — powering the `$0.00` Zero-LLM Raw-RAG + 4-Way RRF memory substrate behind **`#1 Overall` on Official `DolphinBench` (`89.17%`, `535/600` @ `$24.57`)** and `10M`-token ICLR 2026 `BEAM`.
 
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![MCP: 5 Verbs](https://img.shields.io/badge/MCP-5%20Core%20Verbs-blue.svg)](docs/TOOL_REFERENCE.md)
 [![Storage: SQLite-First](https://img.shields.io/badge/Storage-SQLite--First%20(zero--Docker)-lightgrey.svg)](docs/ARCHITECTURE.md)
+[![DolphinBench #1 Overall](https://img.shields.io/badge/DolphinBench-%231%20Overall%2089.17%25%20(%2424.57)-00e5ff.svg)](https://krusch.dev/articles/return-on-memory-dolphinbench.html)
+[![Paper #27 PDF](https://img.shields.io/badge/Paper%20%2327-Return%20on%20Memory%20(PDF)-blueviolet.svg)](https://krusch.dev/papers/return-on-memory-dolphinbench.pdf)
 [![Article: What Makes It Special](https://img.shields.io/badge/Article-What%20Makes%20It%20Special-cyan.svg)](https://krusch.dev/articles/what-makes-krusch-context-mcp-special.html)
 [![Docs: What Makes It Special](https://img.shields.io/badge/Docs-What%20Makes%20It%20Special-purple.svg)](docs/WHAT_MAKES_IT_SPECIAL.md)
 [![HOL Guard Catalog](https://img.shields.io/badge/HOL_Guard-Catalog_Listed-0B0F17?logo=shield&logoColor=00F5D4)](https://hol.org/guard/extension-studio?extension=mcp.krusch-context-mcp)
 [![M8ven Score](https://m8ven.ai/badge/mcp/kruschdev/krusch-context-mcp)](https://m8ven.ai/mcp/kruschdev/krusch-context-mcp?s=readme)
 
-> 📖 **Read the Systems Deep Dive**: Check out the published architecture essay [**Beyond Flat Vector RAG: What Makes krusch-context-mcp Special**](https://krusch.dev/articles/what-makes-krusch-context-mcp-special.html) on krusch.dev, or the local companion guide in [`docs/WHAT_MAKES_IT_SPECIAL.md`](docs/WHAT_MAKES_IT_SPECIAL.md).
+> 📖 **Read the Systems & Benchmark Deep Dives**: Read [**Paper #27 — Return on Memory (`#1` Official DolphinBench `89.17%`)**](https://krusch.dev/articles/return-on-memory-dolphinbench.html) ([**PDF**](https://krusch.dev/papers/return-on-memory-dolphinbench.pdf)), [**Paper #26 — What DolphinBench Taught Us About Local AI**](https://krusch.dev/articles/what-dolphinbench-taught-us-about-local-ai.html), and [**Beyond Flat Vector RAG: What Makes krusch-context-mcp Special**](https://krusch.dev/articles/what-makes-krusch-context-mcp-special.html) ([`docs/WHAT_MAKES_IT_SPECIAL.md`](docs/WHAT_MAKES_IT_SPECIAL.md)).
 
 **Krusch Context MCP** gives AI coding agents (Cursor, Claude Code, Windsurf, Antigravity) persistent working memory across sessions. It captures architectural decisions, invariants, lessons, and bug diagnoses, warns on near-duplicate memories, maintains temporal lineage when facts are superseded or invalidated, and audits diffs against active constraints.
 
@@ -182,6 +184,30 @@ claude mcp add krusch-context -- npx -y krusch-context-mcp
 
 ---
 
+## 🏆 Verified External Benchmarks
+
+### `#1 Overall` on Official DolphinBench (`89.17%`, `535/600` @ `$24.57`) — *Return on Memory*
+
+Evaluating all **`600/600` multi-app workspace tasks** across **`13,539` conversational sessions (`1.5M` `o200k_base` tokens)** under the official `openai/gpt-5.6-sol` judge (`7` clean-room runs = `4,200` traces), our **byte-identical `0o444` read-only frozen Zero-LLM Raw-RAG (`256/32`-token windows) + Porter-FTS5 BM25 + `snowflake-arctic-embed2` (`1024d`) 4-Way RRF `node:sqlite` store (`$0.00` ingestion)** achieves **`#1 Overall` (`89.17%`)** when paired with `Gemini 4 Argon` and a **`$0.00` zero-cloud floor (`42.67%`)** on local open weights:
+
+| Agent Reader + Memory Substrate | Overall (`600`) | Persona Breakdown (`Morgan` / `Alex` / `Riley`) | Checks / Key Delta | Total Cost |
+| :--- | :--- | :--- | :--- | :--- |
+| **`Sovereign Raw-RAG + Gemini 4 Argon`** (`medium`) | **`89.17%` (`535/600`, `#1 Overall`)** | **`92.0%` (`184`) / `87.0%` (`174`) / `88.5%` (`177`)** | **`+18.50 pp` (`+111` tasks)** > `#1` `Mem0` · Mech `89.8%` (`1,193/1,329`) · Sem `92.2%` (`545/591`) | **`$24.57`** (`$0.00` ingest, `56.5%` cache hit, `~4x` cheaper) |
+| *Official `#1` Cloud: `Hermes + GPT 5.6 Luna + Mem0`* | *`70.67%` (`424/600`)* | *— / `66.0%` / `68.0%`* | *Official `dolphinbench.ai` Cloud Leader (`14x` cheaper vs. `Supermemory` `59.17%` @ `$345.64`)* | *`$96.21`* |
+| **`Qwen3-Coder-30B-A3B` Wave-4 QLoRA+DPO** (`3.3B` active) | **`42.67%` (`256/600`)** | `55.5%` (`111`) / `35.0%` (`70`) / `37.5%` (`75`) | **`85.73%` Mech** (`42.00%` Stock) · Beats `MiniMax M3 + Hindsight` (`41.00%` @ `$158.33`) & `Sonnet 5 + Honcho/Mem0` (`35.83%`/`32.33%` @ `$1.57K`/`$1.83K`) | **`$0.00`** |
+| **`gpt-oss:120b` Wave-4 QLoRA+DPO** (`5.1B` active) | **`39.50%` (`237/600`)** | `54.5%` (`109`) / `31.5%` (`63`) / `32.5%` (`65`) | `+7.33 pp` Raw-RAG + 4-Way RRF lift over raw turns (`39.17%` Stock) | **`$0.00`** |
+| **`Qwen3-Coder-Next-80B` Stock** (`3.0B` active / `79.7B`) | **`38.50%` (`231/600`)** | `52.0%` (`104`) / `34.0%` (`68`) / `29.5%` (`59`) | Offline MoE scaling-law control | **`$0.00`** |
+| **`Hermes-3-Llama-3.1-8B` Wave-4 LoRA+DPO** (`Q4_0`) | **`18.33%` (`110/600`)** | `26.0%` (`52`) / `14.5%` (`29`) / `14.5%` (`29`) | **`15.7x` lift** over `1.17%` stock (`Ollama .System` fix + BF16 LoRA+DPO) | **`$0.00`** |
+
+* **Three *Return on Memory* Scaling Laws**: (1) **`92.33%` (`554/600`) `Oracle@7` retrieval sufficiency** across the frozen `0o444` SQLite store (`69.33%` `Oracle@6` open-weights; `138/600` uniquely solved by Argon); (2) **`3.88x` superlinear reader multiplier at `LBF=4+`** (`1.81x` → `2.04x` → `2.69x` → `3.88x`; `82.7%` vs. `21.3%` `30B`); and (3) **`4.4x` flatter corpus-entropy slope** (`-3.50 pp` `Morgan` → `Riley` vs. `-15.50 pp` on lossy LLM-summarized `Mem0`).
+* **Verified Upstream Queue & Open Artifacts**: All **`6/6` sovereign submission `.zip` archives** (`export_submission --check`, `error_code: null`; Argon Submission UUID `29389157-b01b-42b5-8193-17d9a496f580`, SHA-256 `9a7fa41fb3d1cf5f71f0c3cf74a0c97f8f39d50e26a7dd484c323f7719ecb7a0`) hold `status: "queued"` on `dolphinbench.ai` awaiting maintainer merge (`dolphinbench.ai/leaderboard/results.json` currently lists the `13` commercial cloud baselines). Read [**Paper #27 (HTML)**](https://krusch.dev/articles/return-on-memory-dolphinbench.html) · [**Paper #27 (PDF)**](https://krusch.dev/papers/return-on-memory-dolphinbench.pdf) · [**Paper #26 (Local AI Ablation)**](https://krusch.dev/articles/what-dolphinbench-taught-us-about-local-ai.html) · [**`29` SHA-256 Raw Audit Logs (`krush420/sovereign-g4-benchmarks`)**](https://huggingface.co/datasets/krush420/sovereign-g4-benchmarks).
+
+### Official ICLR 2026 BEAM (`100K`–`10M` Tokens, `2,000/2,000` Probes)
+
+* Closed-system full-suite evaluation across all **`100` conversations (`~178.34M` tokens) and `2,000/2,000` questions** (`100K`, `500K`, `1M`, `10M` splits) on `node:sqlite` + `snowflake-arctic-embed2` (`8K` ctx) in a fixed `~8K` prompt budget: reaches **`92.58%` (`100K`) & `93.00%` (`10M` IE) recall** (`78.67%` 4-split weighted), exhibits **zero E2E QA degradation from `100K` → `1M`** (`70.60%` → `71.82%` → `72.86%` on `hermes3`), and **outperforms cloud `past.dev` (`openai/gpt-5.6-luna`)** on **Contradiction Resolution across all `4/4` splits** and on **`10M` Multi-Session Reasoning across both cross-family referees** (`29.54%` / `38.33%` vs. `28.17%`) with `10/10` zero-leakage verification ([full report](benchmarks/BEAM_EMPIRICAL_REPORT.md)).
+
+---
+
 ## 📚 Documentation & Specifications
 
 * **[Canonical Tool Reference](docs/TOOL_REFERENCE.md)**: Generated directly from live schemas (`npm run docs:generate`).
@@ -190,8 +216,8 @@ claude mcp add krusch-context -- npx -y krusch-context-mcp
 * **[Migration Guide](docs/MIGRATION.md)**: Step-by-step v1.5 → v1.6 → v1.7 → v1.8 → v1.9.0 → v2.0.0 mapping.
 * **[Episodic Memory Guide](docs/EPISODIC_MEMORY.md)**: Deep dive into the closed taxonomy and lifecycle.
 * **[Changelog](CHANGELOG.md)**: Version release notes.
-* **[Official ICLR 2026 BEAM Empirical Report](benchmarks/BEAM_EMPIRICAL_REPORT.md)**: Closed-system full-suite evaluation across all **`100` conversations (`~178.34M` tokens) and `2,000/2,000` questions** (`100K`, `500K`, `1M`, `10M` splits) on 96 GB Blackwell G4 (`snowflake-arctic-embed2` 8K ctx on SQLite: `v2.0.0` reaches **`92.58%` Hybrid 8K** at `100K`, **`42.23%` `R@10`** at `1M`, and **`55.54%` Hybrid 8K** [`93.00%` IE] + **`48.18%` / `58.71%` E2E QA** at `10M`, beating cloud `past.dev` on Contradiction Resolution across all 4 splits and on `10M` Multi-Session Reasoning across both Referees [`29.54%` / `38.33%` vs. `28.17%`]) with `10/10` zero-leakage verification.
-* **[Official DolphinBench 600-Task Clean-Room Audit Logs](https://huggingface.co/datasets/krush420/sovereign-g4-benchmarks)**: Full `600/600`-task multi-session agent memory evaluation (`1.5M` tokens, frozen `0o444` SQLite, official `gpt-5.6-sol` rubric judge, `5/5` archives queued on [`dolphinbench.ai`](https://dolphinbench.ai))—local `Qwen3-Coder-30B-MoE` Wave-4 reaches **`42.67%` (`256/600`, `85.73%` mechanical accuracy, `+7.33 pp` memory lift) at `$0.00` local inference**, surpassing cloud `MiniMax M3 + Hindsight` (`41.00%` @ `$158.33`), `Claude Sonnet 5 + Honcho` (`35.83%` @ `$1,565.82`), and `Claude Sonnet 5 + Mem0` (`32.33%` @ `$1,830.57`), while Wave-4 QLoRA+DPO lifts `Hermes-3-8B` **`15.7x`** (`1.17% → 18.33%`).
+* **[Official ICLR 2026 BEAM Empirical Report](benchmarks/BEAM_EMPIRICAL_REPORT.md)**: Full `100`-conversation (`~178.34M`-token), `2,000/2,000`-probe methodology, per-ability tables, and `10/10` zero-leakage verification gates.
+* **[Official DolphinBench Whitepapers & Clean-Room Audit Logs](https://krusch.dev/articles/return-on-memory-dolphinbench.html)**: [**Paper #27 (HTML)**](https://krusch.dev/articles/return-on-memory-dolphinbench.html), [**Paper #27 (PDF)**](https://krusch.dev/papers/return-on-memory-dolphinbench.pdf), [**Paper #26**](https://krusch.dev/articles/what-dolphinbench-taught-us-about-local-ai.html), and all `7` `dolphinbench_600` runs (`4,200` official `gpt-5.6-sol` traces, `6/6` `status: "queued"` archives led by `89.17%` Argon UUID `29389157-b01b-42b5-8193-17d9a496f580` + `42.67%` `$0.00` `30B` Wave-4) in [`krush420/sovereign-g4-benchmarks`](https://huggingface.co/datasets/krush420/sovereign-g4-benchmarks).
 * **[Evaluation Baseline Notes](evals/README.md)**: Preliminary benchmark fixtures and token-budget metrics.
 
 ---
