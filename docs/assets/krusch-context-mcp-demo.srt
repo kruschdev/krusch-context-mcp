@@ -1,0 +1,23 @@
+1
+00:00:00,450 --> 00:00:14,214
+AI coding agents excel inside a single prompt, yet lose architectural context across sessions. Naive memory servers dump raw notes into flat vector bags and bloat prompts with dozens of tools.
+
+2
+00:00:15,067 --> 00:00:28,841
+krusch-context-mcp solves this locally in one command. Run npx krusch-context-mcp init to initialize a zero-Docker SQLite engine on Node 22 and wire your IDE in seconds.
+
+3
+00:00:29,767 --> 00:00:43,700
+Instead of tool soup, agents operate through strictly 5 canonical verbs: retrieve within a token budget, remember in a closed 5-type taxonomy, revise with lineage, nudge before commits, and health.
+
+4
+00:00:44,600 --> 00:00:58,489
+Every rule anchors to exact code spans via SHA-256 provenance, automatically healing shifted line numbers or flagging drift, while pre-commit nudge blocks invariant regressions before git commit.
+
+5
+00:00:59,400 --> 00:01:16,281
+Backed by $0.00 Raw-RAG, Porter FTS5, and snowflake-arctic-embed2 4-Way RRF, it reaches 91.17% on DolphinBench, 90.26% on LoCoMo, and 93.00% 10M-token IE recall on BEAM.
+
+6
+00:01:17,300 --> 00:01:30,351
+Give Cursor, Claude Code, Windsurf, and Antigravity persistent, verifiable working memory today. Open source under MIT — get started with npx krusch-context-mcp init.

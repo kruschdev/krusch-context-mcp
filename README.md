@@ -24,6 +24,14 @@
 
 ---
 
+## 🎬 90-Second Narrated Walkthrough (`1080p`)
+
+[![Watch the Krusch Context MCP v2.0 Narrated Walkthrough (01:31 · 1080p HD)](docs/assets/krusch-context-mcp-video-card.jpg)](https://krusch.dev/assets/video/krusch-context-mcp-demo.mp4)
+
+> ▶️ **[Stream 1080p HD Walkthrough (`01:31`, with audio)](https://krusch.dev/assets/video/krusch-context-mcp-demo.mp4)** · **[Interactive Player on `krusch.dev`](https://krusch.dev/#video-context-mcp)** · **[Local MP4 (`15.6 MiB`)](docs/assets/krusch-context-mcp-demo.mp4)** · **[Closed Captions (`.srt`)](docs/assets/krusch-context-mcp-demo.srt)**
+
+---
+
 ## 🚫 What This Is Not
 
 * **Not a codebase AST or Git indexer**: Code symbol search, call graphs, and Git DAG traversal belong in [`krusch-git`](https://github.com/kruschdev/krusch-git) or your IDE's native search.
