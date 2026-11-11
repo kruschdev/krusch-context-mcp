@@ -48,6 +48,13 @@ import {
 } from './retrieval-epistemic.js';
 import { ensureEpisodeRollups, searchEpisodeRollups } from './episode-rollup.js';
 import { expandMultiHopBridges } from './retrieval-bridge.js';
+import {
+    hasProvenanceColumn,
+    computeSpanProximityFeatures,
+    extractRelationalGraphAnchors,
+    calibrateMultiArmFusion,
+    probeRelationalMemoryGraph
+} from './retrieval-calibration.js';
 
 export {
     CHARS_PER_ESTIMATED_TOKEN,
@@ -59,7 +66,11 @@ export {
     buildMemoryLineageChain,
     detectActiveConflicts,
     detectTemporalUpdates,
-    evaluateAttributeGrounding
+    evaluateAttributeGrounding,
+    computeSpanProximityFeatures,
+    extractRelationalGraphAnchors,
+    calibrateMultiArmFusion,
+    probeRelationalMemoryGraph
 };
 
 const DECAY_RATE = 0.01;
@@ -388,8 +399,12 @@ export async function unifiedRetrieve({
     project = null,
     include_state = false,
     include_lineage = null,
+    enable_calibrated_fusion = null,
     _embedding = null
 } = {}) {
+    const calibratedFusionEnabled =
+        enable_calibrated_fusion !== false
+        && process.env.KRUSCH_DISABLE_CALIBRATED_FUSION !== 'true';
     const safeLimitTokens = Math.min(Math.max(100, Number(limit_tokens) || 4000), 32000);
     const targetProject = project || detectCurrentProject();
     const normCategory = category ? normalizeCategory(category) : null;
@@ -520,9 +535,10 @@ export async function unifiedRetrieve({
             const db = await getProjectDb(targetProject);
             if (db) {
                 const rowCache = new Map();
+                const provCol = hasProvenanceColumn(db) ? ', provenance' : '';
                 const selectCols = (isWildcard || !embeddingArray)
-                    ? `id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at`
-                    : `id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at, embedding, embedding_blob`;
+                    ? `id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at${provCol}`
+                    : `id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, created_at, updated_at${provCol}, embedding, embedding_blob`;
 
                 const candidateMap = new Map();
                 let minVecId = Infinity;
@@ -867,6 +883,7 @@ export async function unifiedRetrieve({
                     let idfOverlap = 0;
                     let userOverlap = 0;
                     let unclampedScore = 0;
+                    let isEntityOnlyIsotropicNeighbor = false;
 
                     if (isWildcard) {
                         score = 0.85;
@@ -949,7 +966,7 @@ export async function unifiedRetrieve({
                             : fullOverlap;
 
                         // Pillar 3 Part A (v2.0): Guard isotropic entity-only neighbor floor when raw cosine < 0.48
-                        const isEntityOnlyIsotropicNeighbor = Boolean(
+                        isEntityOnlyIsotropicNeighbor = Boolean(
                             hasRealQueryEmbedding &&
                             r._hasDialogueTurn &&
                             !isBroadQuery &&
@@ -1111,6 +1128,7 @@ export async function unifiedRetrieve({
                         title: `Memory #${r.id} (${r.category})${statusBadge}`,
                         content: r.content,
                         tags: r.tags || null,
+                        provenance: r.provenance || null,
                         lineage: lineage && lineage.length > 1 ? lineage : null,
                         lineageText,
                         created_at: r.created_at || null,
@@ -1121,6 +1139,7 @@ export async function unifiedRetrieve({
                         rawSemanticScore,
                         idfOverlap,
                         userOverlap,
+                        _isEntityOnlyIsotropicNeighbor: isEntityOnlyIsotropicNeighbor,
                         _stems: r._stems,
                         _userStems: r._userStems,
                         _userRaw: r._userRaw,
@@ -1198,6 +1217,17 @@ export async function unifiedRetrieve({
                             }
                         }
                     }
+                }
+
+                // Pillar 4A (INV-V2-09 / FERN arXiv:2611.14477): Zero-LLM Calibrated Multi-Arm Feature Fusion
+                if (calibratedFusionEnabled && !isWildcard && rawScoredMemoryItems.length >= 2) {
+                    calibrateMultiArmFusion(rawScoredMemoryItems, {
+                        evalStems,
+                        distinctiveStems,
+                        hasRealQueryEmbedding,
+                        knowledgeUpdateMode,
+                        isBroadQuery
+                    });
                 }
 
                 // Stage 2 (v2.0): Gated 2-Hop Multi-Session Bridge Expansion (FTS5 + Gram-Schmidt residual vector, 0 network RPCs)
@@ -1339,6 +1369,74 @@ export async function unifiedRetrieve({
                                 item.score = targetSpec;
                                 item.rawScore = Math.max(item.rawScore, targetSpec);
                                 item._unclampedScore = Math.max(item._unclampedScore, targetSpec);
+                            }
+                        }
+                    }
+                }
+
+                // Pillar 4B (INV-V2-09 / SkinMind arXiv:2611.08935): Uncertainty-Gated Multi-Granularity Relational Graph Probe
+                if (calibratedFusionEnabled && !isWildcard && rawScoredMemoryItems.length >= 1) {
+                    const relProbe = probeRelationalMemoryGraph(db, {
+                        rawQuery,
+                        queryEmbedding: embeddingArray,
+                        hasRealQueryEmbedding,
+                        distinctiveTerms,
+                        distinctiveStems,
+                        evalStems,
+                        hop1Items: rawScoredMemoryItems,
+                        candidateMap,
+                        allCandidateRows,
+                        normCategory,
+                        selectCols
+                    });
+                    if (relProbe.triggered) {
+                        if (relProbe.rescuedRows.length > 0) {
+                            const newlyProbedRows = [];
+                            for (const rescuedRow of relProbe.rescuedRows) {
+                                const numId = Number(rescuedRow.id);
+                                if (!candidateMap.has(numId)) {
+                                    rowCache.set(numId, rescuedRow);
+                                    candidateMap.set(numId, rescuedRow);
+                                    populateRowFeatures(rescuedRow);
+                                    allCandidateRows.push(rescuedRow);
+                                    newlyProbedRows.push(rescuedRow);
+                                }
+                            }
+                            if (newlyProbedRows.length > 0) {
+                                allCandidateRows.sort((a, b) => Number(a.id) - Number(b.id));
+                                for (const addedRow of newlyProbedRows) {
+                                    const scoredAdded = scoreCandidateRow(
+                                        addedRow,
+                                        allCandidateRows.indexOf(addedRow),
+                                        allCandidateRows.length
+                                    );
+                                    if (scoredAdded) rawScoredMemoryItems.push(scoredAdded);
+                                }
+                                rawScoredMemoryItems.sort((a, b) => Number(a.id) - Number(b.id));
+                            }
+                        }
+
+                        const top1AnchorScore = rawScoredMemoryItems.reduce(
+                            (mx, x) => (x.score > mx ? x.score : mx),
+                            0
+                        );
+                        const relRankCeiling = Math.max(0.58, top1AnchorScore - 0.004);
+                        for (const item of rawScoredMemoryItems) {
+                            const rInfo = relProbe.relationalBoostById.get(Number(item.id));
+                            if (!rInfo) continue;
+                            const itemCeiling = (knowledgeUpdateMode && item._hasStateTransition) ? 1.0 : 0.995;
+                            item._isBridgeHop = true;
+                            item._relationalEdges = rInfo.edgeTypes;
+                            item._bridgeScore = Math.max(item._bridgeScore || 0, rInfo.probeScore);
+                            const targetRel = Math.min(
+                                itemCeiling,
+                                relRankCeiling,
+                                Math.max(item.score + rInfo.bonus, rInfo.probeScore * 0.92)
+                            );
+                            if (targetRel > item.score) {
+                                item.score = targetRel;
+                                item.rawScore = Math.max(item.rawScore, targetRel);
+                                item._unclampedScore = Math.max(item._unclampedScore, targetRel + 0.015);
                             }
                         }
                     }
