@@ -11,7 +11,22 @@ import path from 'node:path';
 import { DatabaseSync as NodeSqliteDriver } from 'node:sqlite';
 import { pool, query } from '../db/pool.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
-import { getProjectDb, cosineSimilarity as engineCosineSimilarity, getParsedEmbedding } from './sqlite-engine.js';
+import {
+    getProjectDb,
+    cosineSimilarity as engineCosineSimilarity,
+    getParsedEmbedding,
+    isHydraEnabled,
+    getHydraClient,
+    pushHydraProjectMemory,
+    queryHydraProjectContext
+} from './sqlite-engine.js';
+
+export {
+    isHydraEnabled,
+    getHydraClient,
+    pushHydraProjectMemory,
+    queryHydraProjectContext
+};
 
 let openSqliteDb = null;
 try {

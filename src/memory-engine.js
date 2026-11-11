@@ -916,7 +916,7 @@ export async function addMemory({
             if (supersedes_id) {
                 const upd = db.prepare(`
                     UPDATE ide_agent_memory
-                    SET status = 'SUPERSEDED', superseded_by = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP
+                    SET status = 'SUPERSEDED', superseded_by = ?, pg_synced = 0, hydra_synced = 0, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 `).run(insertedId, supersedes_id);
                 if (upd.changes === 0) {
@@ -1114,7 +1114,7 @@ export async function invalidateMemory({ id, target_id, reason, project, active_
     if (db) {
         const info = db.prepare(`
             UPDATE ide_agent_memory 
-            SET status = 'INVALIDATED', invalidated_reason = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP
+            SET status = 'INVALIDATED', invalidated_reason = ?, pg_synced = 0, hydra_synced = 0, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         `).run(reason.trim(), resolvedId);
 

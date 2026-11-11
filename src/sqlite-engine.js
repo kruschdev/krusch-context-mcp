@@ -7,6 +7,7 @@ import { detectCurrentProject } from './project-helper.js';
 import { fileURLToPath } from 'node:url';
 
 let openSqliteDb = null;
+let createHydraDbClient = null;
 try {
     const siblingSqliteUrl = new URL('../../../lib/sqlite.js', import.meta.url);
     if (fs.existsSync(siblingSqliteUrl)) {
@@ -16,6 +17,98 @@ try {
     }
 } catch {
     openSqliteDb = null;
+}
+
+function createStandaloneHydraFallbackClient({
+    apiKey = '',
+    baseUrl = 'https://api.hydradb.com/v2',
+    database = 'krusch_context',
+    collection = 'default'
+} = {}) {
+    const cleanKey = String(apiKey || '').trim();
+    const parsedBase = new URL(String(baseUrl || 'https://api.hydradb.com/v2'));
+    const cleanBase = parsedBase.href.replace(/\/+$/, '');
+    return {
+        isConfigured: () => cleanKey.length > 0,
+        async ingestAppKnowledge(items, { database: db = database, collection: col = collection, upsert = true } = {}) {
+            const normalized = items.map((item, idx) => ({
+                ...(item.id ? { id: String(item.id) } : {}),
+                database: item.database || db,
+                collection: item.collection || col,
+                title: String(item.title || item.id || `knowledge-${idx + 1}`),
+                type: String(item.type || 'document'),
+                timestamp: item.timestamp || new Date().toISOString(),
+                content: { text: String(item.content?.text ?? item.text ?? '').trim() },
+                ...(item.tenant_metadata ? { tenant_metadata: item.tenant_metadata } : {}),
+                ...(item.additional_metadata ? { additional_metadata: item.additional_metadata } : {}),
+                ...(item.relations ? { relations: item.relations } : {})
+            }));
+            const form = new FormData();
+            form.set('type', 'knowledge');
+            form.set('database', db);
+            if (col) form.set('collection', col);
+            form.set('upsert', upsert ? 'true' : 'false');
+            form.set('app_knowledge', JSON.stringify(normalized));
+            const res = await fetch(`${cleanBase}/context/ingest`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${cleanKey}`, 'API-Version': '2' },
+                body: form
+            });
+            const json = await res.json();
+            if (!res.ok || json?.success === false) {
+                throw new Error(json?.error?.message || `HydraDB HTTP ${res.status}`);
+            }
+            return json?.data ?? json;
+        },
+        async queryContext({
+            query,
+            database: db = database,
+            collection: col = collection,
+            type = 'all',
+            queryBy = 'hybrid',
+            mode = 'thinking',
+            maxResults = 10,
+            graphContext = true,
+            queryForcefulRelations = true
+        } = {}) {
+            const payload = {
+                database: db,
+                query: String(query || '').trim(),
+                type,
+                query_by: queryBy,
+                mode,
+                max_results: maxResults,
+                graph_context: Boolean(graphContext),
+                query_forceful_relations: Boolean(queryForcefulRelations),
+                ...(col ? { collection: col } : {})
+            };
+            const res = await fetch(`${cleanBase}/query`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${cleanKey}`,
+                    'API-Version': '2',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+            const json = await res.json();
+            if (!res.ok || json?.success === false) {
+                throw new Error(json?.error?.message || `HydraDB HTTP ${res.status}`);
+            }
+            return json?.data ?? json;
+        }
+    };
+}
+
+try {
+    const siblingHydraUrl = new URL('../../../lib/hydradb.js', import.meta.url);
+    if (fs.existsSync(siblingHydraUrl)) {
+        ({ createHydraDbClient } = await import(siblingHydraUrl.href));
+    } else {
+        ({ createHydraDbClient } = await import('@krusch/toolkit/hydradb'));
+    }
+} catch {
+    createHydraDbClient = createStandaloneHydraFallbackClient;
 }
 
 function openEngineSqlite(dbPath) {
@@ -390,6 +483,8 @@ async function _initProjectDb(projectName) {
         `ALTER TABLE ide_agent_memory ADD COLUMN provenance TEXT;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN last_accessed_at DATETIME;`,
         `ALTER TABLE ide_agent_memory ADD COLUMN embedding_blob BLOB;`,
+        `ALTER TABLE ide_agent_memory ADD COLUMN hydra_id TEXT;`,
+        `ALTER TABLE ide_agent_memory ADD COLUMN hydra_synced BOOLEAN DEFAULT 0;`,
         `ALTER TABLE ide_agent_nuggets ADD COLUMN project TEXT;`,
         `ALTER TABLE ide_agent_nuggets ADD COLUMN pg_synced BOOLEAN DEFAULT 0;`,
         `ALTER TABLE auditor_feedback ADD COLUMN project TEXT;`
@@ -858,15 +953,24 @@ export async function pullProjectMemory(projectName, db, _pool = pool) {
  */
 export async function pushProjectMemory(projectName, db) {
     if (!process.env.DATABASE_URL && !process.env.DB_PASSWORD) {
+        if (isHydraEnabled()) {
+            await pushHydraProjectMemory(projectName, db);
+        }
         return; // Skip if postgres not configured
     }
     if (/^(test_|smoke_)/i.test(String(projectName || ''))) {
+        if (isHydraEnabled() && process.env.HYDRADB_ALLOW_TEST_PUSH) {
+            await pushHydraProjectMemory(projectName, db);
+        }
         return; // Never push ephemeral test projects to production Postgres
     }
     let client;
     try {
         client = await pool.connect();
     } catch {
+        if (isHydraEnabled()) {
+            await pushHydraProjectMemory(projectName, db);
+        }
         return; // Postgres unavailable
     }
 
@@ -1025,6 +1129,178 @@ export async function pushProjectMemory(projectName, db) {
         console.error(`[sqlite-engine] Push failed for ${projectName}:`, e.message);
     } finally {
         if (client) client.release();
+    }
+
+    if (isHydraEnabled()) {
+        await pushHydraProjectMemory(projectName, db);
+    }
+}
+
+let _hydraClient = null;
+let _hydraClientKey = '';
+
+/**
+ * Checks whether the optional HydraDB v2 cloud context mirror is configured.
+ * @returns {boolean}
+ */
+export function isHydraEnabled() {
+    const key = String(process.env.HYDRADB_API_KEY || '').trim();
+    if (!key) return false;
+    const syncFlag = String(process.env.HYDRADB_SYNC ?? 'true').toLowerCase().trim();
+    return syncFlag !== 'false' && syncFlag !== '0';
+}
+
+/**
+ * Resolves a cached HydraDbClient instance when HYDRADB_API_KEY is configured.
+ * @param {object} [options]
+ */
+export function getHydraClient(options = {}) {
+    if (typeof createHydraDbClient !== 'function') return null;
+    const apiKey = options.apiKey || process.env.HYDRADB_API_KEY || '';
+    const baseUrl = options.baseUrl || process.env.HYDRADB_BASE_URL || '';
+    if (!apiKey) return null;
+
+    const cacheKey = `${apiKey}:${baseUrl}`;
+    if (_hydraClient && _hydraClientKey === cacheKey && Object.keys(options).length === 0) {
+        return _hydraClient;
+    }
+    const client = createHydraDbClient({
+        apiKey,
+        ...(baseUrl ? { baseUrl } : {}),
+        database: options.database || process.env.HYDRADB_DATABASE || 'krusch_context',
+        collection: options.collection || process.env.HYDRADB_COLLECTION || 'default',
+        ...options
+    });
+    if (Object.keys(options).length === 0) {
+        _hydraClient = client;
+        _hydraClientKey = cacheKey;
+    }
+    return client;
+}
+
+/**
+ * PUSH: Compute Cache (SQLite) -> HydraDB v2 Sub-Second Context & Temporal Knowledge Graph
+ * Maps active/superseded memories into HydraDB app_knowledge with explicit relations.ids
+ * for superseding lineage edges and file-anchor metadata.
+ */
+export async function pushHydraProjectMemory(projectName, db, hydraClient = getHydraClient()) {
+    if (!hydraClient || !hydraClient.isConfigured() || !db) {
+        return { pushedCount: 0, skipped: true };
+    }
+    if (/^(test_|smoke_)/i.test(String(projectName || '')) && !process.env.HYDRADB_ALLOW_TEST_PUSH) {
+        return { pushedCount: 0, skipped: true };
+    }
+
+    const safeCollection = String(projectName || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const unsyncedRows = db.prepare(`
+        SELECT id, category, content, tags, status, supersedes_id, superseded_by, invalidated_reason, provenance, created_at
+        FROM ide_agent_memory
+        WHERE COALESCE(hydra_synced, 0) = 0
+        ORDER BY id ASC
+        LIMIT 100
+    `).all();
+
+    if (unsyncedRows.length === 0) {
+        return { pushedCount: 0, skipped: false };
+    }
+
+    const items = unsyncedRows.map((row) => {
+        const hydraDocId = `${safeCollection}-mem-${row.id}`;
+        const relationIds = [];
+        if (row.supersedes_id) {
+            relationIds.push(`${safeCollection}-mem-${row.supersedes_id}`);
+        }
+        let parsedProv = null;
+        if (row.provenance) {
+            try {
+                parsedProv = typeof row.provenance === 'string' ? JSON.parse(row.provenance) : row.provenance;
+            } catch {
+                parsedProv = null;
+            }
+        }
+        return {
+            id: hydraDocId,
+            collection: safeCollection,
+            title: `[${String(row.category || 'lesson').toUpperCase()}] #${row.id} (${row.status || 'ACTIVE'})`,
+            type: String(row.category || 'lesson'),
+            timestamp: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+            content: { text: String(row.content || '') },
+            tenant_metadata: {
+                project: String(projectName || 'default'),
+                category: String(row.category || 'lesson'),
+                status: String(row.status || 'ACTIVE'),
+                local_id: Number(row.id)
+            },
+            additional_metadata: {
+                ...(row.supersedes_id ? { supersedes_id: Number(row.supersedes_id) } : {}),
+                ...(row.superseded_by ? { superseded_by: Number(row.superseded_by) } : {}),
+                ...(row.invalidated_reason ? { invalidated_reason: String(row.invalidated_reason) } : {}),
+                ...(parsedProv?.file ? { file: String(parsedProv.file) } : {}),
+                ...(parsedProv?.anchor_hash ? { anchor_hash: String(parsedProv.anchor_hash) } : {})
+            },
+            ...(relationIds.length > 0
+                ? {
+                    relations: {
+                        ids: relationIds,
+                        properties: { edge_type: 'SUPERSEDES' }
+                    }
+                }
+                : {})
+        };
+    });
+
+    try {
+        await hydraClient.ingestAppKnowledge(items, {
+            collection: safeCollection,
+            upsert: true
+        });
+        const upd = db.prepare(`
+            UPDATE ide_agent_memory
+            SET hydra_id = ?, hydra_synced = 1
+            WHERE id = ?
+        `);
+        withTransaction(db, () => {
+            for (const row of unsyncedRows) {
+                upd.run(`${safeCollection}-mem-${row.id}`, row.id);
+            }
+        });
+        return { pushedCount: unsyncedRows.length, skipped: false };
+    } catch (err) {
+        console.error(`[sqlite-engine] HydraDB push warning for ${projectName}: ${err.message}`);
+        return { pushedCount: 0, skipped: false, error: err.message };
+    }
+}
+
+/**
+ * QUERY: Fetch hybrid + multi-hop knowledge-graph context from HydraDB v2 when on the road.
+ */
+export async function queryHydraProjectContext(
+    projectName,
+    queryText,
+    {
+        maxResults = 8,
+        mode = 'thinking',
+        hydraClient = getHydraClient()
+    } = {}
+) {
+    if (!hydraClient || !hydraClient.isConfigured() || !queryText || queryText === '*') {
+        return null;
+    }
+    const safeCollection = String(projectName || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
+    try {
+        return await hydraClient.queryContext({
+            query: queryText,
+            collection: safeCollection,
+            type: 'all',
+            queryBy: 'hybrid',
+            mode,
+            maxResults,
+            graphContext: true,
+            queryForcefulRelations: true
+        });
+    } catch (err) {
+        console.warn(`[sqlite-engine] HydraDB query fallback warning: ${err.message}`);
+        return null;
     }
 }
 

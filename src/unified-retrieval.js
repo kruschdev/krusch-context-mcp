@@ -12,7 +12,14 @@ import { getEmbedding, calibrateQuerySimilarity } from './embedding-helper.js';
 import { prunePreRetrieval, prunePostRetrieval, prunePreSynthesis } from './prune-helper.js';
 import { detectCurrentProject } from './project-helper.js';
 import { compileProjectState, normalizeCategory } from './memory-engine.js';
-import { getProjectDb, cosineSimilarity, getParsedEmbedding, searchMemoryFts } from './sqlite-engine.js';
+import {
+    getProjectDb,
+    cosineSimilarity,
+    getParsedEmbedding,
+    searchMemoryFts,
+    isHydraEnabled,
+    queryHydraProjectContext
+} from './sqlite-engine.js';
 import {
     CHARS_PER_ESTIMATED_TOKEN,
     fnv1a32,
@@ -1386,6 +1393,40 @@ export async function unifiedRetrieve({
         } catch (e) {
             storageError = e;
             console.warn(`[unified-retrieval] SQLite retrieval warning: ${e.message}`);
+        }
+
+        // 3b. Optional HydraDB v2 remote hybrid + knowledge-graph retrieval (road/travel sync mode)
+        if (!isWildcard && isHydraEnabled() && (!/^(test_|smoke_)/i.test(String(targetProject || '')) || process.env.HYDRADB_ALLOW_TEST_PUSH)) {
+            const hydraResult = await queryHydraProjectContext(targetProject, rawQuery, {
+                maxResults: 6,
+                mode: 'thinking'
+            });
+            if (hydraResult && Array.isArray(hydraResult.chunks)) {
+                const existingContents = new Set(
+                    items.map(it => String(it.content || '').trim().toLowerCase())
+                );
+                for (let idx = 0; idx < hydraResult.chunks.length; idx++) {
+                    const chunk = hydraResult.chunks[idx];
+                    const chunkText = String(chunk?.text ?? chunk?.content ?? '').trim();
+                    if (!chunkText) continue;
+                    const normText = chunkText.toLowerCase();
+                    if (existingContents.has(normText)) continue;
+                    existingContents.add(normText);
+
+                    const rawHydraScore = typeof chunk?.score === 'number' && Number.isFinite(chunk.score)
+                        ? Math.min(0.95, Math.max(0.55, chunk.score))
+                        : 0.72;
+                    items.push({
+                        type: 'memory',
+                        id: chunk.source_id || chunk.id || `hydra-${idx + 1}`,
+                        category: chunk.metadata?.category || 'decision',
+                        status: 'ACTIVE',
+                        title: `HydraDB Graph Memory (${chunk.title || chunk.source_id || `chunk-${idx + 1}`})`,
+                        content: chunkText,
+                        score: rawHydraScore
+                    });
+                }
+            }
         }
     }
 
