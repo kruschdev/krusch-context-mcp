@@ -12,11 +12,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execSync } from 'node:child_process';
 import { runServer, VERSION } from '../src/index.js';
 import { getHealthStats, addMemory } from '../src/memory-engine.js';
 import { getSqliteDb } from '../src/storage-adapter.js';
-import { detectCurrentProject } from '../src/project-helper.js';
+import { detectCurrentProject, findGitRoot } from '../src/project-helper.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -164,16 +163,11 @@ async function runInit() {
     cleanStaleMcpSchemas();
 
     const cwd = process.cwd();
-    let isGit = false;
-    let gitRoot = cwd;
-
-    try {
-        gitRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-        isGit = true;
-    } catch (err) {
-        if (process.env.KRUSCH_DEBUG) {
-            console.warn(`[krusch-context] Non-git directory fallback (${cwd}): ${err.message}`);
-        }
+    const detectedRoot = findGitRoot(cwd);
+    const isGit = Boolean(detectedRoot);
+    const gitRoot = detectedRoot || cwd;
+    if (!isGit && process.env.KRUSCH_DEBUG) {
+        console.warn(`[krusch-context] Non-git directory fallback (${cwd})`);
     }
 
     const projectName = path.basename(gitRoot || cwd);
