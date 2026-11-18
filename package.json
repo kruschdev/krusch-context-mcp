@@ -27,6 +27,7 @@
     "CONTRIBUTING.md",
     "LICENSE",
     "CHANGELOG.md",
+    "server.json",
     ".env.example"
   ],
   "scripts": {
@@ -57,7 +58,7 @@
     "memory-hygiene",
     "sqlite"
   ],
-  "author": "kruschdev",
+  "author": "kruschdev <kruschdev@users.noreply.github.com>",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
