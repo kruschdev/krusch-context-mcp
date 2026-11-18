@@ -44,7 +44,13 @@
 
 ## ⚡ 30-Second Quickstart
 
-Requires **Node.js >= 22.0.0**. Run once inside your project repository:
+Ask your coding agent (Claude Code, Codex, Cursor, Windsurf, or Antigravity):
+
+```text
+Read https://raw.githubusercontent.com/kruschdev/krusch-context-mcp/main/INSTALL.md and set up krusch-context-mcp on this machine.
+```
+
+Or run once inside your project repository (requires **Node.js >= 22.0.0**):
 
 ```bash
 npx krusch-context-mcp init
