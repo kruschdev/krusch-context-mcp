@@ -22,6 +22,7 @@ import { checkNearDuplicateMemory, getStorageMode } from './storage-adapter.js';
 import { generateTagsFromLLM, extractHeuristicTags } from './llm-tags.js';
 import { detectCurrentProject, getWorktreeStatus } from './project-helper.js';
 import { ensureEpisodeRollups } from './episode-rollup.js';
+import { scanSupersededStaleCode } from './git-alignment-guard.js';
 
 export const CLOSED_CATEGORIES = new Set(['decision', 'bug', 'invariant', 'lesson', 'blocker']);
 const DECAY_RATE = 0.01;
@@ -1679,6 +1680,9 @@ export async function getHealthStats({ project } = {}) {
     }
 
     const worktree = getWorktreeStatus();
+    const staleCodeScan = db
+        ? scanSupersededStaleCode({ targetProject, projectDb: db })
+        : { findings: [], totalStaleLines: 0, budgetExceeded: false };
 
     let output = `# 🩺 Krusch Context Health Status\n\n`;
     output += `* **Storage Mode**: \`${mode}\` (${mode === 'sqlite' ? '.agent/context.db' : 'PostgreSQL'})\n`;
@@ -1693,6 +1697,15 @@ export async function getHealthStats({ project } = {}) {
         output += `* **Offline / Unembedded Memories**: ${unembeddedCount} (lexical-indexed)\n`;
     }
     output += `* **Superseded Lineage**: ${supersededCount}\n`;
+    if (staleCodeScan.findings.length > 0) {
+        output += `* **Superseded Stale-Code Scan (INV-ALIGN-STALE-02)**: ⚠️ ${staleCodeScan.findings.length} superseded commit(s) still own ${staleCodeScan.totalStaleLines} line(s) on HEAD:\n`;
+        for (const sf of staleCodeScan.findings.slice(0, 5)) {
+            const locList = sf.files.map((f) => f.citation).join(', ');
+            output += `  - ~~#${sf.supersededId}~~ (\`${sf.commit}\`) -> **#${sf.replacedById}**: ${locList}\n`;
+        }
+    } else if (supersededCount > 0) {
+        output += `* **Superseded Stale-Code Scan (INV-ALIGN-STALE-02)**: ✅ 0 surviving lines blamed to superseded commits.\n`;
+    }
     output += `* **Invalidated Records**: ${invalidatedCount}\n`;
     output += `* **Steering Nuggets**: ${nuggetCount}\n`;
     if (rollupCount > 0) {
@@ -1714,6 +1727,8 @@ export async function getHealthStats({ project } = {}) {
             driftedCount,
             unembeddedCount,
             supersededCount,
+            staleCodeFindings: staleCodeScan.findings.length,
+            staleCodeLines: staleCodeScan.totalStaleLines,
             invalidatedCount,
             nuggetCount,
             rollupCount,

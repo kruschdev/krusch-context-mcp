@@ -6,7 +6,7 @@
 
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests: 149 Passed](https://img.shields.io/badge/Tests-149%20Passed-brightgreen.svg)](#5-minute-external-engineer-verification-zero-docker-zero-api-keys)
+[![Tests: 155 Passed](https://img.shields.io/badge/Tests-155%20Passed-brightgreen.svg)](#5-minute-external-engineer-verification-zero-docker-zero-api-keys)
 [![MCP: 5 Verbs](https://img.shields.io/badge/MCP-5%20Core%20Verbs-blue.svg)](docs/TOOL_REFERENCE.md)
 [![Storage: SQLite-First](https://img.shields.io/badge/Storage-SQLite--First%20(zero--Docker)-lightgrey.svg)](docs/ARCHITECTURE.md)
 [![DolphinBench Queued Submission](https://img.shields.io/badge/DolphinBench-91.17%25%20Queued%20(UUID%20c047b063)-00e5ff.svg)](https://krusch.dev/articles/return-on-memory-dolphinbench)
@@ -67,14 +67,14 @@ This command will:
 
 ## 🔬 5-Minute External Engineer Verification (Zero Docker, Zero API Keys)
 
-Verify the production SQLite engine, all `149` unit and contract tests, and the cryptographic zero-leakage benchmark verifiers locally in under a minute with zero external services or API keys:
+Verify the production SQLite engine, all `155` unit and contract tests, and the cryptographic zero-leakage benchmark verifiers locally in under a minute with zero external services or API keys:
 
 ```bash
 git clone https://github.com/kruschdev/krusch-context-mcp.git
 cd krusch-context-mcp
 npm ci
 
-# 1. Run all 149 unit & contract tests on built-in node:sqlite (zero Docker, zero API keys)
+# 1. Run all 155 unit & contract tests on built-in node:sqlite (zero Docker, zero API keys)
 npm test
 
 # 2. Run the 5-part static engine, JS Proxy oracle-trap, and SHA-256 audit-log verifiers
@@ -281,7 +281,7 @@ Evaluating all **`600/600` multi-app workspace tasks** across **`13,539` convers
 ## 🧪 Testing
 
 ```bash
-# Run full unit & contract test suite (149 tests, 100% SQLite, zero Docker)
+# Run full unit & contract test suite (155 tests, 100% SQLite, zero Docker)
 npm test
 
 # Check storage and memory health

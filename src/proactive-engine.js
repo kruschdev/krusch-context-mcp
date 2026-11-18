@@ -14,6 +14,12 @@ import {
 import { getProjectDb, getParsedEmbedding, cosineSimilarity } from './sqlite-engine.js';
 import { detectCurrentProject } from './project-helper.js';
 import { detectHandRolledBoilerplate } from './lego-boilerplate-guard.js';
+import {
+    isUnifiedDiffText,
+    findBlamedDiffMemories,
+    extractProjectCoChangeRules,
+    evaluateCoChangeRules
+} from './git-alignment-guard.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '..', '.env'), quiet: true });
@@ -601,9 +607,10 @@ export async function handleProactiveNudge({
                     }
                 }
 
-                // Add active nuggets
+                // Add active nuggets (excluding structured cochange:* rules evaluated deterministically in step 3c)
                 const nugs = projectDb.prepare(`SELECT key, value, embedding FROM ide_agent_nuggets`).all();
                 for (const n of nugs) {
+                    if (/^cochange:/i.test(String(n.key || ''))) continue;
                     const weight = ruleWeights.has(n.key) ? ruleWeights.get(n.key) : 1.0;
                     if (weight > 0.2) {
                         candidateRules.push({
@@ -628,23 +635,90 @@ export async function handleProactiveNudge({
         return w > 0.2;
     });
 
-    if (candidateRules.length === 0 && legoFindings.length === 0) {
+    // 3c. Deterministic Co-Change companion-file gate (INV-ALIGN-COCHANGE-03) on pre_commit / multi-file diffs
+    const coChangeFindings = [];
+    if (projectDb) {
+        const { rules: coChangeRules, malformedRules } = extractProjectCoChangeRules({ projectDb, ruleWeights });
+        if (coChangeRules.length > 0 || malformedRules.length > 0) {
+            const coChangeRuleIds = new Set([
+                ...coChangeRules.map((r) => String(r.id)),
+                ...malformedRules.map((r) => String(r.id))
+            ]);
+            for (let idx = candidateRules.length - 1; idx >= 0; idx--) {
+                if (coChangeRuleIds.has(String(candidateRules[idx].id))) {
+                    candidateRules.splice(idx, 1);
+                }
+            }
+            if (effectiveTrigger !== 'pre_edit' && isUnifiedDiffText(queryText)) {
+                for (const bad of malformedRules) {
+                    coChangeFindings.push({
+                        id: bad.id,
+                        category: 'blocker',
+                        content: `Invalid co-change rule syntax in '${bad.id}': ${bad.error}`,
+                        is_drifted: false,
+                        provenance: { citation: `Co-Change Config (${bad.id})` }
+                    });
+                }
+                if (coChangeRules.length > 0) {
+                    const coChangeEval = evaluateCoChangeRules({
+                        diff: queryText,
+                        changedFiles: file_path ? [file_path] : [],
+                        rules: coChangeRules
+                    });
+                    for (const v of coChangeEval.violations) {
+                        coChangeFindings.push({
+                            id: v.id,
+                            category: v.category || 'invariant',
+                            content: `${v.description} (triggered by ${v.triggeredBy.join(', ')}; missing companion update in ${v.missingAnyOf.join(' or ')})`,
+                            is_drifted: false,
+                            provenance: v.provenance || { citation: `Co-Change ${v.triggeredBy[0]}` }
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // 3d. Zero-LLM Old-Hunk & Pre-Edit Snippet `git blame -w -M` attribution (INV-ALIGN-BLAME-01)
+    const blameFindings = projectDb
+        ? findBlamedDiffMemories(queryText, { filePath: file_path || '', targetProject, projectDb, ruleWeights })
+        : [];
+
+    if (
+        candidateRules.length === 0 &&
+        legoFindings.length === 0 &&
+        coChangeFindings.length === 0 &&
+        blameFindings.length === 0
+    ) {
         return { content: [{ type: "text", text: "NO_NUDGES_REQUIRED" }] };
     }
 
-    // 4. Deterministic KruschNexus span/file matching first, then hybrid IDF-stem + symbol + embedding scorer
+    // 4. Deterministic KruschNexus span/co-change/blame matching first, then hybrid IDF-stem + symbol + embedding scorer
     const activeViolations = [];
     const seenIds = new Set();
     for (const lf of legoFindings) {
         if (activeViolations.length >= 3) break;
         activeViolations.push({ ...lf, is_drifted: false });
-        seenIds.add(lf.id);
+        seenIds.add(String(lf.id));
+    }
+    for (const cf of coChangeFindings) {
+        if (activeViolations.length >= 3) break;
+        if (seenIds.has(String(cf.id))) continue;
+        activeViolations.push(cf);
+        seenIds.add(String(cf.id));
+    }
+    for (const bf of blameFindings) {
+        if (activeViolations.length >= 3) break;
+        if (seenIds.has(String(bf.id))) continue;
+        activeViolations.push(bf);
+        seenIds.add(String(bf.id));
     }
     const lowerQuery = queryText.toLowerCase();
     const lowerFilePath = (file_path || '').toLowerCase();
 
     for (const rule of candidateRules) {
         if (activeViolations.length >= 3) break;
+        if (seenIds.has(String(rule.id))) continue;
         const prov = rule.provenance;
         if (!prov) continue;
         const provFile = (prov.file || '').toLowerCase();
@@ -663,13 +737,13 @@ export async function handleProactiveNudge({
         const quoteMatched = quotedSpan && lowerQuery.includes(quotedSpan);
         if (fileMatched || quoteMatched) {
             activeViolations.push({ ...rule, spanMatched: true });
-            seenIds.add(rule.id);
+            seenIds.add(String(rule.id));
         }
         if (activeViolations.length >= 3) break;
     }
 
     if (activeViolations.length < 3) {
-        const remainingRules = candidateRules.filter(r => !seenIds.has(r.id));
+        const remainingRules = candidateRules.filter(r => !seenIds.has(String(r.id)));
         if (remainingRules.length > 0) {
             const idfMap = computeRuleIdfMap(candidateRules);
 
