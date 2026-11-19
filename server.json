@@ -1,17 +1,18 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "dev.krusch/krusch-context-mcp",
+  "title": "Krusch Context MCP",
   "description": "Persistent working memory and SHA-256 span drift verification for AI coding agents in 5 MCP verbs.",
   "repository": {
     "url": "https://github.com/kruschdev/krusch-context-mcp",
     "source": "github"
   },
-  "version": "2.0.1",
+  "version": "2.0.2",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "krusch-context-mcp",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
