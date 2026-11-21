@@ -573,6 +573,24 @@ test('Memory Engine: Closed Taxonomy, Duplicate Guard & Provenance Suite', async
       /Synthetic SQLite disk I\/O error/
     );
 
+    // BUG-03: triggerBackgroundMemoryPush logs async rejections instead of swallowing silently
+    const { triggerBackgroundMemoryPush } = await import('../src/memory-engine.js');
+    const capturedErrs = [];
+    const origConsoleError = console.error;
+    console.error = (...args) => capturedErrs.push(args.join(' '));
+    try {
+      triggerBackgroundMemoryPush(ctxProject, db, async () => {
+        throw new Error('Synthetic background mirror rejection');
+      });
+      await new Promise((r) => setTimeout(r, 25));
+    } finally {
+      console.error = origConsoleError;
+    }
+    assert.ok(
+      capturedErrs.some((line) => line.includes('"operation":"pushProjectMemory"') && line.includes('Synthetic background mirror rejection')),
+      'triggerBackgroundMemoryPush must emit structured stderr JSON when pushProjectMemory rejects'
+    );
+
     try {
       fs.rmSync(projRoot, { recursive: true, force: true });
     } catch {}

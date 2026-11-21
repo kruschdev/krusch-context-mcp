@@ -221,7 +221,7 @@ async function verifyDatabase() {
     await getProjectDb();
 }
 
-export const VERSION = "2.0.0";
+export const VERSION = "2.0.2";
 export const server = new McpServer(
   { name: "krusch-context-mcp", version: VERSION },
   { capabilities: { tools: {}, prompts: {} } }

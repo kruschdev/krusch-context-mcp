@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-11-21
+
+### Fixed & Changed
+- **Structured Background Sync Diagnostics (`src/memory-engine.js`)**: Replaced silent fire-and-forget `.catch(() => {})` handlers on `pushProjectMemory` with `triggerBackgroundMemoryPush`, emitting structured JSON diagnostics to `stderr` whenever asynchronous PostgreSQL or HydraDB mirror pushes reject without blocking local SQLite writes.
+- **Official MCP Registry & Version Alignment (`server.json`, `src/index.js`, `package.json`)**: Aligned `VERSION` (`2.0.2`) across runtime exports, `package.json`, and Official Model Context Protocol Registry metadata (`dev.krusch/krusch-context-mcp`).
+
 ## [2.0.0] - 2026-10-26
 
 ### Added

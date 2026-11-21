@@ -58,6 +58,23 @@ const MAX_RELOC_SCAN_FILES = 250;
 const MAX_RELOC_FILE_BYTES = 512 * 1024;
 
 /**
+ * Triggers fire-and-forget PostgreSQL/HydraDB mirror sync after local SQLite commit,
+ * logging unexpected async rejections to stderr instead of silently swallowing them.
+ */
+export function triggerBackgroundMemoryPush(targetProject, db, pushFn = pushProjectMemory) {
+    Promise.resolve()
+        .then(() => pushFn(targetProject, db))
+        .catch((err) => {
+            console.error(JSON.stringify({
+                module: 'memory-engine',
+                operation: 'pushProjectMemory',
+                project: targetProject,
+                error: err?.message || String(err)
+            }));
+        });
+}
+
+/**
  * Checks whether a candidate file path points to a sensitive secret dotfile or key file.
  */
 function isSensitiveAnchorFile(filePath) {
@@ -931,7 +948,7 @@ export async function addMemory({
         });
 
         // Push behind if postgres available
-        pushProjectMemory(targetProject, db).catch(() => {});
+        triggerBackgroundMemoryPush(targetProject, db);
 
         const supersedeNote = supersedes_id ? ` (supersedes ID ${supersedes_id})` : '';
         const offlineNote = !embeddingArray ? ' [offline lexical mode]' : '';
@@ -1038,7 +1055,7 @@ export async function backfillMissingEmbeddings({ project, active_project, limit
     }
 
     if (backfilledCount > 0) {
-        pushProjectMemory(targetProject, db).catch(() => {});
+        triggerBackgroundMemoryPush(targetProject, db);
     }
 
     const remRow = db.prepare(`
@@ -1126,7 +1143,7 @@ export async function invalidateMemory({ id, target_id, reason, project, active_
             );
         }
 
-        pushProjectMemory(targetProject, db).catch(() => {});
+        triggerBackgroundMemoryPush(targetProject, db);
 
         return {
             content: [{
@@ -1802,7 +1819,7 @@ export async function updateMemory({ id, content, tags, project, active_project,
         const embBlob = emb ? encodeEmbeddingBlob(emb) : null;
         const tagStr = tags ? JSON.stringify(tags) : null;
         db.prepare(`UPDATE ide_agent_memory SET content = ?, tags = ?, embedding = ?, embedding_blob = ?, pg_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(content, tagStr, embStr, embBlob, id);
-        pushProjectMemory(targetProject, db).catch(() => {});
+        triggerBackgroundMemoryPush(targetProject, db);
         return { content: [{ type: "text", text: `[krusch-context] ✅ Updated memory record #${id}` }] };
     }
     throw new McpError(ErrorCode.InternalError, "Database unavailable");
@@ -1867,7 +1884,7 @@ export async function consolidateMemories({ category, project, active_project, t
         }
     } catch {}
 
-    pushProjectMemory(targetProject, db).catch(() => {});
+    triggerBackgroundMemoryPush(targetProject, db);
 
     return { content: [{ type: "text", text: `🔗 Consolidated ${mergedCount} duplicate pairs in category '${normCat}'.` }] };
 }
