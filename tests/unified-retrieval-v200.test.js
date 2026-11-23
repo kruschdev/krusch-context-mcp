@@ -58,8 +58,8 @@ test('krusch-context-mcp v2.0.0 End-to-End Unified Retrieval Suite (Pillars 1, 2
         } catch {}
     });
 
-    await t.test('0. v2.0.x surface invariants (INV-V2-01): VERSION === 2.0.2, 5 canonical verbs, 5 closed categories', () => {
-        assert.equal(VERSION, '2.0.2');
+    await t.test('0. v2.0.x surface invariants (INV-V2-01): VERSION === 2.0.3, 5 canonical verbs, 5 closed categories', () => {
+        assert.equal(VERSION, '2.0.3');
         assert.equal(CORE_TOOLS.size, 5);
         assert.equal(CLOSED_CATEGORIES.size, 5);
     });

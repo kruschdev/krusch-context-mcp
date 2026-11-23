@@ -221,7 +221,7 @@ async function verifyDatabase() {
     await getProjectDb();
 }
 
-export const VERSION = "2.0.2";
+export const VERSION = "2.0.3";
 export const server = new McpServer(
   { name: "krusch-context-mcp", version: VERSION },
   { capabilities: { tools: {}, prompts: {} } }
@@ -240,7 +240,7 @@ export const CORE_TOOLS = new Set([
 const RAW_CORE_TOOL_DEFINITIONS = [
   {
     name: "krusch_context_retrieve",
-    description: "Universal context retrieval tool. Pulls active project memories, steering rules, and state briefings respecting token budget limits.",
+    description: "Retrieve active memories, steering rules, and project state within a token budget.",
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -250,19 +250,19 @@ const RAW_CORE_TOOL_DEFINITIONS = [
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Search query or topic" },
+        query: { type: "string", description: "Search query or \"*\"" },
         mode: { type: "string", enum: ['hybrid', 'memory', 'state'], default: 'hybrid', description: "Retrieval mode" },
-        category: { type: "string", enum: ['decision', 'bug', 'invariant', 'lesson', 'blocker'], description: "Optional closed category filter" },
-        limit_tokens: { type: "number", default: 4000, description: "Maximum token budget to return" },
-        include_state: { type: "boolean", default: false, description: "Optionally prepend compiled state briefing" },
-        project: { type: "string", description: "Target project (auto-detected if omitted)" }
+        category: { type: "string", enum: ['decision', 'bug', 'invariant', 'lesson', 'blocker'], description: "Category filter" },
+        limit_tokens: { type: "number", default: 4000, description: "Max tokens to return" },
+        include_state: { type: "boolean", default: false, description: "Prepend compiled project state briefing" },
+        project: { type: "string", description: "Target project (auto-detected)" }
       },
       required: ["query"]
     }
   },
   {
     name: "krusch_context_remember",
-    description: "Unified write API for episodic memory and persistent steering nuggets. Includes automatic near-duplicate detection and provenance tracking.",
+    description: "Store an episodic memory or steering nugget with near-duplicate detection and provenance.",
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
@@ -272,30 +272,30 @@ const RAW_CORE_TOOL_DEFINITIONS = [
     inputSchema: {
       type: "object",
       properties: {
-        content: { type: "string", description: "The fact, lesson, decision, or invariant to remember" },
-        category: { type: "string", enum: ['decision', 'bug', 'invariant', 'lesson', 'blocker'], default: 'lesson', description: "Closed category taxonomy" },
-        key: { type: "string", description: "Optional key to store as a persistent steering nugget" },
+        content: { type: "string", description: "Fact, decision, bug, lesson, or invariant" },
+        category: { type: "string", enum: ['decision', 'bug', 'invariant', 'lesson', 'blocker'], default: 'lesson', description: "Closed category" },
+        key: { type: "string", description: "Key for persistent steering nugget" },
         provenance: {
           type: "object",
           properties: {
             file: { type: "string" },
             commit: { type: "string" },
             pr: { type: "string" },
-            locator: { type: "string", description: "Optional KruschNexus section/page locator" },
-            quoted_sentence: { type: "string", description: "Optional verbatim line/signature from file for INV-12 drift verification" },
+            locator: { type: "string", description: "Section or page locator" },
+            quoted_sentence: { type: "string", description: "Verbatim line for drift check" },
             start_line: { type: "number" },
             end_line: { type: "number" },
             anchor_hash: { type: "string" },
             author: { type: "string", enum: ['human', 'agent'], default: 'agent' },
-            host_node: { type: "string", description: "Optional fleet node name (auto-detected if omitted)" },
-            client: { type: "string", description: "Optional MCP client/app name (auto-detected from MCP handshake if omitted)" },
-            model: { type: "string", description: "Optional AI model identifier (recorded only when supplied)" },
+            host_node: { type: "string", description: "Host node (auto-detected)" },
+            client: { type: "string", description: "MCP client (auto-detected)" },
+            model: { type: "string", description: "AI model ID" },
             confidence: { type: "number", default: 1.0 }
           },
-          description: "Provenance & KruschNexus span-grounding metadata"
+          description: "Source span and attribution metadata"
         },
-        tags: { type: "array", items: { type: "string" }, description: "Optional descriptive tags" },
-        force: { type: "boolean", default: false, description: "If true, bypasses near-duplicate warnings" },
+        tags: { type: "array", items: { type: "string" }, description: "Tags" },
+        force: { type: "boolean", default: false, description: "Bypass near-duplicate warning" },
         project: { type: "string", description: "Target project" }
       },
       required: ["content"]
@@ -303,7 +303,7 @@ const RAW_CORE_TOOL_DEFINITIONS = [
   },
   {
     name: "krusch_context_revise",
-    description: "Unified knowledge revision API. Supports temporal superseding (updating stale knowledge with lineage) and explicit invalidations (revoking obsolete rules with mandatory reason).",
+    description: "Supersede stale memories with lineage, invalidate obsolete rules with a reason, or forget a nugget.",
     annotations: {
       readOnlyHint: false,
       destructiveHint: true,
@@ -313,13 +313,13 @@ const RAW_CORE_TOOL_DEFINITIONS = [
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ['supersede', 'invalidate', 'forget_nugget'], description: "Revision action to perform" },
-        target_id: { type: "number", description: "Target memory ID (for supersede or invalidate)" },
-        reason: { type: "string", description: "Mandatory justification when invalidating a memory" },
-        content: { type: "string", description: "New authoritative content when superseding" },
-        key: { type: "string", description: "Key of nugget to forget when action is forget_nugget" },
-        category: { type: "string", enum: ['decision', 'bug', 'invariant', 'lesson', 'blocker'], description: "Optional category update" },
-        provenance: { type: "object", description: "Optional provenance metadata" },
+        action: { type: "string", enum: ['supersede', 'invalidate', 'forget_nugget'], description: "Revision action" },
+        target_id: { type: "number", description: "Memory ID (supersede/invalidate)" },
+        reason: { type: "string", description: "Required reason (invalidate)" },
+        content: { type: "string", description: "Replacement content (supersede)" },
+        key: { type: "string", description: "Nugget key (forget_nugget)" },
+        category: { type: "string", enum: ['decision', 'bug', 'invariant', 'lesson', 'blocker'], description: "Updated category" },
+        provenance: { type: "object", description: "Provenance metadata" },
         project: { type: "string", description: "Target project" }
       },
       required: ["action"]
@@ -327,7 +327,7 @@ const RAW_CORE_TOOL_DEFINITIONS = [
   },
   {
     name: "krusch_context_nudge",
-    description: "Invariant auditor and alignment feedback loop. Checks proposed code diffs or actions against active project invariants, and adjusts rule weights based on developer feedback.",
+    description: "Audit a code snippet or diff against active invariants, or submit rule feedback.",
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
@@ -337,20 +337,20 @@ const RAW_CORE_TOOL_DEFINITIONS = [
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ['audit', 'feedback'], default: 'audit', description: "Action: audit against invariants or submit feedback" },
-        code: { type: "string", description: "Code or diff snippet to audit" },
-        file_path: { type: "string", description: "Optional target file path" },
-        trigger: { type: "string", enum: ['pre_commit', 'pre_edit', 'manual'], default: 'manual', description: "Trigger point. Default: manual. ('every_turn' is disabled to prevent audit spam)" },
+        action: { type: "string", enum: ['audit', 'feedback'], default: 'audit', description: "Audit or feedback" },
+        code: { type: "string", description: "Code or diff to audit" },
+        file_path: { type: "string", description: "Target file path" },
+        trigger: { type: "string", enum: ['pre_commit', 'pre_edit', 'manual'], default: 'manual', description: "Trigger point" },
         hook: { type: "string", enum: ['pre_commit', 'pre_edit', 'manual'], description: "Alias for trigger" },
-        rule_id: { type: "string", description: "Rule or memory ID when providing feedback" },
-        feedback: { type: "string", enum: ['helpful', 'unhelpful', 'false_positive'], description: "Feedback rating to tune rule weights" },
+        rule_id: { type: "string", description: "Rule/memory ID (feedback)" },
+        feedback: { type: "string", enum: ['helpful', 'unhelpful', 'false_positive'], description: "Feedback rating" },
         project: { type: "string", description: "Target project" }
       }
     }
   },
   {
     name: "krusch_context_health",
-    description: "Operational health check, memory counts by closed taxonomy, storage mode, and 30-day TTL decay review.",
+    description: "Report storage mode, memory counts by category, span drift, and 30-day decay review.",
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,

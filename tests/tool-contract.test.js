@@ -29,11 +29,18 @@ describe('Tool Contract & Invariant Suite', () => {
 
     assert.deepEqual([...CORE_TOOLS].sort(), [...expectedVerbs].sort());
 
-    // Verify schema names match Set members
+    // Verify schema names match Set members and compact JSON budget stays under 4,500 bytes
     const defNames = new Set(CORE_TOOL_DEFINITIONS.map(d => d.name));
     for (const tool of CORE_TOOLS) {
       assert.ok(defNames.has(tool), `Core tool '${tool}' is missing a schema definition`);
     }
+    const wireSchemaBytes = JSON.stringify(
+      CORE_TOOL_DEFINITIONS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))
+    ).length;
+    assert.ok(
+      wireSchemaBytes <= 4500,
+      `Compact tools/list schema JSON (${wireSchemaBytes} B) exceeded 4,500 B budget`
+    );
   });
 
   it('Zero companion extensions or legacy engine modules are embedded', () => {
@@ -57,6 +64,14 @@ describe('Tool Contract & Invariant Suite', () => {
   it('Version consistency across package.json, code, and changelog', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf-8'));
     assert.equal(pkg.version, VERSION, `package.json version (${pkg.version}) must match src/index.js VERSION (${VERSION})`);
+
+    const serverManifest = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'server.json'), 'utf-8'));
+    assert.equal(serverManifest.version, VERSION, `server.json version (${serverManifest.version}) must match VERSION (${VERSION})`);
+    assert.equal(
+      serverManifest.packages?.[0]?.version,
+      VERSION,
+      `server.json packages[0].version (${serverManifest.packages?.[0]?.version}) must match VERSION (${VERSION})`
+    );
 
     const changelog = fs.readFileSync(path.join(ROOT_DIR, 'CHANGELOG.md'), 'utf-8');
     assert.ok(changelog.includes(`## [${VERSION}]`), `CHANGELOG.md must contain heading for ## [${VERSION}]`);

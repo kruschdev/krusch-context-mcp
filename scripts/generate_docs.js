@@ -97,7 +97,7 @@ Decision to standardize on 5 canonical verbs.
 function generateMarkdown() {
     let md = `# 📖 Krusch Context MCP Tool Reference (v${VERSION})\n\n`;
     md += `> Auto-generated from source definitions in \`src/index.js\`. Run \`npm run docs:generate\` to synchronize.\n\n`;
-    md += `Krusch Context MCP enforces a strict **5-verb public contract** (~350 prompt tokens) to maximize host agent accuracy and eliminate tool hallucination.\n\n`;
+    md += `Krusch Context MCP enforces a strict **5-verb public contract** (\`~950\` \`o200k_base\` schema tokens across the full \`tools/list\` JSON) to maximize host agent accuracy and eliminate tool hallucination.\n\n`;
 
     md += `## ⚡ The 5 Canonical Verbs\n\n`;
     md += `| Verb | Short Alias | Purpose |\n`;

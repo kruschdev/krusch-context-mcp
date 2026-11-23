@@ -2,7 +2,7 @@
 
 ![Krusch Context MCP: Persistent 5-Verb Agent Memory, SHA-256 Span Provenance & LoCoMo 90.26%](docs/assets/banner.png)
 
-> **Persistent working memory for AI coding agents in 5 MCP verbs (`~350` schema tokens), backed by built-in `node:sqlite` WAL + Porter `FTS5` + local `1024d` embeddings (`PostgreSQL 16 + pgvector` optional).** Stores architectural decisions and invariants with SHA-256 line-span drift detection and `$0.00` zero-LLM `Raw-RAG` indexing, scoring **`90.26%` accuracy and `95.77%` evidence recall** across `1,540` ACL 2024 Snap `LoCoMo` questions (`81.50%` @ `$1.35` on model-matched `GPT 5.6 Luna` across `600` `DolphinBench` tasks; `91.17%` uploaded submission `UUID c047b063` queued; all self-run in my lab with raw SHA-256 logs published, no third-party reproduction yet).
+> **Persistent working memory for AI coding agents in 5 MCP verbs (`~950` `o200k_base` schema tokens, [Audited 100/100 on AddonAudit](https://addonaudit.com/addon/dev-krusch-krusch-context-mcp/)), backed by built-in `node:sqlite` WAL + Porter `FTS5` + local `1024d` embeddings (`PostgreSQL 16 + pgvector` optional).** Stores architectural decisions and invariants with SHA-256 line-span drift detection and `$0.00` zero-LLM `Raw-RAG` indexing, scoring **`90.26%` accuracy and `95.77%` evidence recall** across `1,540` ACL 2024 Snap `LoCoMo` questions (`81.50%` @ `$1.35` on model-matched `GPT 5.6 Luna` across `600` `DolphinBench` tasks; `91.17%` uploaded submission `UUID c047b063` queued; all self-run in my lab with raw SHA-256 logs published, no third-party reproduction yet).
 
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -18,6 +18,7 @@
 [![Docs: What Makes It Special](https://img.shields.io/badge/Docs-What%20Makes%20It%20Special-purple.svg)](docs/WHAT_MAKES_IT_SPECIAL.md)
 [![HOL Guard Catalog](https://img.shields.io/badge/HOL_Guard-Catalog_Listed-0B0F17?logo=shield&logoColor=00F5D4)](https://hol.org/guard/extension-studio?extension=mcp.krusch-context-mcp)
 [![M8ven Score](https://m8ven.ai/badge/mcp/kruschdev/krusch-context-mcp)](https://m8ven.ai/mcp/kruschdev/krusch-context-mcp?s=readme)
+[![Audited by AddonAudit](https://addonaudit.com/badges/dev-krusch-krusch-context-mcp.svg)](https://addonaudit.com/addon/dev-krusch-krusch-context-mcp/)
 
 > 📖 **Architecture & Benchmark Papers**: [**Beyond Flat Vector RAG: What Makes `krusch-context-mcp` Special**](https://krusch.dev/articles/what-makes-krusch-context-mcp-special) ([`docs/WHAT_MAKES_IT_SPECIAL.md`](docs/WHAT_MAKES_IT_SPECIAL.md)) · [**Paper #27: Return on Memory (`DolphinBench` & `LoCoMo`)**](https://krusch.dev/articles/return-on-memory-dolphinbench) ([**PDF**](https://krusch.dev/papers/return-on-memory-dolphinbench.pdf)) · [**Paper #26: Open-Weights Memory Ablations (`$0.00`)**](https://krusch.dev/articles/what-dolphinbench-taught-me-about-local-ai).
 
@@ -36,7 +37,7 @@
 ## 🚫 What This Is Not
 
 * **Not a codebase AST or Git indexer**: Code symbol search, call graphs, and Git DAG traversal belong in [`krusch-git`](https://github.com/kruschdev/krusch-git) or your IDE's native search.
-* **Not a 61-tool cafeteria**: Collapsed to strictly 5 canonical verbs (~350 prompt tokens) for boring reliability.
+* **Not a 61-tool cafeteria**: Collapsed to strictly 5 canonical verbs (`~950` `o200k_base` schema tokens across the full `tools/list` JSON) for boring reliability.
 * **Not a cloud SaaS platform**: Runs 100% locally on your machine with zero external cloud dependencies.
 * **Not a monolithic domain suite**: Legal compliance ([`krusch-law`](https://github.com/kruschdev/krusch-law)), document ingestion ([`krusch-nexus`](https://github.com/kruschdev/krusch-nexus)), and contract graphs ([`krusch-biz`](https://github.com/kruschdev/krusch-biz)) live in separate companion repositories.
 

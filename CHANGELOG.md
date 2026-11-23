@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2026-11-23
+
+### Changed & Improved
+- **Tightened 5-Verb Tool Schema Descriptions (`src/index.js`, `docs/TOOL_REFERENCE.md`)**: Trimmed verbose description prose across the 5 canonical MCP tool definitions without changing any tool name, parameter, enum, default, or `INV-STACK-03` annotation, reducing the exact `o200k_base` `tools/list` JSON footprint from `1,072` (`~1,100` audited on `v2.0.2`) to `947` (`~950`) tokens.
+- **AddonAudit Gold Listing & Documentation Reconciliation (`README.md`, `docs/TOOL_REFERENCE.md`, `docs/WHAT_MAKES_IT_SPECIAL.md`)**: Added the [AddonAudit](https://addonaudit.com/addon/dev-krusch-krusch-context-mcp/) Gold "Audited" badge (`100/100` metadata score, `8/8` checks passed, `208 ms` offline handshake, `0` advisories across `111` scanned packages) and replaced stale `~350` token estimates with exact `o200k_base` serialized schema counts (`~950` tokens).
+- **Release & Contract Hardening (`tests/tool-contract.test.js`, `server.json`, `package.json`)**: Shipped commit `1af487b` (`triggerBackgroundMemoryPush` structured stderr logging and dynamic `v${VERSION}` startup banner) to npm and Official MCP Registry, and extended the contract suite to assert `server.json` version parity and a compact serialized schema byte ceiling (`<= 4,500` bytes).
+
 ## [2.0.2] - 2026-11-21
 
 ### Fixed & Changed

@@ -62,7 +62,7 @@ Most MCP servers suffer from bloated tool definitions. Exposing dozens of tools 
 | **`nudge`** | `krusch_context_nudge` | Audit code diffs against recorded invariants before committing (max 1–3 findings). |
 | **`health`** | `krusch_context_health` | Inspect taxonomy breakdown, storage mode, and review memories older than 30 days. |
 
-*Result*: Tool schema footprint is reduced from ~3,500 tokens to **~350 tokens**. Host agents call the right tool with near-100% precision.
+*Result*: Tool schema footprint is reduced from ~3,500+ tokens to **~950 `o200k_base` tokens** across the full untruncated `tools/list` JSON. Host agents call the right tool with near-100% precision.
 
 ---
 
@@ -191,7 +191,7 @@ In v1.8.0, **Codebase RAG was decoupled into [krusch-git](https://github.com/kru
 
 | Capability | Generic Vector DB | Naive MCP Memory | krusch-context-mcp v1.9.0 |
 | :--- | :---: | :---: | :---: |
-| **Tool Count** | REST APIs / 10+ | 8–20 tools | **Strictly 5 Canonical Verbs** (~350 schema tokens) |
+| **Tool Count** | REST APIs / 10+ | 8–20 tools | **Strictly 5 Canonical Verbs** (~950 `o200k_base` schema tokens) |
 | **Write Model** | Raw vectors | Unbounded strings | **Closed Taxonomy** (`decision`, `invariant`, `bug`, etc.) |
 | **Memory Lineage** | ❌ None | ❌ Overwrite | **✅ Supersede pointers + mandatory invalidation reason** |
 | **Span-Grounded Provenance** | ❌ None | ❌ None | **✅ `INV-12` `quoted_sentence` hash + line self-healing & drift flags** |
